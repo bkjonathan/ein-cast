@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { LibraryStats, useLibraryStore, useLibrarySync } from "@/features/library";
+import { LogsView, useLogSync } from "@/features/logs";
 import { OnboardingScreen } from "@/features/onboarding";
+import { useServerSync } from "@/features/server";
+import { DashboardView } from "./DashboardView";
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
 import { ViewPlaceholder } from "./ViewPlaceholder";
@@ -12,6 +15,8 @@ export function App() {
   const [active, setActive] = useState<View>("dashboard");
   const info = useAppInfo();
   useLibrarySync();
+  useServerSync();
+  useLogSync();
   const hydrated = useLibraryStore((s) => s.hydrated);
   const hasLibrary = useLibraryStore((s) => s.summary !== null);
 
@@ -37,7 +42,9 @@ export function App() {
 }
 
 function ActiveView({ view }: { view: View }) {
+  if (view === "dashboard") return <DashboardView />;
   if (view === "library") return <LibraryStats />;
+  if (view === "logs") return <LogsView />;
   const meta = views.find((v) => v.id === view);
   return meta ? <ViewPlaceholder key={meta.id} {...meta} /> : null;
 }

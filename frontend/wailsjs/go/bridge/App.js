@@ -13,3 +13,19 @@ export function ChooseFolder() {
 export function GetLibrarySummary() {
   return window['go']['bridge']['App']['GetLibrarySummary']();
 }
+
+export function GetLogHistory() {
+  return window['go']['bridge']['App']['GetLogHistory']();
+}
+
+export function GetServerState() {
+  return window['go']['bridge']['App']['GetServerState']();
+}
+
+export function StartServer() {
+  return window['go']['bridge']['App']['StartServer']();
+}
+
+export function StopServer() {
+  return window['go']['bridge']['App']['StopServer']();
+}

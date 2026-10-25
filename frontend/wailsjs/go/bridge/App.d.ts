@@ -7,3 +7,11 @@ export function AppInfo():Promise<bridge.AppInfoDTO>;
 export function ChooseFolder():Promise<void>;
 
 export function GetLibrarySummary():Promise<bridge.LibrarySummaryDTO>;
+
+export function GetLogHistory():Promise<Array<bridge.LogLineDTO>>;
+
+export function GetServerState():Promise<bridge.ServerStateDTO>;
+
+export function StartServer():Promise<void>;
+
+export function StopServer():Promise<void>;

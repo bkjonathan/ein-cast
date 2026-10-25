@@ -1,6 +1,9 @@
 package app
 
-import "eincast/internal/domain/media"
+import (
+	"eincast/internal/domain/media"
+	"eincast/internal/domain/server"
+)
 
 // Event is something that happened in the app. The unexported method seals the
 // set: only this package defines events, so a type switch over them is
@@ -21,3 +24,21 @@ type LibraryScanned struct {
 }
 
 func (LibraryScanned) event() {}
+
+// ServerStatus describes the HTTP server at one instant.
+type ServerStatus struct {
+	State server.State
+	// Name is the configured server name; empty until the first start.
+	Name string
+	// Addr is the bound address while Running; empty otherwise.
+	Addr string
+	// Error is the failure reason while Failed; empty otherwise.
+	Error string
+}
+
+// ServerStateChanged is published on every server lifecycle transition.
+type ServerStateChanged struct {
+	Status ServerStatus
+}
+
+func (ServerStateChanged) event() {}

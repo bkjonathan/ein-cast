@@ -1,12 +1,14 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"testing"
 
 	"eincast/internal/app"
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/server"
 )
 
 type emitted struct {
@@ -46,5 +48,41 @@ func TestEmitter_DropsEventsBeforeStartup(t *testing.T) {
 	newTestEmitter(&got).Publish(app.LibraryScanned{})
 	if len(got) != 0 {
 		t.Fatalf("emitted %d events before the UI was ready, want 0", len(got))
+	}
+}
+
+func TestEmitter_ServerStateChanged(t *testing.T) {
+	var got []emitted
+	e := newTestEmitter(&got)
+	e.bind(context.Background())
+
+	e.Publish(app.ServerStateChanged{Status: app.ServerStatus{
+		State: server.Running, Name: "Den", Addr: "127.0.0.1:8765",
+	}})
+
+	if len(got) != 1 || got[0].name != "server:state" {
+		t.Fatalf("emitted = %+v", got)
+	}
+	want := ServerStateDTO{State: "running", Name: "Den", Addr: "127.0.0.1:8765"}
+	if dto, ok := got[0].data[0].(ServerStateDTO); !ok || dto != want {
+		t.Fatalf("payload = %#v, want %#v", got[0].data[0], want)
+	}
+}
+
+// A log line that produced a log line would loop forever, so emitLog must stay
+// silent when the UI is not ready. The logger here would fail the test if used.
+func TestEmitLog_SilentBeforeStartup(t *testing.T) {
+	var logged bytes.Buffer
+	e := NewEmitter(slog.New(slog.NewTextHandler(&logged, nil)))
+	var got []emitted
+	e.emit = func(_ context.Context, name string, data ...any) { got = append(got, emitted{name, data}) }
+
+	e.emitLog(app.LogEntry{Message: "early"})
+
+	if len(got) != 0 {
+		t.Errorf("emitted %d events before startup, want 0", len(got))
+	}
+	if logged.Len() != 0 {
+		t.Errorf("emitLog logged %q; it must never log (feedback loop)", logged.String())
 	}
 }

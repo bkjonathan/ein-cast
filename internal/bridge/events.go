@@ -14,6 +14,8 @@ import (
 // frontend/src/shared/bridge/events.ts.
 const (
 	EventLibraryScanned = "library:scanned"
+	EventServerState    = "server:state"
+	EventLogLine        = "log:line"
 )
 
 // Emitter implements app.EventPublisher by forwarding events to the frontend.
@@ -30,6 +32,18 @@ type Emitter struct {
 // app has started.
 func NewEmitter(log *slog.Logger) *Emitter {
 	return &Emitter{log: log, emit: wruntime.EventsEmit}
+}
+
+// emitLog forwards one log entry. It must never log, not even to report that
+// the UI is not ready: a log line that triggers a log line is a feedback loop.
+func (e *Emitter) emitLog(entry app.LogEntry) {
+	e.mu.RLock()
+	ctx := e.ctx
+	e.mu.RUnlock()
+	if ctx == nil {
+		return
+	}
+	e.emit(ctx, EventLogLine, toLogLineDTO(entry))
 }
 
 func (e *Emitter) bind(ctx context.Context) {
@@ -52,6 +66,8 @@ func (e *Emitter) Publish(ev app.Event) {
 	switch ev := ev.(type) {
 	case app.LibraryScanned:
 		e.emit(ctx, EventLibraryScanned, toLibrarySummaryDTO(ev.Summary))
+	case app.ServerStateChanged:
+		e.emit(ctx, EventServerState, toServerStateDTO(ev.Status))
 	default:
 		e.log.Error("event has no frontend mapping", slog.Any("event", ev))
 	}

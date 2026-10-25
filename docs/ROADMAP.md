@@ -5,7 +5,7 @@ instead of adding it early.
 
 | Version | Features | Status |
 |---|---|---|
-| **v0.1 MVP** | Pick folder, scan, LAN HTTP server, device player page, M3U playlist, QR connect, live logs, glass UI | In progress — Phases 1–2 done |
+| **v0.1 MVP** | Pick folder, scan, LAN HTTP server, device player page, M3U playlist, QR connect, live logs, glass UI | In progress — Phases 1–4 done |
 | v0.2 | Settings persistence, rescan + file watcher (`fsnotify`), library search/filter, thumbnails (ffmpeg), dark/light toggle | |
 | v0.3 Remote access | Tunnel providers (Tailscale, Cloudflare quick/named, ngrok), PIN auth, signed stream links, public-access badge, remote session list | |
 | v0.4 Playback | ffmpeg HLS transcoding, subtitles (.srt → WebVTT), resume position per device | |
@@ -16,13 +16,23 @@ instead of adding it early.
 
 1. **Skeleton** — done
 2. **Domain + library** — done
-3. Server lifecycle
-4. Log pipeline
+3. **Server lifecycle** — done
+4. **Log pipeline** — done
 5. Connect
 6. Hardening
 7. Remote access (v0.3)
 
 ## Seams needed later
+
+- **Secret redaction (Phase 7):** nothing secret is logged today. When tunnel tokens and PINs exist, add a redacting `slog.Attr` helper and keep secrets out of log calls; `logbus.Handler` deliberately does not try to scrub text after the fact.
+- **Log gap marker (optional):** `Seq` already reveals dropped lines; the viewer does not yet render a "N lines dropped" row.
+- **Log level control (Phase 6):** the console handler is fixed at Info and the UI sees Debug and up. A setting can raise or lower the console level without touching `logbus`.
+
+- **LAN binding (Phase 5):** `httpapi` binds `127.0.0.1` only, so no other device can connect yet. Phase 5 adds the `NetInfo` port and listens on loopback + the detected LAN addresses (one listener each; never `0.0.0.0`).
+- **Settings (Phase 6):** `StartServer()` uses `streaming.NewConfig()` defaults (port 8765, name "EinCast"). Port and name come from persisted settings later; `Config` and its options are already the seam.
+- **Player page (Phase 5):** `GET /` serves a placeholder string; the real page goes in `adapters/httpapi/web` via `embed.FS`.
+- **Forwarded headers (Phase 7):** the access log uses the TCP peer address and ignores `X-Forwarded-For` / `CF-Connecting-IP` until requests are known to come from a tunnel's loopback connection.
+- **Tailscale CORS (Phase 7):** `isLANOrigin` does not yet accept the 100.64.0.0/10 range.
 
 - `Transcoder` port (v0.4) — not added until transcoding starts.
 - Windows title bar: Phase 1 keeps the native frame on Windows (Mica backdrop only). A frameless window needs custom min/max/close controls; decide in Phase 6 when the cross-platform build is checked.

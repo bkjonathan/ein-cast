@@ -4,7 +4,7 @@
 
 A desktop app (macOS + Windows) that serves a folder of media over your LAN so TVs, iPads and phones can play it. Built with Go, Wails v2 and React.
 
-> Status: **Phase 2 — library.** You can choose a media folder and EinCast scans it and shows what it found. The HTTP server comes next; features land phase by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+> Status: **Phase 4 — logs.** Choose a media folder, start the HTTP server from the dashboard, fetch the library, streams and an M3U playlist from this computer, and watch everything the app does in the live Logs view. LAN access and the QR code are the next phase; features land phase by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ## Requirements
 
@@ -22,6 +22,19 @@ go test ./...                   # Go tests
 scripts/check-deps.sh           # hexagonal dependency rules
 cd frontend && npm run typecheck && npm test
 ```
+
+## Try the API
+
+Choose a folder, press **Start server**, then (default port 8765):
+
+```sh
+curl http://127.0.0.1:8765/api/health
+curl http://127.0.0.1:8765/api/library
+curl -H "Range: bytes=0-99" -i http://127.0.0.1:8765/stream/<id>
+curl http://127.0.0.1:8765/playlist.m3u      # open in VLC / Infuse
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full route table.
 
 ## Folder map
 

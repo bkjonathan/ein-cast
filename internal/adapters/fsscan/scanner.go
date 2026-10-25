@@ -20,7 +20,7 @@ type Scanner struct {
 
 // New returns a Scanner that logs skipped entries to log.
 func New(log *slog.Logger) *Scanner {
-	return &Scanner{log: log}
+	return &Scanner{log: log.With(slog.String("source", "library"))}
 }
 
 // Scan returns every supported media file under root in walk order (lexical

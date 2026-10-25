@@ -22,7 +22,7 @@ type Service struct {
 
 // NewService builds a Service from its ports.
 func NewService(scanner app.Scanner, repo app.LibraryRepo, events app.EventPublisher, log *slog.Logger) *Service {
-	return &Service{scanner: scanner, repo: repo, events: events, log: log}
+	return &Service{scanner: scanner, repo: repo, events: events, log: log.With(slog.String("source", "library"))}
 }
 
 // ScanFolder scans path and, only if that succeeds, replaces the current
@@ -57,6 +57,12 @@ func (s *Service) Summary() (summary app.LibrarySummary, ok bool) {
 		return app.LibrarySummary{}, false
 	}
 	return app.LibrarySummary{Root: root, Stats: media.Summarize(s.repo.List())}, true
+}
+
+// Root is the scanned folder, or "" before the first scan. Unlike Summary it is
+// O(1), so request handlers can call it on every request.
+func (s *Service) Root() string {
+	return s.repo.Root()
 }
 
 // List returns every item in the library.

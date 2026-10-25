@@ -1,6 +1,8 @@
 package bridge
 
 import (
+	"log/slog"
+
 	"eincast/internal/app"
 	"eincast/internal/domain/media"
 )
@@ -42,5 +44,65 @@ func toLibrarySummaryDTO(s app.LibrarySummary) LibrarySummaryDTO {
 			Audio: s.Stats.Counts[media.KindAudio],
 			Image: s.Stats.Counts[media.KindImage],
 		},
+	}
+}
+
+// ServerStateDTO is the HTTP server's lifecycle state. State is one of "idle",
+// "starting", "running", "stopping" or "failed".
+type ServerStateDTO struct {
+	State string `json:"state"`
+	Name  string `json:"name"`
+	// Addr is the bound "host:port" while running, otherwise empty.
+	Addr  string `json:"addr"`
+	Error string `json:"error"`
+}
+
+func toServerStateDTO(s app.ServerStatus) ServerStateDTO {
+	return ServerStateDTO{State: s.State.String(), Name: s.Name, Addr: s.Addr, Error: s.Error}
+}
+
+// LogAttrDTO is one key/value pair of a log line.
+type LogAttrDTO struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// LogLineDTO is one log record. Time is Unix milliseconds (cheap to turn into a
+// JS Date); Level is "debug", "info", "warn" or "error".
+type LogLineDTO struct {
+	Seq     uint64       `json:"seq"`
+	Time    int64        `json:"time"`
+	Level   string       `json:"level"`
+	Source  string       `json:"source"`
+	Message string       `json:"message"`
+	Attrs   []LogAttrDTO `json:"attrs"`
+}
+
+func toLogLineDTO(e app.LogEntry) LogLineDTO {
+	attrs := make([]LogAttrDTO, len(e.Attrs)) // non-nil: JSON [] rather than null
+	for i, a := range e.Attrs {
+		attrs[i] = LogAttrDTO{Key: a.Key, Value: a.Value}
+	}
+	return LogLineDTO{
+		Seq:     e.Seq,
+		Time:    e.Time.UnixMilli(),
+		Level:   levelName(e.Level),
+		Source:  e.Source,
+		Message: e.Message,
+		Attrs:   attrs,
+	}
+}
+
+// levelName buckets any slog level into the four the UI filters on.
+func levelName(l slog.Level) string {
+	switch {
+	case l < slog.LevelInfo:
+		return "debug"
+	case l < slog.LevelWarn:
+		return "info"
+	case l < slog.LevelError:
+		return "warn"
+	default:
+		return "error"
 	}
 }

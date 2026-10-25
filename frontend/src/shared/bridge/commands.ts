@@ -3,8 +3,13 @@ import {
   AppInfo as goAppInfo,
   ChooseFolder as goChooseFolder,
   GetLibrarySummary as goGetLibrarySummary,
+  GetLogHistory as goGetLogHistory,
+  GetServerState as goGetServerState,
+  StartServer as goStartServer,
+  StopServer as goStopServer,
 } from "../../../wailsjs/go/bridge/App";
-import type { AppInfo, LibrarySummary } from "./types";
+import { toLogLine, toServerStatus } from "./mappers";
+import type { AppInfo, LibrarySummary, LogLine, ServerStatus } from "./types";
 
 /** Asks Go for the app name, version and host platform. */
 export async function getAppInfo(): Promise<AppInfo> {
@@ -34,4 +39,28 @@ export async function getLibrarySummary(): Promise<LibrarySummary | null> {
     totalSize: dto.totalSize,
     counts: { ...dto.counts },
   };
+}
+
+/**
+ * Asks Go to start the HTTP server. Resolves when the request was accepted; the
+ * outcome (running, or failed with a reason) arrives as a "server:state" event.
+ * Rejects with Go's message if the request was refused.
+ */
+export async function startServer(): Promise<void> {
+  await goStartServer();
+}
+
+/** Asks Go to stop the HTTP server gracefully. */
+export async function stopServer(): Promise<void> {
+  await goStopServer();
+}
+
+/** The server's current lifecycle state. */
+export async function getServerState(): Promise<ServerStatus> {
+  return toServerStatus(await goGetServerState());
+}
+
+/** Recent log lines, oldest first. Join them with live events by `seq`. */
+export async function getLogHistory(): Promise<LogLine[]> {
+  return (await goGetLogHistory()).map(toLogLine);
 }

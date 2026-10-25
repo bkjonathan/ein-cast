@@ -25,4 +25,54 @@ describe("onEvent", () => {
     off();
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
+
+  it("decodes server:state payloads into the frontend type", () => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_name: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+
+    const handler = vi.fn();
+    onEvent("server:state", handler);
+    deliver({ state: "failed", name: "Den", addr: "", error: "port in use" });
+
+    expect(handler).toHaveBeenCalledWith({
+      state: "failed",
+      name: "Den",
+      addr: "",
+      error: "port in use",
+    });
+  });
+
+  it("does not deliver a server:state payload with an unknown state", () => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_name: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+
+    const handler = vi.fn();
+    onEvent("server:state", handler);
+
+    expect(() => deliver({ state: "paused", name: "", addr: "", error: "" })).toThrow();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("decodes log:line payloads", () => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_name: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+
+    const handler = vi.fn();
+    onEvent("log:line", handler);
+    deliver({ seq: 3, time: 5, level: "error", source: "server", message: "boom", attrs: [] });
+
+    expect(runtime.EventsOn).toHaveBeenLastCalledWith("log:line", expect.any(Function));
+    expect(handler).toHaveBeenCalledWith({
+      seq: 3, time: 5, level: "error", source: "server", message: "boom", attrs: [],
+    });
+  });
 });
