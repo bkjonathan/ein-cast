@@ -1,0 +1,113 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * Design tokens. Light is the default; dark follows the OS through
+ * prefers-color-scheme, so there is no JS theme state to keep in sync
+ * (a manual toggle arrives in v0.2).
+ */
+:root {
+  --foreground: oklch(0.2 0.01 260);
+  --muted-foreground: oklch(0.2 0.01 260 / 0.62);
+  --primary: oklch(0.58 0.2 258);
+  --primary-foreground: oklch(0.99 0 0);
+  --destructive: oklch(0.58 0.22 27);
+  --success: oklch(0.6 0.17 150);
+  --warning: oklch(0.72 0.17 75);
+
+  --glass-surface: rgb(255 255 255 / 0.55);
+  --glass-surface-hover: rgb(255 255 255 / 0.72);
+  --glass-border: rgb(255 255 255 / 0.18);
+  /* A hairline dark ring keeps white-on-white glass legible in light mode. */
+  --glass-ring: rgb(0 0 0 / 0.08);
+  --glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.5);
+  --glass-shadow: 0 8px 32px rgb(0 0 0 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.97 0 0 / 0.6);
+    --primary: oklch(0.66 0.19 258);
+
+    --glass-surface: rgb(255 255 255 / 0.08);
+    --glass-surface-hover: rgb(255 255 255 / 0.14);
+    --glass-ring: rgb(0 0 0 / 0.35);
+    --glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.12);
+    --glass-shadow: 0 8px 32px rgb(0 0 0 / 0.35);
+  }
+}
+
+/* Maps tokens onto Tailwind utilities (bg-primary, text-muted-foreground, ...). */
+@theme inline {
+  --font-sans:
+    -apple-system, "SF Pro Text", "Segoe UI Variable", system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  --radius-glass-sm: 10px;
+  --radius-glass-md: 14px;
+  --radius-glass-lg: 20px;
+
+  /* The window itself is translucent, so the page background must be clear. */
+  --color-background: transparent;
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--glass-surface);
+  --color-secondary-foreground: var(--foreground);
+  --color-accent: var(--glass-surface-hover);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--glass-border);
+  --color-input: var(--glass-border);
+  --color-ring: var(--primary);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: transparent;
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    /* Desktop-app feel: text is not selectable unless a view opts in with select-text. */
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+  }
+}
+
+/* The frosted surface every glass component is built from. */
+@utility glass {
+  background: var(--glass-surface);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    var(--glass-highlight), 0 0 0 0.5px var(--glass-ring), var(--glass-shadow);
+}
+
+/* Wails reads these custom properties to decide which areas drag the window.
+   no-drag must be set on interactive children because the value inherits. */
+@utility app-drag {
+  --wails-draggable: drag;
+}
+
+@utility app-no-drag {
+  --wails-draggable: no-drag;
+}

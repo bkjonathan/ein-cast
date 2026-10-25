@@ -1,0 +1,8 @@
+build/bin
+node_modules
+.DS_Store
+
+# Vite output is rebuilt by `wails build`; gitkeep stays so `//go:embed all:frontend/dist`
+# compiles on a fresh clone (frontend/public/gitkeep makes Vite re-create it every build).
+frontend/dist/*
+!frontend/dist/gitkeep

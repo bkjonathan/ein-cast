@@ -1,0 +1,21 @@
+import { Cast } from "lucide-react";
+import { cn } from "@/shared/lib/cn";
+
+// The macOS traffic lights float over our content (hidden-inset title bar),
+// so the bar must leave room for them. WKWebView always reports "Macintosh".
+const isMac = navigator.userAgent.includes("Macintosh");
+
+/** Draggable window title bar; the right side is reserved for status badges. */
+export function TitleBar({ name }: { name: string }) {
+  return (
+    <header
+      className={cn(
+        "app-drag flex h-11 shrink-0 items-center gap-2 pr-4",
+        isMac ? "pl-20" : "pl-4",
+      )}
+    >
+      <Cast className="size-4 text-primary" aria-hidden />
+      <h1 className="text-sm font-semibold tracking-tight">{name}</h1>
+    </header>
+  );
+}
