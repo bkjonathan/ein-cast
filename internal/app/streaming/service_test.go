@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/netip"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +16,7 @@ import (
 
 // fakeRun is a controllable app.RunningServer.
 type fakeRun struct {
-	addr    string
+	addrs   []netip.AddrPort
 	stopErr error
 	done    chan struct{}
 	err     error
@@ -25,11 +27,16 @@ type fakeRun struct {
 	closeOne sync.Once
 }
 
-func newFakeRun() *fakeRun { return &fakeRun{addr: "127.0.0.1:8765", done: make(chan struct{})} }
+func newFakeRun() *fakeRun {
+	return &fakeRun{
+		addrs: []netip.AddrPort{netip.MustParseAddrPort("127.0.0.1:8765")},
+		done:  make(chan struct{}),
+	}
+}
 
-func (f *fakeRun) Addr() string          { return f.addr }
-func (f *fakeRun) Done() <-chan struct{} { return f.done }
-func (f *fakeRun) Err() error            { return f.err }
+func (f *fakeRun) Addrs() []netip.AddrPort { return f.addrs }
+func (f *fakeRun) Done() <-chan struct{}   { return f.done }
+func (f *fakeRun) Err() error              { return f.err }
 func (f *fakeRun) Stop(ctx context.Context) error {
 	f.mu.Lock()
 	f.stopped++
@@ -93,9 +100,20 @@ func (f *fakeEvents) states() []server.State {
 	return out
 }
 
+type fakeNet struct {
+	addrs []netip.Addr
+	err   error
+}
+
+func (f fakeNet) LANAddrs() ([]netip.Addr, error) { return f.addrs, f.err }
+
 func newService(web *fakeWeb) (*Service, *fakeEvents) {
+	return newServiceWithNet(web, fakeNet{})
+}
+
+func newServiceWithNet(web *fakeWeb, n fakeNet) (*Service, *fakeEvents) {
 	ev := &fakeEvents{}
-	return NewService(web, ev, slog.New(slog.DiscardHandler)), ev
+	return NewService(web, n, ev, slog.New(slog.DiscardHandler)), ev
 }
 
 func okWeb() *fakeWeb {
@@ -134,12 +152,15 @@ func TestStart_Success(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	if web.gotCfg != (app.ServeConfig{Port: 9000, Name: "Den"}) || web.gotCtx != ctx {
+	if web.gotCfg.Port != 9000 || web.gotCfg.Name != "Den" || len(web.gotCfg.Hosts) != 0 || web.gotCtx != ctx {
 		t.Errorf("web got cfg=%+v ctx=%v", web.gotCfg, web.gotCtx)
 	}
 	st := svc.Status()
-	if st.State != server.Running || st.Addr != "127.0.0.1:8765" || st.Name != "Den" || st.Error != "" {
+	if st.State != server.Running || st.Port != 8765 || st.LocalURL != "http://127.0.0.1:8765" || st.Name != "Den" || st.Error != "" {
 		t.Errorf("Status() = %+v", st)
+	}
+	if len(st.LANURLs) != 0 {
+		t.Errorf("LANURLs = %v, want none when the network reports no addresses", st.LANURLs)
 	}
 	if want := []server.State{server.Starting, server.Running}; !equalStates(ev.states(), want) {
 		t.Errorf("events = %v, want %v", ev.states(), want)
@@ -157,8 +178,8 @@ func TestStart_BindFailureFailsAndCanRetry(t *testing.T) {
 		t.Fatalf("Start() error = %v, want it to wrap %v", err, boom)
 	}
 	st := svc.Status()
-	if st.State != server.Failed || st.Error != boom.Error() || st.Addr != "" {
-		t.Errorf("Status() = %+v, want failed with reason and no addr", st)
+	if st.State != server.Failed || st.Error != boom.Error() || st.LocalURL != "" || st.Port != 0 {
+		t.Errorf("Status() = %+v, want failed with reason and no URLs", st)
 	}
 
 	web.startFn = func() (*fakeRun, error) { return newFakeRun(), nil }
@@ -217,8 +238,8 @@ func TestStop_Success(t *testing.T) {
 		t.Errorf("stop context deadline = %v, %v; want one within %s", dl, ok, stopTimeout)
 	}
 	st := svc.Status()
-	if st.State != server.Idle || st.Addr != "" || st.Name != "Den" {
-		t.Errorf("Status() = %+v, want idle with no addr (name remembered)", st)
+	if st.State != server.Idle || st.LocalURL != "" || len(st.LANURLs) != 0 || st.Port != 0 || st.Name != "Den" {
+		t.Errorf("Status() = %+v, want idle with no URLs (name remembered)", st)
 	}
 	want := []server.State{server.Starting, server.Running, server.Stopping, server.Idle}
 	if !equalStates(ev.states(), want) {
@@ -277,8 +298,8 @@ func TestCrash_RunningServerThatDiesBecomesFailed(t *testing.T) {
 	web.last().end(crash)
 
 	eventually(t, func() bool { return svc.Status().State == server.Failed })
-	if st := svc.Status(); st.Error != crash.Error() || st.Addr != "" {
-		t.Errorf("Status() = %+v, want the crash reason and no addr", st)
+	if st := svc.Status(); st.Error != crash.Error() || st.LocalURL != "" {
+		t.Errorf("Status() = %+v, want the crash reason and no URLs", st)
 	}
 }
 
@@ -330,5 +351,93 @@ func TestConcurrentStartsCreateOneRun(t *testing.T) {
 	defer web.mu.Unlock()
 	if len(web.runs) != 1 {
 		t.Fatalf("%d runs created, want 1", len(web.runs))
+	}
+}
+
+func TestStart_PassesLANAddressesAndBuildsURLs(t *testing.T) {
+	lan := []netip.Addr{netip.MustParseAddr("192.168.1.20"), netip.MustParseAddr("10.0.0.7")}
+	web := &fakeWeb{}
+	web.startFn = func() (*fakeRun, error) {
+		r := newFakeRun()
+		r.addrs = []netip.AddrPort{
+			netip.MustParseAddrPort("127.0.0.1:9000"),
+			netip.MustParseAddrPort("192.168.1.20:9000"),
+			netip.MustParseAddrPort("10.0.0.7:9000"),
+		}
+		return r, nil
+	}
+	svc, ev := newServiceWithNet(web, fakeNet{addrs: lan})
+
+	if err := svc.Start(context.Background(), NewConfig(WithPort(9000))); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(web.gotCfg.Hosts, lan) {
+		t.Errorf("server was asked to listen on %v, want the detected LAN addresses %v", web.gotCfg.Hosts, lan)
+	}
+	st := svc.Status()
+	wantLAN := []string{"http://192.168.1.20:9000", "http://10.0.0.7:9000"}
+	if st.Port != 9000 || st.LocalURL != "http://127.0.0.1:9000" || !slices.Equal(st.LANURLs, wantLAN) {
+		t.Errorf("Status() = %+v, want port 9000, local URL, and LAN URLs %v in bind order", st, wantLAN)
+	}
+
+	// The event the UI receives carries the same URLs.
+	ev.mu.Lock()
+	published := ev.got[len(ev.got)-1]
+	ev.mu.Unlock()
+	if !slices.Equal(published.LANURLs, wantLAN) {
+		t.Errorf("published LANURLs = %v", published.LANURLs)
+	}
+}
+
+func TestStart_URLsComeFromWhatWasActuallyBound(t *testing.T) {
+	// The network reports two addresses but the server could bind only one; the
+	// UI must not advertise an address that does not work.
+	web := &fakeWeb{}
+	web.startFn = func() (*fakeRun, error) {
+		r := newFakeRun()
+		r.addrs = []netip.AddrPort{
+			netip.MustParseAddrPort("127.0.0.1:8765"),
+			netip.MustParseAddrPort("192.168.1.20:8765"),
+		}
+		return r, nil
+	}
+	lan := []netip.Addr{netip.MustParseAddr("192.168.1.20"), netip.MustParseAddr("10.0.0.7")}
+	svc, _ := newServiceWithNet(web, fakeNet{addrs: lan})
+	_ = svc.Start(context.Background(), NewConfig())
+
+	if got := svc.Status().LANURLs; !slices.Equal(got, []string{"http://192.168.1.20:8765"}) {
+		t.Errorf("LANURLs = %v, want only the bound address", got)
+	}
+}
+
+func TestStart_NetworkDetectionFailureStillServesLocally(t *testing.T) {
+	web := okWeb()
+	svc, _ := newServiceWithNet(web, fakeNet{err: errors.New("no interfaces")})
+
+	if err := svc.Start(context.Background(), NewConfig()); err != nil {
+		t.Fatalf("Start() error = %v; a network problem must not block local use", err)
+	}
+	if len(web.gotCfg.Hosts) != 0 {
+		t.Errorf("Hosts = %v, want none", web.gotCfg.Hosts)
+	}
+	if st := svc.Status(); st.State != server.Running || st.LocalURL == "" || len(st.LANURLs) != 0 {
+		t.Errorf("Status() = %+v", st)
+	}
+}
+
+func TestStatus_LANURLsAreACopy(t *testing.T) {
+	web := &fakeWeb{}
+	web.startFn = func() (*fakeRun, error) {
+		r := newFakeRun()
+		r.addrs = append(r.addrs, netip.MustParseAddrPort("192.168.1.20:8765"))
+		return r, nil
+	}
+	svc, _ := newServiceWithNet(web, fakeNet{addrs: []netip.Addr{netip.MustParseAddr("192.168.1.20")}})
+	_ = svc.Start(context.Background(), NewConfig())
+
+	svc.Status().LANURLs[0] = "tampered"
+	if got := svc.Status().LANURLs[0]; got != "http://192.168.1.20:8765" {
+		t.Errorf("a caller changed the service's state through Status(): %q", got)
 	}
 }

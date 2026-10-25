@@ -19,6 +19,7 @@ import (
 	"eincast/internal/adapters/httpapi"
 	"eincast/internal/adapters/logbus"
 	"eincast/internal/adapters/memrepo"
+	"eincast/internal/adapters/netinfo"
 	"eincast/internal/app/library"
 	"eincast/internal/app/streaming"
 	"eincast/internal/bridge"
@@ -42,7 +43,7 @@ func main() {
 
 	emitter := bridge.NewEmitter(log)
 	libraryService := library.NewService(fsscan.New(log), memrepo.New(), emitter, log)
-	streamingService := streaming.NewService(httpapi.New(libraryService, version, log), emitter, log)
+	streamingService := streaming.NewService(httpapi.New(libraryService, version, log), netinfo.New(), emitter, log)
 	app := bridge.New(bridge.Deps{
 		Info:      bridge.Info{Name: appName, Version: version},
 		Library:   libraryService,

@@ -27,18 +27,19 @@ Arrows point in the direction of the import. `domain` imports nothing; `app`
 never imports Wails, `net/http` or `os`. `scripts/check-deps.sh` fails if that
 changes.
 
-## What exists today (through Phase 4)
+## What exists today (through Phase 5)
 
 | Layer | Contents |
 |---|---|
 | `domain/media` | `Item`, `ID` (hash of relative path), `Kind` + extension detection, `Stats`, sentinel errors |
 | `domain/server` | `State`, the transition table, and `Machine` (atomic check-and-set) |
-| `app` | Ports (`Scanner`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `LogStream`), `LogEntry`, sealed `Event` type |
+| `app` | Ports (`Scanner`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `NetInfo`, `LogStream`), `LogEntry`, sealed `Event` type |
 | `app/library` | `Service`: `ScanFolder`, `Summary`, `Root`, `List`, `Get` |
 | `app/streaming` | `Config` + functional options, `Service`: `Start`, `Stop`, `Status`, crash watcher |
 | `adapters/fsscan` | `filepath.WalkDir` scanner (skips hidden, system files, symlinks) |
 | `adapters/memrepo` | `sync.RWMutex`-guarded snapshot repository |
-| `adapters/httpapi` | Server lifecycle (errgroup), route table, middleware chain, handlers |
+| `adapters/httpapi` | Server lifecycle (errgroup, one listener per address), route table, middleware chain, handlers, embedded player page |
+| `adapters/netinfo` | LAN IPv4 detection: pure `Pick` over interfaces + the `System` reader |
 | `adapters/logbus` | `Handler` (slog decorator), `Bus` (non-blocking pub/sub), ring buffer |
 | `bridge` | `App` facade, `Emitter` (event → Wails runtime), log forwarder, DTOs, startup/shutdown hooks |
 
@@ -46,7 +47,8 @@ changes.
 
 | Route | Response |
 |---|---|
-| `GET /` | Placeholder landing page (the embedded player arrives in the Connect phase) |
+| `GET /` | The device player page (embedded; list, search, `<video>`/`<audio>`/`<img>`), with a strict CSP |
+| `GET /static/{file}` | The page's script, stylesheet and icon (single path segment, never a directory listing) |
 | `GET /api/health` | `{"status":"ok","version":"…","name":"…"}` |
 | `GET /api/library` | `[{id, name, kind, size, modTime}]` (never a path) |
 | `GET /api/library/{id}` | One item, or 404 |
@@ -57,8 +59,10 @@ Errors always look like `{"error":{"code":"not_found","message":"…"}}`.
 Middleware, outermost first: request ID → `Server: EinCast/<version>` → access
 log → panic recovery → LAN-only CORS.
 
-The server binds `127.0.0.1` only for now. The Connect phase adds the LAN
-interface addresses (never `0.0.0.0`).
+The server listens on loopback plus this machine's LAN IPv4 addresses, one
+explicit listener each, all on the same port. It never binds `0.0.0.0`, and the
+adapter refuses to ([ADR 0009](adr/0009-lan-binding-and-interface-detection.md)).
+Until the access token (Phase 6), anyone on the same network can open the library.
 
 ### Flow: a log line reaches the screen
 
@@ -115,6 +119,29 @@ The UI changes screens because of the *event*, not because the command
 resolved: Go is the source of truth. On a webview reload the UI re-reads state
 with `GetLibrarySummary()`.
 
+### Flow: a phone joins from the QR code
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Card as ConnectCard (React)
+    participant Phone
+    participant MW as Middleware chain
+    participant Page as handleIndex + handleStatic
+    participant API as handleLibrary / handleStream
+
+    Card->>Card: status.lanUrls[0] → QR code + copyable URL
+    User->>Phone: scans the QR code
+    Phone->>MW: GET http://192.168.1.20:8765/
+    MW->>Page: security headers + CSP
+    Page-->>Phone: index.html (embedded)
+    Phone->>MW: GET /static/app.js, /static/style.css
+    Phone->>API: GET /api/health, /api/library
+    API-->>Phone: JSON (ids, names, kinds, sizes; never paths)
+    Phone->>Phone: renders the list as text (never as HTML)
+    Phone->>API: GET /stream/{id} (Range) when an item is tapped
+```
+
 ### Flow: user clicks Start
 
 ```mermaid
@@ -133,11 +160,12 @@ sequenceDiagram
     Svc->>SM: Transition(Starting)
     Svc-->>Emit: Publish(ServerStateChanged: starting)
     Emit-->>UI: "server:state" → pill shows Starting…
-    Svc->>Web: Start(ctx, ServeConfig)
-    Web->>Web: net.Listen (port conflicts fail here)
-    Web-->>Svc: RunningServer (serving in the background)
+    Svc->>Svc: NetInfo.LANAddrs() → hosts to listen on
+    Svc->>Web: Start(ctx, ServeConfig{port, name, hosts})
+    Web->>Web: one net.Listen per address, loopback first (any failure closes them all)
+    Web-->>Svc: RunningServer (Addrs: what was actually bound)
     Svc->>SM: Transition(Running)
-    Svc-->>Emit: Publish(ServerStateChanged: running + addr)
+    Svc-->>Emit: Publish(ServerStateChanged: running + port + local/LAN URLs)
     Emit-->>UI: "server:state" → pill shows Running
     Svc->>Svc: go watch(run) until run.Done()
 ```

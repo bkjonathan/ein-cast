@@ -1,4 +1,4 @@
-// The only module in the frontend allowed to import ../wailsjs/runtime.
+// A bridge module: allowed to import ../wailsjs/runtime.
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { toLogLine, toServerStatus, type RawLogLine, type RawServerStatus } from "./mappers";
 import type { LibrarySummary, LogLine, ServerStatus } from "./types";

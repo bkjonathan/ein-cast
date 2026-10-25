@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { toLogLine, toServerStatus } from "./mappers";
 
-const raw = (state: string) => ({ state, name: "Den", addr: "127.0.0.1:1", error: "" });
+const raw = (state: string) => ({
+  state,
+  name: "Den",
+  port: 8765,
+  localUrl: "http://127.0.0.1:8765",
+  lanUrls: ["http://192.168.1.20:8765"],
+  error: "",
+});
 
 describe("toServerStatus", () => {
   it.each(["idle", "starting", "running", "stopping", "failed"])("accepts %s", (state) => {
@@ -12,7 +19,9 @@ describe("toServerStatus", () => {
     expect(toServerStatus(raw("running"))).toStrictEqual({
       state: "running",
       name: "Den",
-      addr: "127.0.0.1:1",
+      port: 8765,
+      localUrl: "http://127.0.0.1:8765",
+      lanUrls: ["http://192.168.1.20:8765"],
       error: "",
     });
   });

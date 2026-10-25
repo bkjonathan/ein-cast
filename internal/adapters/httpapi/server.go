@@ -9,7 +9,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strconv"
+	"net/netip"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -18,10 +19,8 @@ import (
 )
 
 const (
-	// bindHost is loopback until the Connect phase adds the LAN interface
-	// addresses. Never 0.0.0.0: that would also expose every VPN and docker
-	// interface.
-	bindHost = "127.0.0.1"
+	// loopbackHost is always bound, in addition to any LAN addresses.
+	loopbackHost = "127.0.0.1"
 
 	// shutdownGrace bounds the shutdown that follows a cancelled parent context.
 	// An explicit Stop uses the caller's own deadline instead.
@@ -43,12 +42,16 @@ func New(lib Library, version string, log *slog.Logger) *Server {
 	return &Server{lib: lib, version: version, log: log.With(slog.String("source", "http"))}
 }
 
-// Start binds the port and serves in the background.
+// Start binds the port on loopback plus every address in cfg.Hosts and serves
+// in the background.
+//
+// Binding is explicit, one listener per address. There is no 0.0.0.0 option:
+// that would also expose VPN, container and virtual interfaces. Loopback is
+// always included because the local UI and, later, tunnels reach us through it.
 func (s *Server) Start(ctx context.Context, cfg app.ServeConfig) (app.RunningServer, error) {
-	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", net.JoinHostPort(bindHost, strconv.Itoa(cfg.Port)))
+	listeners, err := listenAll(ctx, bindAddrs(cfg.Hosts), cfg.Port)
 	if err != nil {
-		return nil, fmt.Errorf("listen on port %d: %w", cfg.Port, err)
+		return nil, err
 	}
 
 	a := s.newAPI(cfg)
@@ -62,17 +65,24 @@ func (s *Server) Start(ctx context.Context, cfg app.ServeConfig) (app.RunningSer
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
-	r := &running{srv: srv, addr: ln.Addr().String(), cancel: cancel, done: make(chan struct{}), log: s.log}
+	addrs := make([]netip.AddrPort, len(listeners))
+	for i, ln := range listeners {
+		addrs[i] = ln.Addr().(*net.TCPAddr).AddrPort()
+	}
+	r := &running{srv: srv, addrs: addrs, cancel: cancel, done: make(chan struct{}), log: s.log}
 
-	// The errgroup owns both goroutines. Each ends when runCtx is cancelled
-	// (Stop or parent cancel) or when serving fails.
+	// The errgroup owns every goroutine: one Serve per listener plus the
+	// shutdown watcher. All end when runCtx is cancelled (Stop or parent
+	// cancel) or when any listener fails.
 	g, gctx := errgroup.WithContext(runCtx)
-	g.Go(func() error {
-		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("serve: %w", err)
-		}
-		return nil
-	})
+	for _, ln := range listeners {
+		g.Go(func() error {
+			if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+				return fmt.Errorf("serve %s: %w", ln.Addr(), err)
+			}
+			return nil
+		})
+	}
 	g.Go(func() error {
 		<-gctx.Done()
 		graceCtx, stop := context.WithTimeout(context.Background(), shutdownGrace)
@@ -88,8 +98,59 @@ func (s *Server) Start(ctx context.Context, cfg app.ServeConfig) (app.RunningSer
 		close(r.done)
 	}()
 
-	s.log.Info("http server listening", slog.String("addr", r.addr), slog.String("name", cfg.Name))
+	s.log.Info("http server listening",
+		slog.String("name", cfg.Name), slog.Any("addrs", addrStrings(addrs)))
 	return r, nil
+}
+
+// bindAddrs is loopback first, then the requested hosts without duplicates.
+func bindAddrs(hosts []netip.Addr) []netip.Addr {
+	out := []netip.Addr{netip.MustParseAddr(loopbackHost)}
+	for _, h := range hosts {
+		if !slices.Contains(out, h) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// listenAll opens one listener per address on the same port. With port 0 the
+// first listener lets the OS choose and the rest reuse that port, so every
+// address ends up on one number. If any bind fails, the ones already opened are
+// closed: the server either starts completely or not at all.
+func listenAll(ctx context.Context, hosts []netip.Addr, port int) ([]net.Listener, error) {
+	var lc net.ListenConfig
+	var opened []net.Listener
+	closeAll := func() {
+		for _, ln := range opened {
+			_ = ln.Close()
+		}
+	}
+
+	for _, h := range hosts {
+		if h.IsUnspecified() {
+			closeAll()
+			return nil, fmt.Errorf("refusing to listen on %s: bind explicit addresses, not every interface", h)
+		}
+		ln, err := lc.Listen(ctx, "tcp", netip.AddrPortFrom(h, uint16(port)).String())
+		if err != nil {
+			closeAll()
+			return nil, fmt.Errorf("listen on %s port %d: %w", h, port, err)
+		}
+		opened = append(opened, ln)
+		if port == 0 {
+			port = ln.Addr().(*net.TCPAddr).Port
+		}
+	}
+	return opened, nil
+}
+
+func addrStrings(addrs []netip.AddrPort) []string {
+	out := make([]string, len(addrs))
+	for i, a := range addrs {
+		out[i] = a.String()
+	}
+	return out
 }
 
 // newAPI builds the handler state for one run.
@@ -100,7 +161,7 @@ func (s *Server) newAPI(cfg app.ServeConfig) *api {
 // running is one live server. It implements app.RunningServer.
 type running struct {
 	srv    *http.Server
-	addr   string
+	addrs  []netip.AddrPort
 	cancel context.CancelFunc
 	log    *slog.Logger
 
@@ -108,9 +169,9 @@ type running struct {
 	err  error // written before done is closed, read only after
 }
 
-func (r *running) Addr() string          { return r.addr }
-func (r *running) Done() <-chan struct{} { return r.done }
-func (r *running) Err() error            { return r.err }
+func (r *running) Addrs() []netip.AddrPort { return slices.Clone(r.addrs) }
+func (r *running) Done() <-chan struct{}   { return r.done }
+func (r *running) Err() error              { return r.err }
 
 // Stop shuts down gracefully until ctx expires, then drops remaining
 // connections. Dropping them is the intended outcome of the deadline, not a

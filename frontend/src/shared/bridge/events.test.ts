@@ -35,12 +35,14 @@ describe("onEvent", () => {
 
     const handler = vi.fn();
     onEvent("server:state", handler);
-    deliver({ state: "failed", name: "Den", addr: "", error: "port in use" });
+    deliver({ state: "failed", name: "Den", port: 0, localUrl: "", lanUrls: [], error: "port in use" });
 
     expect(handler).toHaveBeenCalledWith({
       state: "failed",
       name: "Den",
-      addr: "",
+      port: 0,
+      localUrl: "",
+      lanUrls: [],
       error: "port in use",
     });
   });
@@ -55,7 +57,7 @@ describe("onEvent", () => {
     const handler = vi.fn();
     onEvent("server:state", handler);
 
-    expect(() => deliver({ state: "paused", name: "", addr: "", error: "" })).toThrow();
+    expect(() => deliver({ state: "paused", name: "", port: 0, localUrl: "", lanUrls: [], error: "" })).toThrow();
     expect(handler).not.toHaveBeenCalled();
   });
 

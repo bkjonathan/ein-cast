@@ -30,6 +30,7 @@ type api struct {
 func (a *api) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", a.handleIndex)
+	mux.HandleFunc("GET /static/{file}", a.handleStatic)
 	mux.HandleFunc("GET /api/health", a.handleHealth)
 	mux.HandleFunc("GET /api/library", a.handleLibrary)
 	mux.HandleFunc("GET /api/library/{id}", a.handleLibraryItem)
@@ -40,11 +41,12 @@ func (a *api) routes() http.Handler {
 }
 
 // handler is the routes wrapped in the middleware chain, outermost first:
-// request ID, Server header, access log, panic recovery, CORS.
+// request ID, Server header, security headers, access log, panic recovery, CORS.
 func (a *api) handler() http.Handler {
 	return chain(a.routes(),
 		requestID,
 		serverHeader(a.version),
+		securityHeaders,
 		accessLog(a.log),
 		recoverer(a.log),
 		corsLAN,

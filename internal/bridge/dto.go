@@ -52,13 +52,29 @@ func toLibrarySummaryDTO(s app.LibrarySummary) LibrarySummaryDTO {
 type ServerStateDTO struct {
 	State string `json:"state"`
 	Name  string `json:"name"`
-	// Addr is the bound "host:port" while running, otherwise empty.
-	Addr  string `json:"addr"`
-	Error string `json:"error"`
+	// Port is the port in use while running, otherwise 0.
+	Port int `json:"port"`
+	// LocalURL reaches the server from this computer; empty unless running.
+	LocalURL string `json:"localUrl"`
+	// LANURLs reach it from other devices, most likely first; empty if the
+	// machine has no usable network.
+	LANURLs []string `json:"lanUrls"`
+	Error   string   `json:"error"`
 }
 
 func toServerStateDTO(s app.ServerStatus) ServerStateDTO {
-	return ServerStateDTO{State: s.State.String(), Name: s.Name, Addr: s.Addr, Error: s.Error}
+	lan := s.LANURLs
+	if lan == nil {
+		lan = []string{} // JSON [] rather than null
+	}
+	return ServerStateDTO{
+		State:    s.State.String(),
+		Name:     s.Name,
+		Port:     s.Port,
+		LocalURL: s.LocalURL,
+		LANURLs:  lan,
+		Error:    s.Error,
+	}
 }
 
 // LogAttrDTO is one key/value pair of a log line.

@@ -78,6 +78,18 @@ func serverHeader(version string) middleware {
 	}
 }
 
+// securityHeaders applies headers that are right for every response.
+// nosniff stops a browser from guessing a type and running, say, a media file
+// as script; no-referrer keeps stream URLs out of Referer headers.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // recorder captures what a handler wrote so the access log can report it.
 type recorder struct {
 	http.ResponseWriter

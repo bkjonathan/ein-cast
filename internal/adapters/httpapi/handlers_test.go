@@ -464,3 +464,89 @@ func TestAccessLogLineForStreamedBytes(t *testing.T) {
 		t.Errorf("logged request_id %v != header %q", entry["request_id"], resp.Header.Get("X-Request-ID"))
 	}
 }
+
+func TestPlayerPage(t *testing.T) {
+	f := newFixture(t)
+	resp := f.get("/")
+	body := string(readBody(t, resp))
+
+	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("status=%d type=%q", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	for _, want := range []string{"<video", "/static/app.js", "/static/style.css", "/playlist.m3u", "EinCast"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html is missing %q", want)
+		}
+	}
+	csp := resp.Header.Get("Content-Security-Policy")
+	for _, want := range []string{"default-src 'none'", "script-src 'self'", "media-src 'self'", "frame-ancestors 'none'"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("CSP %q is missing %q", csp, want)
+		}
+	}
+	if strings.Contains(csp, "unsafe-inline") || strings.Contains(csp, "unsafe-eval") {
+		t.Errorf("CSP allows unsafe script execution: %q", csp)
+	}
+}
+
+func TestStaticFiles(t *testing.T) {
+	f := newFixture(t)
+
+	tests := []struct {
+		path     string
+		status   int
+		typePart string
+	}{
+		{"/static/app.js", 200, "javascript"},
+		{"/static/style.css", 200, "text/css"},
+		{"/static/icon.svg", 200, "image/svg+xml"},
+		{"/static/missing.js", 404, "application/json"},
+		{"/static/index.html", 404, "application/json"}, // the page lives at /
+		{"/static/..%2Fserver.go", 404, ""},
+		{"/static/%2e%2e%2fserver.go", 404, ""},
+		{"/static/", 404, ""}, // no directory listing
+		{"/static", 404, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			resp := f.get(tt.path)
+			body := readBody(t, resp)
+			if resp.StatusCode != tt.status {
+				t.Fatalf("status = %d, want %d (body %.80q)", resp.StatusCode, tt.status, body)
+			}
+			if tt.typePart != "" && !strings.Contains(resp.Header.Get("Content-Type"), tt.typePart) {
+				t.Errorf("Content-Type = %q, want it to contain %q", resp.Header.Get("Content-Type"), tt.typePart)
+			}
+			if tt.status == 404 && (bytes.Contains(body, []byte("package httpapi")) || bytes.Contains(body, []byte("<a href"))) {
+				t.Error("404 response leaks a source file or a directory listing")
+			}
+		})
+	}
+}
+
+func TestSecurityHeadersOnEveryResponse(t *testing.T) {
+	f := newFixture(t)
+	for _, path := range []string{"/", "/api/health", "/api/library", "/nope", "/stream/" + string(f.movie.ID)} {
+		resp := f.get(path)
+		if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s: X-Content-Type-Options = %q", path, got)
+		}
+		if got := resp.Header.Get("Referrer-Policy"); got != "no-referrer" {
+			t.Errorf("%s: Referrer-Policy = %q", path, got)
+		}
+	}
+}
+
+// File names are attacker-influenced text (a downloaded file can be called
+// "<img src=x onerror=...>.mp4"). The page must only ever insert them as text.
+func TestPlayerJSNeverInjectsHTML(t *testing.T) {
+	src, err := webAssets.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, banned := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "setAttribute('on", `setAttribute("on`} {
+		if bytes.Contains(src, []byte(banned)) {
+			t.Errorf("app.js uses %q, which can turn a file name into markup or script", banned)
+		}
+	}
+}

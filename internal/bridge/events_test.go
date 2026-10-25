@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"reflect"
 	"testing"
 
 	"eincast/internal/app"
@@ -57,14 +58,18 @@ func TestEmitter_ServerStateChanged(t *testing.T) {
 	e.bind(context.Background())
 
 	e.Publish(app.ServerStateChanged{Status: app.ServerStatus{
-		State: server.Running, Name: "Den", Addr: "127.0.0.1:8765",
+		State: server.Running, Name: "Den", Port: 8765,
+		LocalURL: "http://127.0.0.1:8765", LANURLs: []string{"http://192.168.1.20:8765"},
 	}})
 
 	if len(got) != 1 || got[0].name != "server:state" {
 		t.Fatalf("emitted = %+v", got)
 	}
-	want := ServerStateDTO{State: "running", Name: "Den", Addr: "127.0.0.1:8765"}
-	if dto, ok := got[0].data[0].(ServerStateDTO); !ok || dto != want {
+	want := ServerStateDTO{
+		State: "running", Name: "Den", Port: 8765,
+		LocalURL: "http://127.0.0.1:8765", LANURLs: []string{"http://192.168.1.20:8765"},
+	}
+	if dto, ok := got[0].data[0].(ServerStateDTO); !ok || !reflect.DeepEqual(dto, want) {
 		t.Fatalf("payload = %#v, want %#v", got[0].data[0], want)
 	}
 }

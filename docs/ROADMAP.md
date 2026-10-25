@@ -5,7 +5,7 @@ instead of adding it early.
 
 | Version | Features | Status |
 |---|---|---|
-| **v0.1 MVP** | Pick folder, scan, LAN HTTP server, device player page, M3U playlist, QR connect, live logs, glass UI | In progress — Phases 1–4 done |
+| **v0.1 MVP** | Pick folder, scan, LAN HTTP server, device player page, M3U playlist, QR connect, live logs, glass UI | In progress — Phases 1–5 done |
 | v0.2 | Settings persistence, rescan + file watcher (`fsnotify`), library search/filter, thumbnails (ffmpeg), dark/light toggle | |
 | v0.3 Remote access | Tunnel providers (Tailscale, Cloudflare quick/named, ngrok), PIN auth, signed stream links, public-access badge, remote session list | |
 | v0.4 Playback | ffmpeg HLS transcoding, subtitles (.srt → WebVTT), resume position per device | |
@@ -18,7 +18,7 @@ instead of adding it early.
 2. **Domain + library** — done
 3. **Server lifecycle** — done
 4. **Log pipeline** — done
-5. Connect
+5. **Connect** — done
 6. Hardening
 7. Remote access (v0.3)
 
@@ -28,7 +28,10 @@ instead of adding it early.
 - **Log gap marker (optional):** `Seq` already reveals dropped lines; the viewer does not yet render a "N lines dropped" row.
 - **Log level control (Phase 6):** the console handler is fixed at Info and the UI sees Debug and up. A setting can raise or lower the console level without touching `logbus`.
 
-- **LAN binding (Phase 5):** `httpapi` binds `127.0.0.1` only, so no other device can connect yet. Phase 5 adds the `NetInfo` port and listens on loopback + the detected LAN addresses (one listener each; never `0.0.0.0`).
+- **Authentication (Phase 6):** the server now listens on the LAN with no auth, so the optional access token (`?t=…`) is the next security step; ADR 0009 records the exposure.
+- **Network changes:** the bound addresses are fixed at start; a new Wi-Fi/Ethernet address needs a restart. A watcher (or a "refresh addresses" action) can come with Settings.
+- **Tailscale and mDNS addresses (Phase 7 / v0.5):** `netinfo` deliberately skips the Tailscale interface (CGNAT range); the tailscale provider reports its own URL. `eincast.local` arrives with mDNS.
+- **Player page on old TVs:** `app.js` uses `fetch`, `async/await`, template-free string concatenation and `replaceChildren`. A very old smart-TV browser may need a lighter fallback; test on real devices before v1.0.
 - **Settings (Phase 6):** `StartServer()` uses `streaming.NewConfig()` defaults (port 8765, name "EinCast"). Port and name come from persisted settings later; `Config` and its options are already the seam.
 - **Player page (Phase 5):** `GET /` serves a placeholder string; the real page goes in `adapters/httpapi/web` via `embed.FS`.
 - **Forwarded headers (Phase 7):** the access log uses the TCP peer address and ignores `X-Forwarded-For` / `CF-Connecting-IP` until requests are known to come from a tunnel's loopback connection.

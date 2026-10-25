@@ -29,8 +29,12 @@ export type ServerState = "idle" | "starting" | "running" | "stopping" | "failed
 export interface ServerStatus {
   state: ServerState;
   name: string;
-  /** Bound "host:port" while running, otherwise empty. */
-  addr: string;
+  /** Port in use while running, otherwise 0. */
+  port: number;
+  /** Reaches the server from this computer, e.g. "http://127.0.0.1:8765". */
+  localUrl: string;
+  /** Reach it from other devices, most likely first. Empty if there is no network. */
+  lanUrls: string[];
   /** Failure reason while failed, otherwise empty. */
   error: string;
 }

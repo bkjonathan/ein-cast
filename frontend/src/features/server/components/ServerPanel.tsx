@@ -29,14 +29,10 @@ export function ServerPanel() {
       </header>
 
       {status.state === "running" && (
-        <div className="space-y-1">
-          <p className="text-sm text-muted-foreground">Listening on</p>
-          <p className="font-mono text-sm select-text">{status.addr}</p>
-          <p className="text-xs text-muted-foreground">
-            Reachable from this computer only for now. LAN access and the QR code
-            arrive with the Connect phase.
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          Serving your library on port{" "}
+          <span className="font-mono text-foreground select-text">{status.port}</span>.
+        </p>
       )}
 
       {shownError && (

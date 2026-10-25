@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"net/netip"
 	"time"
 
 	"eincast/internal/domain/media"
@@ -42,6 +43,11 @@ type ServeConfig struct {
 	Port int
 	// Name is the human-readable server name.
 	Name string
+	// Hosts are extra local addresses to listen on. Loopback is always bound in
+	// addition, because tunnels and the local UI connect through it. A server
+	// must refuse unspecified addresses (0.0.0.0, ::): listening on every
+	// interface would also expose VPN and container networks.
+	Hosts []netip.Addr
 }
 
 // WebServer starts the HTTP interface that devices connect to.
@@ -55,8 +61,8 @@ type WebServer interface {
 // RunningServer is one live run of a WebServer. A stopped server is not
 // restarted; call WebServer.Start again for a fresh one.
 type RunningServer interface {
-	// Addr is the address actually bound, e.g. "127.0.0.1:8765".
-	Addr() string
+	// Addrs lists every address actually bound, loopback first.
+	Addrs() []netip.AddrPort
 	// Stop shuts down gracefully, finishing in-flight requests until ctx
 	// expires and then dropping the rest.
 	Stop(ctx context.Context) error
@@ -95,4 +101,12 @@ type LogStream interface {
 	// never blocks the logger: if the subscriber falls behind and its buffer
 	// fills, entries are dropped for it (visible as a gap in Seq).
 	Subscribe(buffer int) (live <-chan LogEntry, cancel func())
+}
+
+// NetInfo reports which local network addresses other devices can reach us on.
+type NetInfo interface {
+	// LANAddrs returns this machine's private IPv4 addresses on real network
+	// interfaces (not loopback, VPN, container or virtual adapters), most
+	// likely home network first.
+	LANAddrs() ([]netip.Addr, error)
 }

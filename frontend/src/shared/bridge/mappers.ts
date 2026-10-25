@@ -12,7 +12,9 @@ const serverStates: readonly ServerState[] = [
 export interface RawServerStatus {
   state: string;
   name: string;
-  addr: string;
+  port: number;
+  localUrl: string;
+  lanUrls: string[];
   error: string;
 }
 
@@ -23,7 +25,14 @@ export interface RawServerStatus {
 export function toServerStatus(raw: RawServerStatus): ServerStatus {
   const state = serverStates.find((s) => s === raw.state);
   if (!state) throw new Error(`unknown server state from Go: "${raw.state}"`);
-  return { state, name: raw.name, addr: raw.addr, error: raw.error };
+  return {
+    state,
+    name: raw.name,
+    port: raw.port,
+    localUrl: raw.localUrl,
+    lanUrls: [...raw.lanUrls],
+    error: raw.error,
+  };
 }
 
 const logLevels: readonly LogLevel[] = ["debug", "info", "warn", "error"];

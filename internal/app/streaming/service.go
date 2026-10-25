@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,6 +23,7 @@ const stopTimeout = 5 * time.Second
 // time is safe: the loser of a race gets an invalid-transition error.
 type Service struct {
 	web    app.WebServer
+	net    app.NetInfo
 	events app.EventPublisher
 	log    *slog.Logger
 
@@ -30,14 +33,21 @@ type Service struct {
 	current app.RunningServer
 	gen     uint64 // identifies a run, so a stale watcher can recognise itself
 
-	infoMu sync.RWMutex // guards name/addr so Status never waits on mu
-	name   string
-	addr   string
+	infoMu sync.RWMutex // guards info so Status never waits on mu
+	info   endpoints
+}
+
+// endpoints is what the UI needs to show how to connect.
+type endpoints struct {
+	name     string
+	port     int
+	localURL string
+	lanURLs  []string
 }
 
 // NewService builds a Service from its ports.
-func NewService(web app.WebServer, events app.EventPublisher, log *slog.Logger) *Service {
-	return &Service{web: web, events: events, log: log.With(slog.String("source", "server")), machine: server.NewMachine()}
+func NewService(web app.WebServer, net app.NetInfo, events app.EventPublisher, log *slog.Logger) *Service {
+	return &Service{web: web, net: net, events: events, log: log.With(slog.String("source", "server")), machine: server.NewMachine()}
 }
 
 // Start launches the server. ctx bounds the server's whole lifetime: cancelling
@@ -54,9 +64,9 @@ func (s *Service) Start(ctx context.Context, cfg Config) error {
 	if err := s.transition(server.Starting); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
-	s.setInfo(cfg.Name, "")
+	s.setInfo(endpoints{name: cfg.Name})
 
-	run, err := s.web.Start(ctx, app.ServeConfig{Port: cfg.Port, Name: cfg.Name})
+	run, err := s.web.Start(ctx, app.ServeConfig{Port: cfg.Port, Name: cfg.Name, Hosts: s.lanHosts()})
 	if err != nil {
 		s.fail(err)
 		return fmt.Errorf("start server: %w", err)
@@ -64,12 +74,17 @@ func (s *Service) Start(ctx context.Context, cfg Config) error {
 
 	s.current = run
 	s.gen++
-	s.setInfo(cfg.Name, run.Addr())
+	ep := describe(cfg.Name, run.Addrs())
+	s.setInfo(ep)
 	if err := s.transition(server.Running); err != nil {
 		return fmt.Errorf("start: %w", err) // unreachable: Starting → Running is legal
 	}
 
-	s.log.Info("server started", slog.String("addr", run.Addr()), slog.String("name", cfg.Name))
+	s.log.Info("server started",
+		slog.String("name", cfg.Name),
+		slog.Int("port", ep.port),
+		slog.Any("urls", append([]string{ep.localURL}, ep.lanURLs...)),
+	)
 	go s.watch(run, s.gen)
 	return nil
 }
@@ -94,7 +109,7 @@ func (s *Service) Stop(ctx context.Context) error {
 	defer cancel()
 	if run != nil {
 		if err := run.Stop(stopCtx); err != nil {
-			s.setInfo(s.currentName(), "")
+			s.clearEndpoints()
 			s.fail(err)
 			return fmt.Errorf("stop server: %w", err)
 		}
@@ -110,7 +125,13 @@ func (s *Service) Status() app.ServerStatus {
 	snap := s.machine.Snapshot()
 
 	s.infoMu.RLock()
-	status := app.ServerStatus{State: snap.State, Name: s.name, Addr: s.addr}
+	status := app.ServerStatus{
+		State:    snap.State,
+		Name:     s.info.name,
+		Port:     s.info.port,
+		LocalURL: s.info.localURL,
+		LANURLs:  slices.Clone(s.info.lanURLs),
+	}
 	s.infoMu.RUnlock()
 
 	if snap.Err != nil {
@@ -137,7 +158,7 @@ func (s *Service) watch(run app.RunningServer, gen uint64) {
 		cause = errors.New("server stopped unexpectedly")
 	}
 	s.log.Error("server died", slog.String("error", cause.Error()))
-	s.setInfo(s.currentName(), "")
+	s.clearEndpoints()
 	s.fail(cause)
 }
 
@@ -150,7 +171,7 @@ func (s *Service) transition(to server.State) error {
 }
 
 func (s *Service) transitionIdle() error {
-	s.setInfo(s.currentName(), "")
+	s.clearEndpoints()
 	if err := s.transition(server.Idle); err != nil {
 		return fmt.Errorf("stop: %w", err)
 	}
@@ -171,14 +192,49 @@ func (s *Service) publish() {
 	s.events.Publish(app.ServerStateChanged{Status: s.Status()})
 }
 
-func (s *Service) setInfo(name, addr string) {
+func (s *Service) setInfo(ep endpoints) {
 	s.infoMu.Lock()
 	defer s.infoMu.Unlock()
-	s.name, s.addr = name, addr
+	s.info = ep
 }
 
-func (s *Service) currentName() string {
-	s.infoMu.RLock()
-	defer s.infoMu.RUnlock()
-	return s.name
+// clearEndpoints forgets how to connect but remembers the server's name.
+func (s *Service) clearEndpoints() {
+	s.infoMu.Lock()
+	defer s.infoMu.Unlock()
+	s.info = endpoints{name: s.info.name}
+}
+
+// lanHosts asks the network for this machine's LAN addresses. Failing to find
+// any is not fatal: the server still starts on loopback, and the UI says that
+// no network was found.
+func (s *Service) lanHosts() []netip.Addr {
+	addrs, err := s.net.LANAddrs()
+	if err != nil {
+		s.log.Warn("could not detect LAN addresses; serving on this computer only",
+			slog.String("error", err.Error()))
+		return nil
+	}
+	return addrs
+}
+
+// describe turns the addresses a run actually bound into connection URLs:
+// loopback becomes the local URL, everything else a LAN URL, in bind order.
+func describe(name string, addrs []netip.AddrPort) endpoints {
+	ep := endpoints{name: name}
+	for _, ap := range addrs {
+		if ep.port == 0 {
+			ep.port = int(ap.Port())
+		}
+		url := "http://" + ap.String()
+		switch {
+		case ap.Addr().IsLoopback():
+			if ep.localURL == "" {
+				ep.localURL = url
+			}
+		default:
+			ep.lanURLs = append(ep.lanURLs, url)
+		}
+	}
+	return ep
 }

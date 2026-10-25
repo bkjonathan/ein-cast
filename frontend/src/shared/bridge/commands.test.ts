@@ -82,17 +82,26 @@ describe("server commands", () => {
   });
 
   it("getServerState narrows the state string", async () => {
-    go.GetServerState.mockResolvedValue({ state: "running", name: "Den", addr: "127.0.0.1:8765", error: "" });
+    go.GetServerState.mockResolvedValue({
+      state: "running",
+      name: "Den",
+      port: 8765,
+      localUrl: "http://127.0.0.1:8765",
+      lanUrls: ["http://192.168.1.20:8765"],
+      error: "",
+    });
     await expect(getServerState()).resolves.toStrictEqual({
       state: "running",
       name: "Den",
-      addr: "127.0.0.1:8765",
+      port: 8765,
+      localUrl: "http://127.0.0.1:8765",
+      lanUrls: ["http://192.168.1.20:8765"],
       error: "",
     });
   });
 
   it("getServerState rejects a state the frontend does not know", async () => {
-    go.GetServerState.mockResolvedValue({ state: "paused", name: "", addr: "", error: "" });
+    go.GetServerState.mockResolvedValue({ state: "paused", name: "", port: 0, localUrl: "", lanUrls: [], error: "" });
     await expect(getServerState()).rejects.toThrow(/unknown server state/);
   });
 });

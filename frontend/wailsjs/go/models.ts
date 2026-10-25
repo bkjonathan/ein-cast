@@ -125,7 +125,9 @@ export namespace bridge {
 	export class ServerStateDTO {
 	    state: string;
 	    name: string;
-	    addr: string;
+	    port: number;
+	    localUrl: string;
+	    lanUrls: string[];
 	    error: string;
 	
 	    static createFrom(source: any = {}) {
@@ -136,7 +138,9 @@ export namespace bridge {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.state = source["state"];
 	        this.name = source["name"];
-	        this.addr = source["addr"];
+	        this.port = source["port"];
+	        this.localUrl = source["localUrl"];
+	        this.lanUrls = source["lanUrls"];
 	        this.error = source["error"];
 	    }
 	}

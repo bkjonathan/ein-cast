@@ -1,4 +1,4 @@
-// The only module in the frontend allowed to import ../wailsjs/go.
+// A bridge module: allowed to import ../wailsjs/go.
 import {
   AppInfo as goAppInfo,
   ChooseFolder as goChooseFolder,

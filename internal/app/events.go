@@ -30,8 +30,13 @@ type ServerStatus struct {
 	State server.State
 	// Name is the configured server name; empty until the first start.
 	Name string
-	// Addr is the bound address while Running; empty otherwise.
-	Addr string
+	// Port is the port in use while Running; 0 otherwise.
+	Port int
+	// LocalURL reaches the server from this computer, e.g. "http://127.0.0.1:8765".
+	LocalURL string
+	// LANURLs reach it from other devices on the network, most likely first.
+	// Empty when the machine has no usable network.
+	LANURLs []string
 	// Error is the failure reason while Failed; empty otherwise.
 	Error string
 }

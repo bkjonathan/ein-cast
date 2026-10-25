@@ -5,7 +5,9 @@ import { useServerStore } from "./store";
 const status = (state: ServerStatus["state"]): ServerStatus => ({
   state,
   name: "Den",
-  addr: "",
+  port: 0,
+  localUrl: "",
+  lanUrls: [],
   error: "",
 });
 

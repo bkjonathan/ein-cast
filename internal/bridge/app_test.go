@@ -184,9 +184,25 @@ func TestGetServerState(t *testing.T) {
 	a, st := newTestAppWithStreaming(&fakeLibrary{})
 	st.status = app.ServerStatus{State: server.Failed, Name: "Den", Error: "port in use"}
 
-	want := ServerStateDTO{State: "failed", Name: "Den", Error: "port in use"}
-	if got := a.GetServerState(); got != want {
-		t.Fatalf("GetServerState() = %+v, want %+v", got, want)
+	got := a.GetServerState()
+	want := ServerStateDTO{State: "failed", Name: "Den", Error: "port in use", LANURLs: []string{}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetServerState() = %#v, want %#v", got, want)
+	}
+	if got.LANURLs == nil {
+		t.Error("LANURLs must be an empty slice so JSON carries [] not null")
+	}
+
+	st.status = app.ServerStatus{
+		State: server.Running, Name: "Den", Port: 8765,
+		LocalURL: "http://127.0.0.1:8765", LANURLs: []string{"http://192.168.1.20:8765"},
+	}
+	want = ServerStateDTO{
+		State: "running", Name: "Den", Port: 8765,
+		LocalURL: "http://127.0.0.1:8765", LANURLs: []string{"http://192.168.1.20:8765"},
+	}
+	if got := a.GetServerState(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetServerState() = %#v, want %#v", got, want)
 	}
 }
 
