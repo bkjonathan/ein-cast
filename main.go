@@ -15,6 +15,9 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
+	"eincast/internal/adapters/fsscan"
+	"eincast/internal/adapters/memrepo"
+	"eincast/internal/app/library"
 	"eincast/internal/bridge"
 )
 
@@ -29,7 +32,9 @@ var assets embed.FS
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	app := bridge.New(bridge.Info{Name: appName, Version: version})
+	emitter := bridge.NewEmitter(log)
+	libraryService := library.NewService(fsscan.New(log), memrepo.New(), emitter, log)
+	app := bridge.New(bridge.Info{Name: appName, Version: version}, libraryService, emitter)
 
 	err := wails.Run(&options.App{
 		Title:     appName,
@@ -43,6 +48,7 @@ func main() {
 		// Fully transparent so the native vibrancy / Mica backdrop shows through
 		// the glass panels.
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
+		OnStartup:        bridge.OnStartup(app),
 		Bind:             []any{app},
 		Mac: &mac.Options{
 			TitleBar:             mac.TitleBarHiddenInset(),

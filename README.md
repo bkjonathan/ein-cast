@@ -4,7 +4,7 @@
 
 A desktop app (macOS + Windows) that serves a folder of media over your LAN so TVs, iPads and phones can play it. Built with Go, Wails v2 and React.
 
-> Status: **Phase 1 — skeleton.** The window, layout shell, glass design system and architecture guard-rails exist; features land phase by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+> Status: **Phase 2 — library.** You can choose a media folder and EinCast scans it and shows what it found. The HTTP server comes next; features land phase by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ## Requirements
 
@@ -20,7 +20,7 @@ wails build -ldflags "-X main.version=0.1.0"   # → build/bin/eincast.app
 
 go test ./...                   # Go tests
 scripts/check-deps.sh           # hexagonal dependency rules
-cd frontend && npm run typecheck
+cd frontend && npm run typecheck && npm test
 ```
 
 ## Folder map

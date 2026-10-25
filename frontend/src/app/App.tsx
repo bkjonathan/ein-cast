@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { LibraryStats, useLibraryStore, useLibrarySync } from "@/features/library";
+import { OnboardingScreen } from "@/features/onboarding";
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
 import { ViewPlaceholder } from "./ViewPlaceholder";
@@ -9,17 +11,33 @@ import { useAppInfo } from "./useAppInfo";
 export function App() {
   const [active, setActive] = useState<View>("dashboard");
   const info = useAppInfo();
-  const current = views.find((v) => v.id === active) ?? views[0];
+  useLibrarySync();
+  const hydrated = useLibraryStore((s) => s.hydrated);
+  const hasLibrary = useLibraryStore((s) => s.summary !== null);
 
   return (
     <div className="flex h-full flex-col">
       <TitleBar name={info?.name ?? "EinCast"} />
       <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3">
-        <Sidebar active={active} onSelect={setActive} version={info?.version} />
-        <main className="min-w-0 flex-1">
-          {current && <ViewPlaceholder key={current.id} {...current} />}
-        </main>
+        {!hydrated ? null : !hasLibrary ? (
+          <div className="min-w-0 flex-1">
+            <OnboardingScreen />
+          </div>
+        ) : (
+          <>
+            <Sidebar active={active} onSelect={setActive} version={info?.version} />
+            <main className="min-w-0 flex-1">
+              <ActiveView view={active} />
+            </main>
+          </>
+        )}
       </div>
     </div>
   );
+}
+
+function ActiveView({ view }: { view: View }) {
+  if (view === "library") return <LibraryStats />;
+  const meta = views.find((v) => v.id === view);
+  return meta ? <ViewPlaceholder key={meta.id} {...meta} /> : null;
 }

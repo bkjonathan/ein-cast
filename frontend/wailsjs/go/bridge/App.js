@@ -5,3 +5,11 @@
 export function AppInfo() {
   return window['go']['bridge']['App']['AppInfo']();
 }
+
+export function ChooseFolder() {
+  return window['go']['bridge']['App']['ChooseFolder']();
+}
+
+export function GetLibrarySummary() {
+  return window['go']['bridge']['App']['GetLibrarySummary']();
+}

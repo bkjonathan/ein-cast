@@ -8,3 +8,17 @@ export interface AppInfo {
   version: string;
   platform: string;
 }
+
+export interface KindCounts {
+  video: number;
+  audio: number;
+  image: number;
+}
+
+/** The library Go currently has loaded. File paths never cross the bridge. */
+export interface LibrarySummary {
+  root: string;
+  total: number;
+  totalSize: number;
+  counts: KindCounts;
+}

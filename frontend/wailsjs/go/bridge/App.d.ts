@@ -3,3 +3,7 @@
 import {bridge} from '../models';
 
 export function AppInfo():Promise<bridge.AppInfoDTO>;
+
+export function ChooseFolder():Promise<void>;
+
+export function GetLibrarySummary():Promise<bridge.LibrarySummaryDTO>;
