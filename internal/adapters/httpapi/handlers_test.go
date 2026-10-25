@@ -90,7 +90,37 @@ func itemFor(t *testing.T, root, rel string, kind media.Kind) media.Item {
 	}
 }
 
+// fakeAccess is a switchable Access: open, or requiring exactly one token.
+type fakeAccess struct {
+	mu       sync.Mutex
+	required bool
+	token    string
+}
+
+func (f *fakeAccess) Required() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.required
+}
+
+func (f *fakeAccess) Verify(token string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.required || (f.token != "" && token == f.token)
+}
+
+func (f *fakeAccess) set(required bool, token string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.required, f.token = required, token
+}
+
 func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	return newFixtureWith(t, &fakeAccess{})
+}
+
+func newFixtureWith(t *testing.T, access Access) *fixture {
 	t.Helper()
 	root := t.TempDir()
 
@@ -113,7 +143,7 @@ func newFixture(t *testing.T) *fixture {
 	log := slog.New(slog.NewJSONHandler(f.logs, nil))
 	// Build through the real constructor so the test sees what production logs,
 	// including the source=http tag.
-	a := New(f.lib, "1.2.3", log).newAPI(app.ServeConfig{Name: "Den"})
+	a := New(f.lib, access, "1.2.3", log).newAPI(app.ServeConfig{Name: "Den"})
 	f.srv = httptest.NewServer(a.handler())
 	t.Cleanup(f.srv.Close)
 	return f

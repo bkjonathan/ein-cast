@@ -27,18 +27,21 @@ Arrows point in the direction of the import. `domain` imports nothing; `app`
 never imports Wails, `net/http` or `os`. `scripts/check-deps.sh` fails if that
 changes.
 
-## What exists today (through Phase 5)
+## What exists today (through Phase 6)
 
 | Layer | Contents |
 |---|---|
 | `domain/media` | `Item`, `ID` (hash of relative path), `Kind` + extension detection, `Stats`, sentinel errors |
 | `domain/server` | `State`, the transition table, and `Machine` (atomic check-and-set) |
-| `app` | Ports (`Scanner`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `NetInfo`, `LogStream`), `LogEntry`, sealed `Event` type |
-| `app/library` | `Service`: `ScanFolder`, `Summary`, `Root`, `List`, `Get` |
+| `app` | Ports (`Scanner`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `NetInfo`, `LogStream`, `SettingsStore`, `SecretStore`, `LibraryMemory`), `LogEntry`, sealed `Event` type |
+| `app/library` | `Service`: `ScanFolder` (one at a time), `Rescan`, `Restore`, `Status`, `Summary`, `Root`, `List`, `Get` |
+| `app/settings` | `Service`: load/validate/save preferences, access token (`Required`, `Verify`, `RotateToken`); implements `LibraryMemory` |
 | `app/streaming` | `Config` + functional options, `Service`: `Start`, `Stop`, `Status`, crash watcher |
 | `adapters/fsscan` | `filepath.WalkDir` scanner (skips hidden, system files, symlinks) |
 | `adapters/memrepo` | `sync.RWMutex`-guarded snapshot repository |
 | `adapters/httpapi` | Server lifecycle (errgroup, one listener per address), route table, middleware chain, handlers, embedded player page |
+| `adapters/settingsfile` | `settings.json` in the user config dir: atomic writes, `0600`, corrupt files set aside |
+| `adapters/secrets` | OS credential store (Keychain / Credential Manager) via go-keyring |
 | `adapters/netinfo` | LAN IPv4 detection: pure `Pick` over interfaces + the `System` reader |
 | `adapters/logbus` | `Handler` (slog decorator), `Bus` (non-blocking pub/sub), ring buffer |
 | `bridge` | `App` facade, `Emitter` (event → Wails runtime), log forwarder, DTOs, startup/shutdown hooks |
@@ -56,13 +59,16 @@ changes.
 | `GET /playlist.m3u` | Extended M3U of video + audio with absolute URLs built from the request `Host` |
 
 Errors always look like `{"error":{"code":"not_found","message":"…"}}`.
-Middleware, outermost first: request ID → `Server: EinCast/<version>` → access
-log → panic recovery → LAN-only CORS.
+Middleware, outermost first: request ID → `Server: EinCast/<version>` → security
+headers → access log → panic recovery → Host check → LAN-only CORS → access token
+(see [ADR 0011](adr/0011-lan-access-control.md)).
 
 The server listens on loopback plus this machine's LAN IPv4 addresses, one
 explicit listener each, all on the same port. It never binds `0.0.0.0`, and the
 adapter refuses to ([ADR 0009](adr/0009-lan-binding-and-interface-detection.md)).
-Until the access token (Phase 6), anyone on the same network can open the library.
+The access token is optional and off by default; while it is off, anyone on the
+same network can open the library. The Host check (DNS-rebinding defense) is
+always on.
 
 ### Flow: a log line reaches the screen
 
@@ -119,6 +125,32 @@ The UI changes screens because of the *event*, not because the command
 resolved: Go is the source of truth. On a webview reload the UI re-reads state
 with `GetLibrarySummary()`.
 
+### Flow: startup
+
+```mermaid
+sequenceDiagram
+    participant Main as main.go
+    participant Set as settings.Service
+    participant File as settingsfile
+    participant Key as OS credential store
+    participant Lib as library.Service
+    participant UI as React
+
+    Main->>Set: Load()
+    Set->>File: Load() — missing file = first run, bad file = defaults + warning
+    opt token required
+        Set->>Key: Get("access-token") — create one only if "not found"
+    end
+    Main->>Main: wails.Run → OnStartup
+    par background, owned by the app context
+        Main->>Lib: Restore(ctx): rescan the remembered folder
+        Lib-->>UI: "library:status" scanning → "library:scanned" (or an error status)
+    and
+        UI->>Main: GetLibrarySummary / GetLibraryStatus / GetSettings / GetServerState
+    end
+    UI->>UI: scanning → "Scanning…" screen; failed → "Can't open your library"; done → dashboard
+```
+
 ### Flow: a phone joins from the QR code
 
 ```mermaid
@@ -130,9 +162,12 @@ sequenceDiagram
     participant Page as handleIndex + handleStatic
     participant API as handleLibrary / handleStream
 
-    Card->>Card: status.lanUrls[0] → QR code + copyable URL
+    Card->>Card: lanUrls[0] (+ ?t=token when protected) → QR code + copyable URL
     User->>Phone: scans the QR code
-    Phone->>MW: GET http://192.168.1.20:8765/
+    Phone->>MW: GET http://192.168.1.20:8765/?t=…
+    MW->>MW: Host check, then token check
+    MW-->>Phone: 303 to / + HttpOnly cookie (token leaves the address bar)
+    Phone->>MW: GET /
     MW->>Page: security headers + CSP
     Page-->>Phone: index.html (embedded)
     Phone->>MW: GET /static/app.js, /static/style.css

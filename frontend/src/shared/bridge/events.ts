@@ -1,13 +1,15 @@
 // A bridge module: allowed to import ../wailsjs/runtime.
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import { toLogLine, toServerStatus, type RawLogLine, type RawServerStatus } from "./mappers";
-import type { LibrarySummary, LogLine, ServerStatus } from "./types";
+import type { LibraryStatus, LibrarySummary, LogLine, ServerStatus, Settings } from "./types";
 
 /** Every event Go emits, with its payload. Mirrors internal/bridge/events.go. */
 export interface EventMap {
   "library:scanned": LibrarySummary;
   "server:state": ServerStatus;
   "log:line": LogLine;
+  "library:status": LibraryStatus;
+  "settings:changed": Settings;
 }
 
 export type EventName = keyof EventMap;
@@ -19,6 +21,8 @@ const decoders: { [K in EventName]: (raw: unknown) => EventMap[K] } = {
   "library:scanned": (raw) => raw as LibrarySummary,
   "server:state": (raw) => toServerStatus(raw as RawServerStatus),
   "log:line": (raw) => toLogLine(raw as RawLogLine),
+  "library:status": (raw) => raw as LibraryStatus,
+  "settings:changed": (raw) => raw as Settings,
 };
 
 /** Subscribes to a Go event. Returns the unsubscribe function. */

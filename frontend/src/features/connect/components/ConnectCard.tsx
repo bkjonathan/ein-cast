@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { WifiOff } from "lucide-react";
 import { useServerStore } from "@/features/server";
+import { useSettingsStore } from "@/features/settings";
 import { cn } from "@/shared/lib/cn";
 import { GlassPanel } from "@/shared/ui/glass";
-import { hostOf, playlistUrl } from "../urls";
+import { hostOf, playlistUrl, withToken } from "../urls";
 import { QrCode } from "./QrCode";
 import { UrlRow } from "./UrlRow";
 
@@ -16,9 +17,13 @@ export function ConnectCard() {
 
 function ConnectBody({ lanUrls, localUrl }: { lanUrls: string[]; localUrl: string }) {
   const [selected, setSelected] = useState(0);
+  // The token rides in the link so a scan signs the device in. Go keeps it out of
+  // the server status on purpose (it can change while the server runs).
+  const token = useSettingsStore((s) => (s.settings?.requireToken ? s.settings.accessToken : ""));
 
-  const url = lanUrls[Math.min(selected, lanUrls.length - 1)];
-  if (!url) return <NoNetwork localUrl={localUrl} />;
+  const base = lanUrls[Math.min(selected, lanUrls.length - 1)];
+  if (!base) return <NoNetwork localUrl={localUrl} />;
+  const url = withToken(base, token);
 
   return (
     <GlassPanel className="flex flex-col gap-6 p-6 sm:flex-row">
@@ -36,11 +41,11 @@ function ConnectBody({ lanUrls, localUrl }: { lanUrls: string[]; localUrl: strin
               <button
                 key={u}
                 type="button"
-                aria-pressed={u === url}
+                aria-pressed={u === base}
                 onClick={() => setSelected(i)}
                 className={cn(
                   "app-no-drag rounded-full px-3 py-1 font-mono text-xs transition-colors",
-                  u === url
+                  u === base
                     ? "bg-(--glass-surface-hover) text-foreground"
                     : "text-muted-foreground hover:text-foreground",
                 )}
@@ -51,8 +56,13 @@ function ConnectBody({ lanUrls, localUrl }: { lanUrls: string[]; localUrl: strin
           </div>
         )}
 
+        {token && (
+          <p className="text-xs text-muted-foreground">
+            These links include your access token. Share them only with people you trust.
+          </p>
+        )}
         <UrlRow label="Web player" url={url} />
-        <UrlRow label="Playlist for VLC / Infuse" url={playlistUrl(url)} />
+        <UrlRow label="Playlist for VLC / Infuse" url={withToken(playlistUrl(base), token)} />
       </div>
       <QrCode value={url} />
     </GlassPanel>

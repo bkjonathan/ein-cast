@@ -6,12 +6,22 @@ export function AppInfo():Promise<bridge.AppInfoDTO>;
 
 export function ChooseFolder():Promise<void>;
 
+export function GetLibraryStatus():Promise<bridge.LibraryStatusDTO>;
+
 export function GetLibrarySummary():Promise<bridge.LibrarySummaryDTO>;
 
 export function GetLogHistory():Promise<Array<bridge.LogLineDTO>>;
 
 export function GetServerState():Promise<bridge.ServerStateDTO>;
 
+export function GetSettings():Promise<bridge.SettingsDTO>;
+
+export function RescanLibrary():Promise<void>;
+
+export function RotateAccessToken():Promise<void>;
+
 export function StartServer():Promise<void>;
 
 export function StopServer():Promise<void>;
+
+export function UpdateSettings(arg1:bridge.SettingsInputDTO):Promise<void>;

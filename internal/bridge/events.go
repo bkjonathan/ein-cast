@@ -16,6 +16,8 @@ const (
 	EventLibraryScanned = "library:scanned"
 	EventServerState    = "server:state"
 	EventLogLine        = "log:line"
+	EventLibraryStatus  = "library:status"
+	EventSettings       = "settings:changed"
 )
 
 // Emitter implements app.EventPublisher by forwarding events to the frontend.
@@ -66,6 +68,10 @@ func (e *Emitter) Publish(ev app.Event) {
 	switch ev := ev.(type) {
 	case app.LibraryScanned:
 		e.emit(ctx, EventLibraryScanned, toLibrarySummaryDTO(ev.Summary))
+	case app.LibraryStatusChanged:
+		e.emit(ctx, EventLibraryStatus, toLibraryStatusDTO(ev.Status))
+	case app.SettingsChanged:
+		e.emit(ctx, EventSettings, toSettingsDTO(ev.View))
 	case app.ServerStateChanged:
 		e.emit(ctx, EventServerState, toServerStateDTO(ev.Status))
 	default:

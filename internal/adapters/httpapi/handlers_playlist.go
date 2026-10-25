@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"unicode"
@@ -18,6 +19,12 @@ import (
 // server already rejects Host values with control characters.
 func (a *api) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 	base := "http://" + r.Host
+	// When access is protected, entries carry the token they were requested
+	// with: VLC and TV players do not keep cookies.
+	suffix := ""
+	if token := tokenFrom(r.Context()); token != "" {
+		suffix = "?" + queryParam + "=" + url.QueryEscape(token)
+	}
 
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
@@ -28,7 +35,7 @@ func (a *api) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 		b.WriteString("#EXTINF:-1,")
 		b.WriteString(playlistTitle(it.Name))
 		b.WriteByte('\n')
-		b.WriteString(base + "/stream/" + string(it.ID))
+		b.WriteString(base + "/stream/" + string(it.ID) + suffix)
 		b.WriteByte('\n')
 	}
 

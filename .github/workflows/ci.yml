@@ -1,0 +1,77 @@
+# Runs the full check on the two platforms EinCast ships for. scripts/check-cross.sh
+# proves the code compiles for the other OS; this proves it behaves on each one.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash # Git Bash on Windows, so the scripts below run unchanged
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend typecheck and tests
+        working-directory: frontend
+        run: |
+          npm run typecheck
+          npm test
+
+      # The embedded frontend must exist before Go can compile the main package.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Dependency rules
+        run: scripts/check-deps.sh
+
+      # The race detector needs cgo; macOS has it, and it is the platform where
+      # the concurrency code is exercised hardest. Windows runs the same tests
+      # without it.
+      - name: Go tests (macOS, with the race detector)
+        if: runner.os == 'macOS'
+        run: go test -race -count=1 ./...
+
+      - name: Go tests (Windows)
+        if: runner.os == 'Windows'
+        run: go test -count=1 ./...
+
+      - name: Cross-compile check
+        run: scripts/check-cross.sh
+
+      - name: Wails build
+        run: wails build -ldflags "-X main.version=ci"

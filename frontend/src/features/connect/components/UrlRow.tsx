@@ -1,6 +1,6 @@
 import { Check, Copy } from "lucide-react";
 import { GlassButton } from "@/shared/ui/glass";
-import { useCopy } from "../hooks/useCopy";
+import { useCopy } from "@/shared/hooks/useCopy";
 
 /** A labelled, selectable URL with a copy button. */
 export function UrlRow({ label, url }: { label: string; url: string }) {

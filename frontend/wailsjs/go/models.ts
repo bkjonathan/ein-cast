@@ -32,6 +32,22 @@ export namespace bridge {
 	        this.image = source["image"];
 	    }
 	}
+	export class LibraryStatusDTO {
+	    scanning: boolean;
+	    root: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LibraryStatusDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.scanning = source["scanning"];
+	        this.root = source["root"];
+	        this.error = source["error"];
+	    }
+	}
 	export class LibrarySummaryDTO {
 	    root: string;
 	    total: number;
@@ -142,6 +158,42 @@ export namespace bridge {
 	        this.localUrl = source["localUrl"];
 	        this.lanUrls = source["lanUrls"];
 	        this.error = source["error"];
+	    }
+	}
+	export class SettingsDTO {
+	    port: number;
+	    name: string;
+	    requireToken: boolean;
+	    accessToken: string;
+	    tokenPersisted: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SettingsDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.port = source["port"];
+	        this.name = source["name"];
+	        this.requireToken = source["requireToken"];
+	        this.accessToken = source["accessToken"];
+	        this.tokenPersisted = source["tokenPersisted"];
+	    }
+	}
+	export class SettingsInputDTO {
+	    port: number;
+	    name: string;
+	    requireToken: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SettingsInputDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.port = source["port"];
+	        this.name = source["name"];
+	        this.requireToken = source["requireToken"];
 	    }
 	}
 

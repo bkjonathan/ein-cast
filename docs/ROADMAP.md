@@ -5,8 +5,8 @@ instead of adding it early.
 
 | Version | Features | Status |
 |---|---|---|
-| **v0.1 MVP** | Pick folder, scan, LAN HTTP server, device player page, M3U playlist, QR connect, live logs, glass UI | In progress — Phases 1–5 done |
-| v0.2 | Settings persistence, rescan + file watcher (`fsnotify`), library search/filter, thumbnails (ffmpeg), dark/light toggle | |
+| **v0.1 MVP** | Pick folder, scan, LAN HTTP server, device player page, M3U playlist, QR connect, live logs, glass UI | In progress — Phases 1–6 done; Phase 7 is the remote-access phase (v0.3) |
+| v0.2 | ~~Settings persistence~~ and ~~manual rescan~~ (pulled forward into Phase 6), file watcher (`fsnotify`), library search/filter, thumbnails (ffmpeg), dark/light toggle | Partly done |
 | v0.3 Remote access | Tunnel providers (Tailscale, Cloudflare quick/named, ngrok), PIN auth, signed stream links, public-access badge, remote session list | |
 | v0.4 Playback | ffmpeg HLS transcoding, subtitles (.srt → WebVTT), resume position per device | |
 | v0.5 TV | DLNA/UPnP, mDNS `eincast.local` | |
@@ -19,7 +19,7 @@ instead of adding it early.
 3. **Server lifecycle** — done
 4. **Log pipeline** — done
 5. **Connect** — done
-6. Hardening
+6. **Hardening** — done
 7. Remote access (v0.3)
 
 ## Seams needed later
@@ -28,7 +28,11 @@ instead of adding it early.
 - **Log gap marker (optional):** `Seq` already reveals dropped lines; the viewer does not yet render a "N lines dropped" row.
 - **Log level control (Phase 6):** the console handler is fixed at Info and the UI sees Debug and up. A setting can raise or lower the console level without touching `logbus`.
 
-- **Authentication (Phase 6):** the server now listens on the LAN with no auth, so the optional access token (`?t=…`) is the next security step; ADR 0009 records the exposure.
+- **Rate limiting (Phase 7):** the LAN token is 192 bits and needs none; the PIN for public tunnels does (token bucket per IP, lockout). The `requireAccess` middleware is where it goes.
+- **Short-lived signed stream links (Phase 7):** playlists currently embed the long-lived token so VLC can play. Signed, expiring `?sig=&exp=` links for tunnels replace that for public access.
+- **Token expiry:** the cookie lasts 30 days and the token until replaced. A "sign out all devices" action is the existing token rotation.
+- **Windows file attributes:** the scanner still skips by name only (dot-files and known system names), not the Windows "hidden" attribute.
+- **Cross-platform tests:** `scripts/check-cross.sh` proves compilation for macOS and Windows from one machine; behaviour on Windows is checked only by `.github/workflows/ci.yml`, which has not run yet because nothing is pushed.
 - **Network changes:** the bound addresses are fixed at start; a new Wi-Fi/Ethernet address needs a restart. A watcher (or a "refresh addresses" action) can come with Settings.
 - **Tailscale and mDNS addresses (Phase 7 / v0.5):** `netinfo` deliberately skips the Tailscale interface (CGNAT range); the tailscale provider reports its own URL. `eincast.local` arrives with mDNS.
 - **Player page on old TVs:** `app.js` uses `fetch`, `async/await`, template-free string concatenation and `replaceChildren`. A very old smart-TV browser may need a lighter fallback; test on real devices before v1.0.

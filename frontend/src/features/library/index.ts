@@ -1,4 +1,5 @@
+export { LibraryFolder } from "./components/LibraryFolder";
 export { LibraryStats } from "./components/LibraryStats";
-export { useChooseFolder } from "./hooks/useChooseFolder";
+export { useLibraryActions } from "./hooks/useLibraryActions";
 export { useLibrarySync } from "./hooks/useLibrarySync";
-export { useLibraryStore } from "./store";
+export { idleStatus, useLibraryStore } from "./store";

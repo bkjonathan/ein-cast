@@ -23,6 +23,29 @@ export interface LibrarySummary {
   counts: KindCounts;
 }
 
+/** What the library scanner is doing, and why the last attempt failed. */
+export interface LibraryStatus {
+  scanning: boolean;
+  /** The folder being scanned, or the last one attempted. */
+  root: string;
+  /** A short, user-facing reason the last scan failed; empty if it did not. */
+  error: string;
+}
+
+/** The user's preferences, plus the access token when it is switched on. */
+export interface Settings {
+  port: number;
+  name: string;
+  requireToken: boolean;
+  /** Empty unless requireToken is on. */
+  accessToken: string;
+  /** False when the token could not be saved to the system credential store. */
+  tokenPersisted: boolean;
+}
+
+/** The editable part of Settings. */
+export type SettingsInput = Pick<Settings, "port" | "name" | "requireToken">;
+
 export type ServerState = "idle" | "starting" | "running" | "stopping" | "failed";
 
 /** The HTTP server's lifecycle as Go reports it. */

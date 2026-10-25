@@ -13,13 +13,11 @@ export interface ViewMeta {
   id: View;
   label: string;
   icon: LucideIcon;
-  /** Phase that delivers the real screen; shown by the placeholder. */
-  phase: string;
 }
 
 export const views: readonly ViewMeta[] = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, phase: "Phase 3" },
-  { id: "library", label: "Library", icon: Film, phase: "Phase 2" },
-  { id: "logs", label: "Logs", icon: ScrollText, phase: "Phase 4" },
-  { id: "settings", label: "Settings", icon: Settings, phase: "Phase 6" },
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "library", label: "Library", icon: Film },
+  { id: "logs", label: "Logs", icon: ScrollText },
+  { id: "settings", label: "Settings", icon: Settings },
 ];

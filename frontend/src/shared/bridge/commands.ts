@@ -2,14 +2,27 @@
 import {
   AppInfo as goAppInfo,
   ChooseFolder as goChooseFolder,
+  GetLibraryStatus as goGetLibraryStatus,
   GetLibrarySummary as goGetLibrarySummary,
   GetLogHistory as goGetLogHistory,
   GetServerState as goGetServerState,
+  GetSettings as goGetSettings,
+  RescanLibrary as goRescanLibrary,
+  RotateAccessToken as goRotateAccessToken,
   StartServer as goStartServer,
   StopServer as goStopServer,
+  UpdateSettings as goUpdateSettings,
 } from "../../../wailsjs/go/bridge/App";
 import { toLogLine, toServerStatus } from "./mappers";
-import type { AppInfo, LibrarySummary, LogLine, ServerStatus } from "./types";
+import type {
+  AppInfo,
+  LibraryStatus,
+  LibrarySummary,
+  LogLine,
+  ServerStatus,
+  Settings,
+  SettingsInput,
+} from "./types";
 
 /** Asks Go for the app name, version and host platform. */
 export async function getAppInfo(): Promise<AppInfo> {
@@ -63,4 +76,40 @@ export async function getServerState(): Promise<ServerStatus> {
 /** Recent log lines, oldest first. Join them with live events by `seq`. */
 export async function getLogHistory(): Promise<LogLine[]> {
   return (await goGetLogHistory()).map(toLogLine);
+}
+
+/** Scans the current library folder again. The result arrives as events. */
+export async function rescanLibrary(): Promise<void> {
+  await goRescanLibrary();
+}
+
+/** Whether a scan is running, and why the last one failed. */
+export async function getLibraryStatus(): Promise<LibraryStatus> {
+  const dto = await goGetLibraryStatus();
+  return { scanning: dto.scanning, root: dto.root, error: dto.error };
+}
+
+/** The saved settings, and the access token when it is on. */
+export async function getSettings(): Promise<Settings> {
+  const dto = await goGetSettings();
+  return {
+    port: dto.port,
+    name: dto.name,
+    requireToken: dto.requireToken,
+    accessToken: dto.accessToken,
+    tokenPersisted: dto.tokenPersisted,
+  };
+}
+
+/**
+ * Saves new settings. The saved values arrive as a "settings:changed" event.
+ * Rejects with Go's validation message (e.g. "port must be between …").
+ */
+export async function updateSettings(input: SettingsInput): Promise<void> {
+  await goUpdateSettings(input);
+}
+
+/** Replaces the access token; devices using the old link are locked out. */
+export async function rotateAccessToken(): Promise<void> {
+  await goRotateAccessToken();
 }

@@ -30,6 +30,7 @@ const (
 // Server starts HTTP servers for the library. It implements app.WebServer.
 type Server struct {
 	lib     Library
+	access  Access
 	version string
 	log     *slog.Logger
 }
@@ -37,9 +38,9 @@ type Server struct {
 var _ app.WebServer = (*Server)(nil)
 
 // New builds a Server. version appears in the Server header and /api/health.
-func New(lib Library, version string, log *slog.Logger) *Server {
+func New(lib Library, access Access, version string, log *slog.Logger) *Server {
 	// Every line from this package carries source=http (the access log, panics, lifecycle).
-	return &Server{lib: lib, version: version, log: log.With(slog.String("source", "http"))}
+	return &Server{lib: lib, access: access, version: version, log: log.With(slog.String("source", "http"))}
 }
 
 // Start binds the port on loopback plus every address in cfg.Hosts and serves
@@ -155,7 +156,7 @@ func addrStrings(addrs []netip.AddrPort) []string {
 
 // newAPI builds the handler state for one run.
 func (s *Server) newAPI(cfg app.ServeConfig) *api {
-	return &api{lib: s.lib, version: s.version, name: cfg.Name, log: s.log}
+	return &api{lib: s.lib, access: s.access, version: s.version, name: cfg.Name, log: s.log}
 }
 
 // running is one live server. It implements app.RunningServer.

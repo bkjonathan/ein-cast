@@ -18,8 +18,10 @@ type errorDetail struct {
 
 // Error codes. Stable strings clients can switch on.
 const (
-	codeNotFound = "not_found"
-	codeInternal = "internal"
+	codeNotFound     = "not_found"
+	codeInternal     = "internal"
+	codeUnauthorized = "unauthorized"
+	codeForbidden    = "forbidden"
 )
 
 // writeJSON marshals first, so a marshalling failure becomes a clean 500

@@ -8,6 +8,7 @@ import (
 	"embed"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -20,7 +21,10 @@ import (
 	"eincast/internal/adapters/logbus"
 	"eincast/internal/adapters/memrepo"
 	"eincast/internal/adapters/netinfo"
+	"eincast/internal/adapters/secrets"
+	"eincast/internal/adapters/settingsfile"
 	"eincast/internal/app/library"
+	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/bridge"
 )
@@ -42,11 +46,19 @@ func main() {
 	log := slog.New(logbus.NewHandler(slog.NewTextHandler(os.Stderr, nil), logs))
 
 	emitter := bridge.NewEmitter(log)
-	libraryService := library.NewService(fsscan.New(log), memrepo.New(), emitter, log)
-	streamingService := streaming.NewService(httpapi.New(libraryService, version, log), netinfo.New(), emitter, log)
+
+	// Settings live in the per-user config directory; the access token lives in
+	// the OS credential store, never in that file.
+	settingsService := settings.NewService(settingsfile.New(settingsDir(log)), secrets.New(), emitter, log)
+	settingsService.Load()
+
+	libraryService := library.NewService(fsscan.New(log), memrepo.New(), settingsService, emitter, log)
+	webServer := httpapi.New(libraryService, settingsService, version, log)
+	streamingService := streaming.NewService(webServer, netinfo.New(), emitter, log)
 	app := bridge.New(bridge.Deps{
 		Info:      bridge.Info{Name: appName, Version: version},
 		Library:   libraryService,
+		Settings:  settingsService,
 		Streaming: streamingService,
 		Logs:      logs,
 		Emitter:   emitter,
@@ -87,4 +99,17 @@ func main() {
 		log.Error("wails run", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+}
+
+// settingsDir is where settings.json lives: <user config dir>/EinCast. If the
+// platform cannot name one, fall back to the temp directory so the app still
+// runs; the settings simply may not survive a reboot.
+func settingsDir(log *slog.Logger) string {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		log.Warn("no user config directory; settings will be kept in the temp directory",
+			slog.String("error", err.Error()))
+		base = os.TempDir()
+	}
+	return filepath.Join(base, appName)
 }

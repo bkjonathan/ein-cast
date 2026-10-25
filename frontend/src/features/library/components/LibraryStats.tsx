@@ -1,8 +1,8 @@
-import { FolderSync, Film, Image, Music, type LucideIcon } from "lucide-react";
+import { Film, Image, Music, type LucideIcon } from "lucide-react";
 import { formatBytes } from "@/shared/lib/format";
-import { GlassButton, GlassPanel } from "@/shared/ui/glass";
-import { useChooseFolder } from "../hooks/useChooseFolder";
+import { GlassPanel } from "@/shared/ui/glass";
 import { useLibraryStore } from "../store";
+import { LibraryFolder } from "./LibraryFolder";
 
 const kinds: readonly {
   key: "video" | "audio" | "image";
@@ -17,25 +17,13 @@ const kinds: readonly {
 /** Counts by kind, total size and the scanned folder. */
 export function LibraryStats() {
   const summary = useLibraryStore((s) => s.summary);
-  const { choose, busy, error } = useChooseFolder();
-
   if (!summary) return null;
 
   return (
     <GlassPanel className="flex flex-col gap-6 p-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold">Library</h2>
-          <p
-            className="truncate text-sm text-muted-foreground select-text"
-            title={summary.root}
-          >
-            {summary.root}
-          </p>
-        </div>
-        <GlassButton size="sm" onClick={choose} disabled={busy}>
-          <FolderSync /> Change folder
-        </GlassButton>
+      <header className="space-y-2">
+        <h2 className="text-lg font-semibold">Library</h2>
+        <LibraryFolder root={summary.root} />
       </header>
 
       {summary.total === 0 ? (
@@ -49,12 +37,6 @@ export function LibraryStats() {
           ))}
           <Stat label="Total size" value={formatBytes(summary.totalSize)} />
         </dl>
-      )}
-
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
       )}
     </GlassPanel>
   );

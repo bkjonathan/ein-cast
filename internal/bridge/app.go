@@ -13,6 +13,7 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"eincast/internal/app"
+	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/domain/server"
 )
@@ -27,7 +28,17 @@ type Info struct {
 // here, at the consumer, so the bridge can be tested with a fake.
 type Library interface {
 	ScanFolder(ctx context.Context, path string) (app.LibrarySummary, error)
+	Rescan(ctx context.Context) (app.LibrarySummary, error)
+	Restore(ctx context.Context) error
 	Summary() (app.LibrarySummary, bool)
+	Status() app.LibraryStatus
+}
+
+// Settings is the part of the settings use cases the bridge drives.
+type Settings interface {
+	Get() app.SettingsView
+	Update(in settings.Input) (app.SettingsView, error)
+	RotateToken() (app.SettingsView, error)
 }
 
 // Streaming is the part of the server lifecycle the bridge drives.
@@ -42,6 +53,7 @@ type Streaming interface {
 type App struct {
 	info      Info
 	library   Library
+	settings  Settings
 	streaming Streaming
 	logs      app.LogStream
 	emitter   *Emitter
@@ -59,6 +71,7 @@ type App struct {
 type Deps struct {
 	Info      Info
 	Library   Library
+	Settings  Settings
 	Streaming Streaming
 	Logs      app.LogStream
 	Emitter   *Emitter
@@ -70,6 +83,7 @@ func New(d Deps) *App {
 	return &App{
 		info:       d.Info,
 		library:    d.Library,
+		settings:   d.Settings,
 		streaming:  d.Streaming,
 		logs:       d.Logs,
 		emitter:    d.Emitter,
@@ -105,6 +119,17 @@ func (a *App) startup(ctx context.Context) {
 	// Owned by the app context: the goroutine ends, and unsubscribes, when the
 	// app shuts down.
 	go a.forwardLogs(ctx)
+	// Reopen the last folder in the background so the window appears at once.
+	go a.restoreLibrary(ctx)
+}
+
+// restoreLibrary rescans the folder remembered from the last run. A failure is
+// not fatal: the reason is kept in the library status and shown on the first-run
+// screen.
+func (a *App) restoreLibrary(ctx context.Context) {
+	if err := a.library.Restore(ctx); err != nil {
+		a.log.Warn("could not reopen the previous library folder", slog.String("error", err.Error()))
+	}
 }
 
 // logForwardBuffer is how many entries may queue between the logger and the
@@ -165,11 +190,15 @@ func (a *App) GetLibrarySummary() *LibrarySummaryDTO {
 	return &dto
 }
 
-// StartServer starts the HTTP server with the default settings. The outcome
+// StartServer starts the HTTP server with the saved port and name. The outcome
 // arrives as a "server:state" event; an error here means the request itself was
 // refused (for example, the server is already running) or the bind failed.
 func (a *App) StartServer() error {
-	return a.streaming.Start(a.ctx, streaming.NewConfig())
+	s := a.settings.Get()
+	return a.streaming.Start(a.ctx, streaming.NewConfig(
+		streaming.WithPort(s.Port),
+		streaming.WithName(s.Name),
+	))
 }
 
 // StopServer stops the HTTP server gracefully.
@@ -180,6 +209,38 @@ func (a *App) StopServer() error {
 // GetServerState returns the current lifecycle state. The UI calls it on load.
 func (a *App) GetServerState() ServerStateDTO {
 	return toServerStateDTO(a.streaming.Status())
+}
+
+// RescanLibrary scans the current folder again. The result arrives as a
+// "library:scanned" event; failures also appear in "library:status".
+func (a *App) RescanLibrary() error {
+	_, err := a.library.Rescan(a.ctx)
+	return err
+}
+
+// GetLibraryStatus returns whether a scan is running and why the last one failed.
+func (a *App) GetLibraryStatus() LibraryStatusDTO {
+	return toLibraryStatusDTO(a.library.Status())
+}
+
+// GetSettings returns the saved settings and, when switched on, the access token.
+func (a *App) GetSettings() SettingsDTO {
+	return toSettingsDTO(a.settings.Get())
+}
+
+// UpdateSettings validates and saves the settings. The new values arrive as a
+// "settings:changed" event; a rejected value is returned as an error. A new
+// port or name applies the next time the server starts; the token applies at once.
+func (a *App) UpdateSettings(in SettingsInputDTO) error {
+	_, err := a.settings.Update(settings.Input{Port: in.Port, Name: in.Name, RequireToken: in.RequireToken})
+	return err
+}
+
+// RotateAccessToken replaces the access token. Devices using the old link are
+// locked out until they use the new one.
+func (a *App) RotateAccessToken() error {
+	_, err := a.settings.RotateToken()
+	return err
 }
 
 // GetLogHistory returns the recent log lines, oldest first. The UI calls it on

@@ -77,4 +77,20 @@ describe("onEvent", () => {
       seq: 3, time: 5, level: "error", source: "server", message: "boom", attrs: [],
     });
   });
+
+  it.each([
+    ["library:status", { scanning: true, root: "/m", error: "" }],
+    ["settings:changed", { port: 9000, name: "Den", requireToken: true, accessToken: "t", tokenPersisted: true }],
+  ] as const)("delivers %s payloads", (name, payload) => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_n: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+    const handler = vi.fn();
+    onEvent(name, handler);
+    deliver(payload);
+    expect(runtime.EventsOn).toHaveBeenLastCalledWith(name, expect.any(Function));
+    expect(handler).toHaveBeenCalledWith(payload);
+  });
 });

@@ -20,6 +20,7 @@ type Library interface {
 // and write the response; there is no business logic here.
 type api struct {
 	lib     Library
+	access  Access
 	version string
 	name    string
 	log     *slog.Logger
@@ -41,7 +42,10 @@ func (a *api) routes() http.Handler {
 }
 
 // handler is the routes wrapped in the middleware chain, outermost first:
-// request ID, Server header, security headers, access log, panic recovery, CORS.
+// request ID, Server header, security headers, access log, panic recovery,
+// Host check, CORS, access token. The Host check precedes everything that
+// reads data; CORS precedes the token so a browser's preflight (which cannot
+// carry credentials) is answered before authentication is demanded.
 func (a *api) handler() http.Handler {
 	return chain(a.routes(),
 		requestID,
@@ -49,6 +53,8 @@ func (a *api) handler() http.Handler {
 		securityHeaders,
 		accessLog(a.log),
 		recoverer(a.log),
+		hostGuard,
 		corsLAN,
+		a.requireAccess,
 	)
 }

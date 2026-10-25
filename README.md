@@ -4,7 +4,7 @@
 
 A desktop app (macOS + Windows) that serves a folder of media over your LAN so TVs, iPads and phones can play it. Built with Go, Wails v2 and React.
 
-> Status: **Phase 5 — connect.** Choose a media folder, start the server, and open it from a TV, iPad or phone by scanning the QR code or typing the address; the page streams video, music and photos, and an M3U playlist works in VLC and Infuse. The Logs view shows everything the app does. **There is no password yet** (the access token is Phase 6), so anyone on your Wi-Fi can open the library while the server runs. Features land phase by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+> Status: **Phase 6 — hardening.** Choose a media folder, start the server, and open it from a TV, iPad or phone by scanning the QR code or typing the address; the page streams video, music and photos, and an M3U playlist works in VLC and Infuse. The Logs view shows everything the app does. EinCast remembers your folder, port and name between launches, can rescan, and reports problems on screen instead of failing silently. The **access token is off by default**: until you turn it on in Settings, anyone on your Wi-Fi who knows the address can open the library while the server runs. Features land phase by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ## Requirements
 
@@ -20,6 +20,7 @@ wails build -ldflags "-X main.version=0.1.0"   # → build/bin/eincast.app
 
 go test ./...                   # Go tests
 scripts/check-deps.sh           # hexagonal dependency rules
+scripts/check-cross.sh          # compiles for macOS and Windows; add --full for a complete Windows Wails build
 cd frontend && npm run typecheck && npm test
 ```
 
@@ -35,6 +36,15 @@ curl http://127.0.0.1:8765/playlist.m3u      # open in VLC / Infuse
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full route table.
+
+## Settings, token and data
+
+| What | Where |
+|---|---|
+| Port, display name, library folder, token on/off | `settings.json` in `~/Library/Application Support/EinCast` (macOS) or `%AppData%\EinCast` (Windows) |
+| The access token | The system Keychain / Credential Manager, service `com.bkthomas.eincast`. Never in `settings.json` or the logs |
+
+Deleting `settings.json` resets EinCast to its defaults. A damaged one is moved to `settings.json.bad` and EinCast starts with defaults.
 
 ## Folder map
 

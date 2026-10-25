@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { LibraryStats, useLibraryStore, useLibrarySync } from "@/features/library";
 import { LogsView, useLogSync } from "@/features/logs";
-import { OnboardingScreen } from "@/features/onboarding";
+import { OnboardingScreen, ScanningScreen } from "@/features/onboarding";
 import { useServerSync } from "@/features/server";
+import { SettingsView, useSettingsSync } from "@/features/settings";
 import { DashboardView } from "./DashboardView";
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
-import { ViewPlaceholder } from "./ViewPlaceholder";
-import { views, type View } from "./routes";
+import type { View } from "./routes";
 import { useAppInfo } from "./useAppInfo";
 
 /** Layout shell: title bar on top, sidebar on the left, active view in the middle. */
@@ -17,16 +17,21 @@ export function App() {
   useLibrarySync();
   useServerSync();
   useLogSync();
+  useSettingsSync();
+
   const hydrated = useLibraryStore((s) => s.hydrated);
   const hasLibrary = useLibraryStore((s) => s.summary !== null);
+  const status = useLibraryStore((s) => s.status);
 
   return (
     <div className="flex h-full flex-col">
       <TitleBar name={info?.name ?? "EinCast"} />
       <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3">
         {!hydrated ? null : !hasLibrary ? (
+          // No library yet: either the first run, or the last folder is still
+          // being (re)opened, or it could not be opened.
           <div className="min-w-0 flex-1">
-            <OnboardingScreen />
+            {status?.scanning ? <ScanningScreen root={status.root} /> : <OnboardingScreen />}
           </div>
         ) : (
           <>
@@ -42,9 +47,14 @@ export function App() {
 }
 
 function ActiveView({ view }: { view: View }) {
-  if (view === "dashboard") return <DashboardView />;
-  if (view === "library") return <LibraryStats />;
-  if (view === "logs") return <LogsView />;
-  const meta = views.find((v) => v.id === view);
-  return meta ? <ViewPlaceholder key={meta.id} {...meta} /> : null;
+  switch (view) {
+    case "dashboard":
+      return <DashboardView />;
+    case "library":
+      return <LibraryStats />;
+    case "logs":
+      return <LogsView />;
+    case "settings":
+      return <SettingsView />;
+  }
 }

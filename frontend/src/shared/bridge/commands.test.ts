@@ -6,6 +6,11 @@ const go = vi.hoisted(() => ({
   GetLibrarySummary: vi.fn(),
   GetServerState: vi.fn(),
   GetLogHistory: vi.fn(),
+  GetLibraryStatus: vi.fn(),
+  GetSettings: vi.fn(),
+  RescanLibrary: vi.fn(),
+  RotateAccessToken: vi.fn(),
+  UpdateSettings: vi.fn(),
   StartServer: vi.fn(),
   StopServer: vi.fn(),
 }));
@@ -15,8 +20,13 @@ import {
   chooseFolder,
   getAppInfo,
   getLibrarySummary,
+  getLibraryStatus,
   getLogHistory,
   getServerState,
+  getSettings,
+  rescanLibrary,
+  rotateAccessToken,
+  updateSettings,
   startServer,
   stopServer,
 } from "./commands";
@@ -121,5 +131,48 @@ describe("getLogHistory", () => {
   it("returns an empty list for an empty history", async () => {
     go.GetLogHistory.mockResolvedValue([]);
     await expect(getLogHistory()).resolves.toEqual([]);
+  });
+});
+
+describe("library status and rescan", () => {
+  it("getLibraryStatus maps the DTO", async () => {
+    go.GetLibraryStatus.mockResolvedValue({ scanning: false, root: "/gone", error: "That folder no longer exists.", extra: 1 });
+    await expect(getLibraryStatus()).resolves.toStrictEqual({
+      scanning: false,
+      root: "/gone",
+      error: "That folder no longer exists.",
+    });
+  });
+
+  it("rescanLibrary resolves with nothing and propagates a refusal", async () => {
+    go.RescanLibrary.mockResolvedValueOnce(undefined);
+    await expect(rescanLibrary()).resolves.toBeUndefined();
+    go.RescanLibrary.mockRejectedValueOnce("a scan is already running");
+    await expect(rescanLibrary()).rejects.toBe("a scan is already running");
+  });
+});
+
+describe("settings", () => {
+  it("getSettings maps the DTO", async () => {
+    go.GetSettings.mockResolvedValue({
+      port: 9000, name: "Den", requireToken: true, accessToken: "tok", tokenPersisted: true, junk: 1,
+    });
+    await expect(getSettings()).resolves.toStrictEqual({
+      port: 9000, name: "Den", requireToken: true, accessToken: "tok", tokenPersisted: true,
+    });
+  });
+
+  it("updateSettings sends the three editable fields and surfaces Go's validation message", async () => {
+    go.UpdateSettings.mockResolvedValueOnce(undefined);
+    await updateSettings({ port: 9100, name: "Den", requireToken: false });
+    expect(go.UpdateSettings).toHaveBeenCalledWith({ port: 9100, name: "Den", requireToken: false });
+
+    go.UpdateSettings.mockRejectedValueOnce("port must be between 1024 and 65535");
+    await expect(updateSettings({ port: 80, name: "Den", requireToken: false })).rejects.toMatch(/between 1024/);
+  });
+
+  it("rotateAccessToken resolves with nothing", async () => {
+    go.RotateAccessToken.mockResolvedValue(undefined);
+    await expect(rotateAccessToken()).resolves.toBeUndefined();
   });
 });

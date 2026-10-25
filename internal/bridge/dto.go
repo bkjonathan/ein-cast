@@ -77,6 +77,46 @@ func toServerStateDTO(s app.ServerStatus) ServerStateDTO {
 	}
 }
 
+// LibraryStatusDTO says whether a scan is running and why the last one failed.
+type LibraryStatusDTO struct {
+	Scanning bool   `json:"scanning"`
+	Root     string `json:"root"`
+	Error    string `json:"error"`
+}
+
+func toLibraryStatusDTO(s app.LibraryStatus) LibraryStatusDTO {
+	return LibraryStatusDTO{Scanning: s.Scanning, Root: s.Root, Error: s.Error}
+}
+
+// SettingsDTO is what the Settings screen shows. AccessToken is empty unless the
+// token is switched on; TokenPersisted is false when it could not be saved to
+// the system credential store.
+type SettingsDTO struct {
+	Port           int    `json:"port"`
+	Name           string `json:"name"`
+	RequireToken   bool   `json:"requireToken"`
+	AccessToken    string `json:"accessToken"`
+	TokenPersisted bool   `json:"tokenPersisted"`
+}
+
+func toSettingsDTO(v app.SettingsView) SettingsDTO {
+	return SettingsDTO{
+		Port:           v.Port,
+		Name:           v.Name,
+		RequireToken:   v.RequireToken,
+		AccessToken:    v.Token,
+		TokenPersisted: v.TokenPersisted,
+	}
+}
+
+// SettingsInputDTO is what the Settings form sends back. The library folder and
+// the token itself are not editable here.
+type SettingsInputDTO struct {
+	Port         int    `json:"port"`
+	Name         string `json:"name"`
+	RequireToken bool   `json:"requireToken"`
+}
+
 // LogAttrDTO is one key/value pair of a log line.
 type LogAttrDTO struct {
 	Key   string `json:"key"`

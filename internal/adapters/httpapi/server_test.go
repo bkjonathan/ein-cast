@@ -25,7 +25,7 @@ func baseURL(run app.RunningServer) string {
 
 func startServer(t *testing.T, ctx context.Context, lib Library, port int, hosts ...netip.Addr) app.RunningServer {
 	t.Helper()
-	srv := New(lib, "test", slog.New(slog.DiscardHandler))
+	srv := New(lib, &fakeAccess{}, "test", slog.New(slog.DiscardHandler))
 	run, err := srv.Start(ctx, app.ServeConfig{Port: port, Name: "Den", Hosts: hosts})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -78,7 +78,7 @@ func TestServer_PortInUseFailsAtStart(t *testing.T) {
 	first := startServer(t, context.Background(), &fakeLibrary{}, 0)
 	port := int(first.Addrs()[0].Port())
 
-	_, err := New(&fakeLibrary{}, "test", slog.New(slog.DiscardHandler)).
+	_, err := New(&fakeLibrary{}, &fakeAccess{}, "test", slog.New(slog.DiscardHandler)).
 		Start(context.Background(), app.ServeConfig{Port: port, Name: "x"})
 	if err == nil {
 		t.Fatal("second Start() on the same port succeeded")
@@ -159,7 +159,7 @@ func freePort(t *testing.T) int {
 func TestServer_RefusesUnspecifiedAddresses(t *testing.T) {
 	for _, host := range []string{"0.0.0.0", "::"} {
 		t.Run(host, func(t *testing.T) {
-			_, err := New(&fakeLibrary{}, "test", slog.New(slog.DiscardHandler)).
+			_, err := New(&fakeLibrary{}, &fakeAccess{}, "test", slog.New(slog.DiscardHandler)).
 				Start(context.Background(), app.ServeConfig{Port: 0, Hosts: []netip.Addr{netip.MustParseAddr(host)}})
 			if err == nil || !strings.Contains(err.Error(), "refusing") {
 				t.Fatalf("Start() error = %v, want a refusal to listen on every interface", err)
@@ -183,7 +183,7 @@ func TestServer_PartialBindRollsBack(t *testing.T) {
 	port := freePort(t)
 	unassignable := netip.MustParseAddr("203.0.113.77") // TEST-NET-3: not on any interface here
 
-	_, err := New(&fakeLibrary{}, "test", slog.New(slog.DiscardHandler)).
+	_, err := New(&fakeLibrary{}, &fakeAccess{}, "test", slog.New(slog.DiscardHandler)).
 		Start(context.Background(), app.ServeConfig{Port: port, Hosts: []netip.Addr{unassignable}})
 	if err == nil {
 		t.Fatal("Start() succeeded with an address this machine does not have")

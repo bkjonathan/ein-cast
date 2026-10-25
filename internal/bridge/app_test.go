@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"eincast/internal/app"
+	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/domain/media"
 	"eincast/internal/domain/server"
@@ -22,6 +23,46 @@ type fakeLibrary struct {
 	scanned    []string
 	summary    app.LibrarySummary
 	hasSummary bool
+
+	rescanErr  error
+	rescans    int
+	restoreErr error
+	restores   int
+	status     app.LibraryStatus
+}
+
+func (f *fakeLibrary) Rescan(context.Context) (app.LibrarySummary, error) {
+	f.rescans++
+	return f.summary, f.rescanErr
+}
+
+func (f *fakeLibrary) Restore(context.Context) error {
+	f.restores++
+	return f.restoreErr
+}
+
+func (f *fakeLibrary) Status() app.LibraryStatus { return f.status }
+
+type fakeSettings struct {
+	view      app.SettingsView
+	updateErr error
+	rotateErr error
+	gotInput  settings.Input
+	updates   int
+	rotations int
+}
+
+func (f *fakeSettings) Get() app.SettingsView { return f.view }
+
+func (f *fakeSettings) Update(in settings.Input) (app.SettingsView, error) {
+	f.updates++
+	f.gotInput = in
+	return f.view, f.updateErr
+}
+
+func (f *fakeSettings) RotateToken() (app.SettingsView, error) {
+	f.rotations++
+	return f.view, f.rotateErr
 }
 
 func (f *fakeLibrary) ScanFolder(_ context.Context, path string) (app.LibrarySummary, error) {
@@ -78,6 +119,7 @@ func newTestAppWithStreaming(lib *fakeLibrary) (*App, *fakeStreaming) {
 	a := New(Deps{
 		Info:      Info{Name: "EinCast", Version: "1.2.3"},
 		Library:   lib,
+		Settings:  &fakeSettings{view: app.SettingsView{Settings: settings.Default()}},
 		Streaming: st,
 		Logs:      newFakeLogs(),
 		Emitter:   NewEmitter(log),
@@ -152,9 +194,10 @@ func TestGetLibrarySummary(t *testing.T) {
 
 type appCtxKey struct{}
 
-func TestStartServer_UsesAppContextAndDefaults(t *testing.T) {
+func TestStartServer_UsesAppContextAndSavedSettings(t *testing.T) {
 	a, st := newTestAppWithStreaming(&fakeLibrary{})
 	a.ctx = context.WithValue(context.Background(), appCtxKey{}, "app")
+	a.settings = &fakeSettings{view: app.SettingsView{Settings: app.Settings{Port: 9123, Name: "Den"}}}
 
 	if err := a.StartServer(); err != nil {
 		t.Fatalf("StartServer() error = %v", err)
@@ -162,8 +205,8 @@ func TestStartServer_UsesAppContextAndDefaults(t *testing.T) {
 	if st.startCtx != a.ctx {
 		t.Error("server must live as long as the app context, not a per-call one")
 	}
-	if st.startCfg != streaming.NewConfig() {
-		t.Errorf("config = %+v, want the defaults", st.startCfg)
+	if want := streaming.NewConfig(streaming.WithPort(9123), streaming.WithName("Den")); st.startCfg != want {
+		t.Errorf("config = %+v, want %+v (the saved settings)", st.startCfg, want)
 	}
 }
 
@@ -342,5 +385,92 @@ func TestForwardLogs_ReturnsWhenFeedCloses(t *testing.T) {
 	case <-finished:
 	case <-time.After(time.Second):
 		t.Fatal("forwardLogs kept running after the feed closed")
+	}
+}
+
+func TestRescanLibrary(t *testing.T) {
+	boom := errors.New("a scan is already running")
+	lib := &fakeLibrary{}
+	a := newTestApp(lib)
+	if err := a.RescanLibrary(); err != nil || lib.rescans != 1 {
+		t.Fatalf("RescanLibrary() = %v after %d rescans", err, lib.rescans)
+	}
+	lib.rescanErr = boom
+	if err := a.RescanLibrary(); !errors.Is(err, boom) {
+		t.Errorf("error = %v, want %v", err, boom)
+	}
+}
+
+func TestGetLibraryStatus(t *testing.T) {
+	lib := &fakeLibrary{status: app.LibraryStatus{Scanning: false, Root: "/gone", Error: "That folder no longer exists."}}
+	got := newTestApp(lib).GetLibraryStatus()
+	want := LibraryStatusDTO{Root: "/gone", Error: "That folder no longer exists."}
+	if got != want {
+		t.Fatalf("GetLibraryStatus() = %+v, want %+v", got, want)
+	}
+}
+
+func TestRestoreLibrary(t *testing.T) {
+	t.Run("asks the library to reopen the remembered folder", func(t *testing.T) {
+		lib := &fakeLibrary{}
+		newTestApp(lib).restoreLibrary(context.Background())
+		if lib.restores != 1 {
+			t.Errorf("Restore called %d times, want 1", lib.restores)
+		}
+	})
+	t.Run("a failure is logged, not fatal", func(t *testing.T) {
+		lib := &fakeLibrary{restoreErr: errors.New("folder gone")}
+		newTestApp(lib).restoreLibrary(context.Background()) // must return normally
+	})
+}
+
+func TestGetSettings_ExposesTheTokenOnlyWhenOn(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fs := &fakeSettings{view: app.SettingsView{
+		Settings: app.Settings{Port: 9000, Name: "Den", RequireToken: true},
+		Token:    "tok", TokenPersisted: true,
+	}}
+	a.settings = fs
+
+	want := SettingsDTO{Port: 9000, Name: "Den", RequireToken: true, AccessToken: "tok", TokenPersisted: true}
+	if got := a.GetSettings(); got != want {
+		t.Fatalf("GetSettings() = %+v, want %+v", got, want)
+	}
+
+	// The DTO has no field for the library folder: it is not a setting the form edits.
+	fs.view = app.SettingsView{Settings: app.Settings{Port: 9000, Name: "Den", LibraryRoot: "/private/path"}}
+	if got := a.GetSettings(); got.AccessToken != "" || got.RequireToken {
+		t.Errorf("GetSettings() = %+v, want no token when it is off", got)
+	}
+}
+
+func TestUpdateSettings_PassesTheFormValuesAndReturnsValidationErrors(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fs := &fakeSettings{}
+	a.settings = fs
+
+	if err := a.UpdateSettings(SettingsInputDTO{Port: 9100, Name: "Den", RequireToken: true}); err != nil {
+		t.Fatal(err)
+	}
+	if fs.gotInput != (settings.Input{Port: 9100, Name: "Den", RequireToken: true}) {
+		t.Errorf("settings received %+v", fs.gotInput)
+	}
+
+	fs.updateErr = errors.New("port must be between 1024 and 65535")
+	if err := a.UpdateSettings(SettingsInputDTO{Port: 80}); err == nil || err.Error() != fs.updateErr.Error() {
+		t.Errorf("error = %v, want the validation message passed through unchanged", err)
+	}
+}
+
+func TestRotateAccessToken(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fs := &fakeSettings{}
+	a.settings = fs
+	if err := a.RotateAccessToken(); err != nil || fs.rotations != 1 {
+		t.Fatalf("RotateAccessToken() = %v after %d rotations", err, fs.rotations)
+	}
+	fs.rotateErr = settings.ErrTokenOff
+	if err := a.RotateAccessToken(); !errors.Is(err, settings.ErrTokenOff) {
+		t.Errorf("error = %v", err)
 	}
 }

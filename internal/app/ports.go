@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/netip"
 	"time"
@@ -109,4 +110,49 @@ type NetInfo interface {
 	// interfaces (not loopback, VPN, container or virtual adapters), most
 	// likely home network first.
 	LANAddrs() ([]netip.Addr, error)
+}
+
+// Settings are the user's persisted preferences.
+type Settings struct {
+	// Port the server listens on.
+	Port int
+	// Name is the server's display name.
+	Name string
+	// LibraryRoot is the folder chosen last time, rescanned at startup.
+	LibraryRoot string
+	// RequireToken turns on the access token: devices must present it.
+	RequireToken bool
+}
+
+// ErrNoSettings means nothing has been saved yet (first run). It is not a failure.
+var ErrNoSettings = errors.New("no saved settings")
+
+// SettingsStore persists Settings between runs. Secrets never go through it.
+type SettingsStore interface {
+	// Load returns ErrNoSettings (possibly wrapped) when nothing is saved. Any
+	// other error means the saved data could not be used.
+	Load() (Settings, error)
+	Save(Settings) error
+}
+
+// ErrSecretNotFound means the secret does not exist. It is not a failure.
+var ErrSecretNotFound = errors.New("secret not found")
+
+// SecretStore keeps secrets (access tokens, later tunnel tokens) out of the
+// settings file, in the operating system's credential store.
+type SecretStore interface {
+	// Get returns ErrSecretNotFound (possibly wrapped) when the key is absent.
+	// Any other error means the store itself is unavailable.
+	Get(key string) (string, error)
+	Set(key, value string) error
+	// Delete removes the key; deleting an absent key is not an error.
+	Delete(key string) error
+}
+
+// LibraryMemory remembers which folder the user chose, so the next launch can
+// open it without asking again.
+type LibraryMemory interface {
+	RememberRoot(root string) error
+	// LastRoot is the remembered folder, or "" if none.
+	LastRoot() string
 }

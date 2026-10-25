@@ -10,6 +10,10 @@ export function ChooseFolder() {
   return window['go']['bridge']['App']['ChooseFolder']();
 }
 
+export function GetLibraryStatus() {
+  return window['go']['bridge']['App']['GetLibraryStatus']();
+}
+
 export function GetLibrarySummary() {
   return window['go']['bridge']['App']['GetLibrarySummary']();
 }
@@ -22,10 +26,26 @@ export function GetServerState() {
   return window['go']['bridge']['App']['GetServerState']();
 }
 
+export function GetSettings() {
+  return window['go']['bridge']['App']['GetSettings']();
+}
+
+export function RescanLibrary() {
+  return window['go']['bridge']['App']['RescanLibrary']();
+}
+
+export function RotateAccessToken() {
+  return window['go']['bridge']['App']['RotateAccessToken']();
+}
+
 export function StartServer() {
   return window['go']['bridge']['App']['StartServer']();
 }
 
 export function StopServer() {
   return window['go']['bridge']['App']['StopServer']();
+}
+
+export function UpdateSettings(arg1) {
+  return window['go']['bridge']['App']['UpdateSettings'](arg1);
 }

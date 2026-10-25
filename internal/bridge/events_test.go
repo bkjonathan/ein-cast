@@ -91,3 +91,26 @@ func TestEmitLog_SilentBeforeStartup(t *testing.T) {
 		t.Errorf("emitLog logged %q; it must never log (feedback loop)", logged.String())
 	}
 }
+
+func TestEmitter_LibraryStatusAndSettings(t *testing.T) {
+	var got []emitted
+	e := newTestEmitter(&got)
+	e.bind(context.Background())
+
+	e.Publish(app.LibraryStatusChanged{Status: app.LibraryStatus{Root: "/m", Error: "gone"}})
+	e.Publish(app.SettingsChanged{View: app.SettingsView{
+		Settings: app.Settings{Port: 9000, Name: "Den", RequireToken: true, LibraryRoot: "/private"},
+		Token:    "tok", TokenPersisted: true,
+	}})
+
+	if len(got) != 2 || got[0].name != "library:status" || got[1].name != "settings:changed" {
+		t.Fatalf("emitted = %+v", got)
+	}
+	if dto, _ := got[0].data[0].(LibraryStatusDTO); dto != (LibraryStatusDTO{Root: "/m", Error: "gone"}) {
+		t.Errorf("status payload = %+v", dto)
+	}
+	want := SettingsDTO{Port: 9000, Name: "Den", RequireToken: true, AccessToken: "tok", TokenPersisted: true}
+	if dto, _ := got[1].data[0].(SettingsDTO); dto != want {
+		t.Errorf("settings payload = %+v, want %+v (and no library path)", dto, want)
+	}
+}
