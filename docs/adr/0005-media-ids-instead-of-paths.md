@@ -9,10 +9,12 @@ directory layout.
 ## Decision
 Clients only ever see an opaque ID: `/stream/{id}`.
 
-- `media.NewID(relPath)` = first 8 bytes (16 hex chars) of SHA-256 over the
-  slash-separated path *relative to the library root*.
+- `media.NewID(libraryID, relPath)` = first 8 bytes (16 hex chars) of SHA-256 over
+  the library's ID and the slash-separated path *relative to the library root*
+  (the library was added to the input by [ADR 0021](0021-multiple-libraries.md);
+  until then it was the relative path alone).
 - The repository maps ID → `media.Item`, which holds the absolute path. The
-  absolute path never leaves the server (`LibrarySummaryDTO` carries only the
+  absolute path never leaves the server (`LibraryStateDTO` carries only the
   root folder for display).
 - An unknown ID, including `../../etc/passwd`, is simply a missing map key →
   `media.ErrNotFound` → 404. There is no path parsing to get wrong.
@@ -27,8 +29,8 @@ Clients only ever see an opaque ID: `/stream/{id}`.
 - Renaming or moving a file changes its ID. Acceptable: it is a different path.
 - 64 bits makes accidental collisions negligible for a home library. If one
   ever occurred, the later item would shadow the earlier one in the repo.
-- With multiple libraries (v1.0), the same relative path in two roots would
-  collide; the hash input will need a library identifier then (see ROADMAP).
+- With multiple libraries (v1.0) the same relative path in two roots would have
+  collided; the library's ID is therefore part of the hash input (ADR 0021).
 
 ## Alternatives rejected
 - **Path in the URL, sanitized**: relies on getting sanitization right in every

@@ -18,16 +18,22 @@ const idBytes = 8
 // machines and leaks nothing about the host's directory layout.
 type ID string
 
-// NewID derives the stable ID for a slash-separated path relative to the
-// library root.
-func NewID(relPath string) ID {
-	sum := sha256.Sum256([]byte(relPath))
+// NewID derives the stable ID for a slash-separated path relative to the root of
+// library lib. The library is part of the input, so the same relative path in two
+// libraries is two items.
+func NewID(lib LibraryID, relPath string) ID {
+	sum := sha256.Sum256([]byte(string(lib) + "|" + relPath))
 	return ID(hex.EncodeToString(sum[:idBytes]))
 }
 
 // Item is one servable file in the library.
 type Item struct {
 	ID ID
+	// LibraryID is the library the file belongs to.
+	LibraryID LibraryID
+	// Root is the absolute folder of that library. Like Path it stays on the
+	// server; whoever opens Path checks that it is still inside Root.
+	Root string
 	// Name is the file name including its extension.
 	Name string
 	// RelPath is slash-separated and relative to the library root.
@@ -38,4 +44,7 @@ type Item struct {
 	Kind    Kind
 	Size    int64
 	ModTime time.Time
+	// Subtitles are the sidecar subtitle files found next to a video, in a
+	// stable order. Clients refer to one by its position in this list.
+	Subtitles []Subtitle
 }

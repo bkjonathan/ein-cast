@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const go = vi.hoisted(() => ({
   AppInfo: vi.fn(),
   ChooseFolder: vi.fn(),
-  GetLibrarySummary: vi.fn(),
+  ListLibraries: vi.fn(),
+  RemoveLibrary: vi.fn(),
+  RenameLibrary: vi.fn(),
+  RescanAllLibraries: vi.fn(),
   GetServerState: vi.fn(),
   GetLogHistory: vi.fn(),
-  GetLibraryStatus: vi.fn(),
   ListLibrary: vi.fn(),
   GetSettings: vi.fn(),
   RescanLibrary: vi.fn(),
@@ -46,8 +48,10 @@ import {
   getThumbnail,
   thumbnailsAvailable,
   getAppInfo,
-  getLibrarySummary,
-  getLibraryStatus,
+  listLibraries,
+  removeLibrary,
+  renameLibrary,
+  rescanAllLibraries,
   listLibrary,
   getLogHistory,
   getServerState,
@@ -72,25 +76,26 @@ describe("getAppInfo", () => {
   });
 });
 
-describe("getLibrarySummary", () => {
-  it("returns null when Go has no library yet", async () => {
-    go.GetLibrarySummary.mockResolvedValue(null);
-    await expect(getLibrarySummary()).resolves.toBeNull();
+describe("listLibraries", () => {
+  it("is an empty list before any library is added", async () => {
+    go.ListLibraries.mockResolvedValue([]);
+    await expect(listLibraries()).resolves.toEqual([]);
   });
 
-  it("maps a library summary", async () => {
-    go.GetLibrarySummary.mockResolvedValue({
-      root: "/m",
-      total: 3,
-      totalSize: 99,
-      counts: { video: 2, audio: 0, image: 1 },
-    });
-    await expect(getLibrarySummary()).resolves.toStrictEqual({
-      root: "/m",
-      total: 3,
-      totalSize: 99,
-      counts: { video: 2, audio: 0, image: 1 },
-    });
+  it("maps every library and copies the counts", async () => {
+    const dto = {
+      id: "f1", name: "Films", root: "/m/films", total: 3, totalSize: 99,
+      counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true, extra: 1,
+    };
+    go.ListLibraries.mockResolvedValue([dto]);
+    const got = await listLibraries();
+    expect(got).toStrictEqual([
+      {
+        id: "f1", name: "Films", root: "/m/films", total: 3, totalSize: 99,
+        counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true,
+      },
+    ]);
+    expect(got[0]?.counts).not.toBe(dto.counts);
   });
 });
 
@@ -125,7 +130,7 @@ describe("server commands", () => {
       name: "Den",
       port: 8765,
       localUrl: "http://127.0.0.1:8765",
-      lanUrls: ["http://192.168.1.20:8765"],
+      lanUrls: ["http://192.168.1.20:8765"], nameUrls: [], discovery: [],
       error: "",
     });
     await expect(getServerState()).resolves.toStrictEqual({
@@ -133,13 +138,13 @@ describe("server commands", () => {
       name: "Den",
       port: 8765,
       localUrl: "http://127.0.0.1:8765",
-      lanUrls: ["http://192.168.1.20:8765"],
+      lanUrls: ["http://192.168.1.20:8765"], nameUrls: [], discovery: [],
       error: "",
     });
   });
 
   it("getServerState rejects a state the frontend does not know", async () => {
-    go.GetServerState.mockResolvedValue({ state: "paused", name: "", port: 0, localUrl: "", lanUrls: [], error: "" });
+    go.GetServerState.mockResolvedValue({ state: "paused", name: "", port: 0, localUrl: "", lanUrls: [], nameUrls: [], discovery: [], error: "" });
     await expect(getServerState()).rejects.toThrow(/unknown server state/);
   });
 });
@@ -165,10 +170,10 @@ describe("getLogHistory", () => {
 describe("listLibrary", () => {
   it("maps every item and narrows the kind", async () => {
     go.ListLibrary.mockResolvedValue([
-      { id: "a1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9, extra: 1 },
+      { id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9, extra: 1 },
     ]);
     await expect(listLibrary()).resolves.toStrictEqual([
-      { id: "a1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9 },
+      { id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9 },
     ]);
   });
 
@@ -178,42 +183,53 @@ describe("listLibrary", () => {
   });
 });
 
-describe("library status and rescan", () => {
-  it("getLibraryStatus maps the DTO", async () => {
-    go.GetLibraryStatus.mockResolvedValue({ scanning: false, root: "/gone", error: "That folder no longer exists.", watching: true, extra: 1 });
-    await expect(getLibraryStatus()).resolves.toStrictEqual({
-      scanning: false,
-      root: "/gone",
-      error: "That folder no longer exists.",
-      watching: true,
-    });
+describe("library commands", () => {
+  it("rescanLibrary sends the id, resolves with nothing and propagates a refusal", async () => {
+    go.RescanLibrary.mockResolvedValueOnce(undefined);
+    await expect(rescanLibrary("f1")).resolves.toBeUndefined();
+    expect(go.RescanLibrary).toHaveBeenCalledWith("f1");
+    go.RescanLibrary.mockRejectedValueOnce("that library is already being scanned");
+    await expect(rescanLibrary("f1")).rejects.toBe("that library is already being scanned");
   });
 
-  it("rescanLibrary resolves with nothing and propagates a refusal", async () => {
-    go.RescanLibrary.mockResolvedValueOnce(undefined);
-    await expect(rescanLibrary()).resolves.toBeUndefined();
-    go.RescanLibrary.mockRejectedValueOnce("a scan is already running");
-    await expect(rescanLibrary()).rejects.toBe("a scan is already running");
+  it("rescanAllLibraries resolves with nothing and propagates a failure", async () => {
+    go.RescanAllLibraries.mockResolvedValueOnce(undefined);
+    await expect(rescanAllLibraries()).resolves.toBeUndefined();
+    go.RescanAllLibraries.mockRejectedValueOnce("one library failed");
+    await expect(rescanAllLibraries()).rejects.toBe("one library failed");
+  });
+
+  it("removeLibrary and renameLibrary pass their arguments through", async () => {
+    go.RemoveLibrary.mockResolvedValueOnce(undefined);
+    await expect(removeLibrary("f1")).resolves.toBeUndefined();
+    expect(go.RemoveLibrary).toHaveBeenCalledWith("f1");
+
+    go.RenameLibrary.mockResolvedValueOnce(undefined);
+    await expect(renameLibrary("f1", "Movie night")).resolves.toBeUndefined();
+    expect(go.RenameLibrary).toHaveBeenCalledWith("f1", "Movie night");
+
+    go.RenameLibrary.mockRejectedValueOnce("a library name must be 1 to 64 characters");
+    await expect(renameLibrary("f1", "")).rejects.toMatch(/1 to 64/);
   });
 });
 
 describe("settings", () => {
   it("getSettings maps the DTO", async () => {
     go.GetSettings.mockResolvedValue({
-      port: 9000, name: "Den", requireToken: true, accessToken: "tok", tokenPersisted: true, junk: 1,
+      port: 9000, name: "Den", requireToken: true, dlna: false, accessToken: "tok", tokenPersisted: true, junk: 1,
     });
     await expect(getSettings()).resolves.toStrictEqual({
-      port: 9000, name: "Den", requireToken: true, accessToken: "tok", tokenPersisted: true,
+      port: 9000, name: "Den", requireToken: true, dlna: false, accessToken: "tok", tokenPersisted: true,
     });
   });
 
   it("updateSettings sends the three editable fields and surfaces Go's validation message", async () => {
     go.UpdateSettings.mockResolvedValueOnce(undefined);
-    await updateSettings({ port: 9100, name: "Den", requireToken: false });
-    expect(go.UpdateSettings).toHaveBeenCalledWith({ port: 9100, name: "Den", requireToken: false });
+    await updateSettings({ port: 9100, name: "Den", requireToken: false, dlna: false });
+    expect(go.UpdateSettings).toHaveBeenCalledWith({ port: 9100, name: "Den", requireToken: false, dlna: false });
 
     go.UpdateSettings.mockRejectedValueOnce("port must be between 1024 and 65535");
-    await expect(updateSettings({ port: 80, name: "Den", requireToken: false })).rejects.toMatch(/between 1024/);
+    await expect(updateSettings({ port: 80, name: "Den", requireToken: false, dlna: false })).rejects.toMatch(/between 1024/);
   });
 
   it("rotateAccessToken resolves with nothing", async () => {

@@ -10,10 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"eincast/internal/app"
 	"eincast/internal/app/streaming"
+	"eincast/internal/domain/media"
 )
 
 // tokenKey is where the access token lives in the SecretStore.
@@ -21,6 +23,11 @@ const tokenKey = "access-token"
 
 // Ports below 1024 need elevated privileges on most systems, so are not offered.
 const minPort, maxPort = 1024, 65535
+
+// ErrDLNAWithToken is returned when asked to turn on Smart TV discovery together
+// with the access token. A TV cannot present the token, so the two cannot both
+// be on: the user's choice is explained rather than silently resolved.
+var ErrDLNAWithToken = errors.New("smart TV discovery can't be on while the access token is: TVs can't send the token, so turn one of them off")
 
 // ErrTokenOff is returned when asked to rotate a token that is switched off.
 var ErrTokenOff = errors.New("access token is turned off")
@@ -36,6 +43,7 @@ type Input struct {
 	Port         int
 	Name         string
 	RequireToken bool
+	DLNA         bool
 }
 
 // Service owns the settings and the access token. It implements
@@ -105,6 +113,11 @@ func (s *Service) sanitize(in app.Settings) app.Settings {
 			in.Name = def.Name
 		}
 	}
+	if in.DLNA && in.RequireToken {
+		// A hand-edited file asking for both: keep the protection, drop the TV access.
+		s.log.Warn("saved settings turn on both the access token and Smart TV discovery; keeping the token only")
+		in.DLNA = false
+	}
 	return in
 }
 
@@ -122,10 +135,13 @@ func (s *Service) Update(in Input) (app.SettingsView, error) {
 	if err := validate(in.Port, in.Name); err != nil {
 		return app.SettingsView{}, err
 	}
+	if in.DLNA && in.RequireToken {
+		return app.SettingsView{}, ErrDLNAWithToken
+	}
 
 	s.mu.Lock()
 	next := s.cur
-	next.Port, next.Name, next.RequireToken = in.Port, in.Name, in.RequireToken
+	next.Port, next.Name, next.RequireToken, next.DLNA = in.Port, in.Name, in.RequireToken, in.DLNA
 	if err := s.store.Save(next); err != nil {
 		s.mu.Unlock()
 		return app.SettingsView{}, fmt.Errorf("save settings: %w", err)
@@ -164,27 +180,26 @@ func (s *Service) RotateToken() (app.SettingsView, error) {
 	return view, nil
 }
 
-// RememberRoot records the library folder. It implements app.LibraryMemory.
-func (s *Service) RememberRoot(root string) error {
+// Libraries returns the remembered library folders in the order they were added.
+// It implements app.LibraryMemory.
+func (s *Service) Libraries() []media.Library {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Clone(s.cur.Libraries)
+}
+
+// SaveLibraries replaces the remembered library folders. It implements
+// app.LibraryMemory.
+func (s *Service) SaveLibraries(libs []media.Library) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cur.LibraryRoot == root {
-		return nil
-	}
 	next := s.cur
-	next.LibraryRoot = root
+	next.Libraries = slices.Clone(libs)
 	if err := s.store.Save(next); err != nil {
-		return fmt.Errorf("save library folder: %w", err)
+		return fmt.Errorf("save library folders: %w", err)
 	}
 	s.cur = next
 	return nil
-}
-
-// LastRoot is the remembered library folder, or "".
-func (s *Service) LastRoot() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.cur.LibraryRoot
 }
 
 // Required reports whether requests must carry the access token.

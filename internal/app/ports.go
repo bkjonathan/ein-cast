@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/netip"
 	"time"
@@ -10,11 +11,12 @@ import (
 	"eincast/internal/domain/media"
 )
 
-// Scanner walks a folder and reports the media files in it.
+// Scanner walks a library's folder and reports the media files in it.
 type Scanner interface {
-	// Scan returns every servable file under root. It must honour ctx
-	// cancellation, since walking a large library can take a while.
-	Scan(ctx context.Context, root string) ([]media.Item, error)
+	// Scan returns every servable file under lib.Root, stamped with the library's
+	// ID and root. It must honour ctx cancellation, since walking a large library
+	// can take a while.
+	Scan(ctx context.Context, lib media.Library) ([]media.Item, error)
 }
 
 // FolderWatcher tells the app that something under a folder may have changed,
@@ -68,14 +70,66 @@ type ThumbnailCache interface {
 	Put(key string, data []byte) error
 }
 
-// LibraryRepo holds the current library. It is a snapshot store: a scan
-// replaces the contents wholesale.
+// ErrTranscodingUnavailable means this computer cannot convert video, because
+// the tool that does it (ffmpeg) is not installed.
+var ErrTranscodingUnavailable = errors.New("converting video needs ffmpeg, which was not found")
+
+// ErrNotConvertible means ffmpeg could not turn a file into a playable stream.
+var ErrNotConvertible = errors.New("this video could not be converted")
+
+// TranscodeRequest asks for one video to be converted for streaming.
+type TranscodeRequest struct {
+	// Root is the library folder; Path must resolve inside it.
+	Root string
+	// Path is the video file on disk.
+	Path string
+}
+
+// HLSStream is one video being converted into an HLS stream (a playlist plus
+// short segments) that Safari, iOS and most TVs play natively. The output
+// appears as ffmpeg works; the playlist grows until the whole video is done.
+type HLSStream interface {
+	// Ready is closed once playback can start: the playlist and its first
+	// segments exist, or the conversion has finished. It stays open if the
+	// conversion fails first.
+	Ready() <-chan struct{}
+	// Done is closed when ffmpeg is no longer running, whether it finished,
+	// failed or was stopped.
+	Done() <-chan struct{}
+	// Err explains why the conversion ended badly; nil means it finished or was
+	// stopped on request. Only valid after Done is closed.
+	Err() error
+	// Open opens one output file by name: "index.m3u8" or a "seg00000.ts" segment.
+	// Any other name is refused. It fails with fs.ErrNotExist when the file is
+	// not there (yet, or any more).
+	Open(name string) (io.ReadSeekCloser, error)
+	// Stop ends the conversion and deletes its files. Safe to call more than once.
+	Stop()
+}
+
+// Transcoder starts conversions.
+type Transcoder interface {
+	// Available reports whether conversions can run on this computer.
+	Available() bool
+	// Start begins converting and returns at once; the work continues in the
+	// background until the stream ends or is stopped. ctx governs only this call,
+	// not the conversion.
+	Start(ctx context.Context, req TranscodeRequest) (HLSStream, error)
+}
+
+// LibraryRepo holds the items of every library. It is a snapshot store: a scan
+// replaces one library's items wholesale.
 type LibraryRepo interface {
-	// Replace swaps in a new library atomically.
-	Replace(root string, items []media.Item)
-	// Root is the folder the current library was scanned from, or "" if none.
-	Root() string
-	// List returns the items in scan order. The slice is the caller's to keep.
+	// Replace swaps in a library's items atomically, adding the library if it
+	// was not there.
+	Replace(id media.LibraryID, items []media.Item)
+	// Remove forgets a library and its items. Removing an unknown one is not an
+	// error.
+	Remove(id media.LibraryID)
+	// Items returns one library's items in scan order. The slice is the caller's.
+	Items(id media.LibraryID) []media.Item
+	// List returns every item: libraries in the order they were first added to
+	// the repository, each in scan order. The slice is the caller's to keep.
 	List() []media.Item
 	// Get returns media.ErrNotFound (wrapped) for an unknown ID.
 	Get(id media.ID) (media.Item, error)
@@ -95,11 +149,44 @@ type ServeConfig struct {
 	Port int
 	// Name is the human-readable server name.
 	Name string
+	// DLNA turns on the Smart TV (DLNA/UPnP) pages, served under /dlna/. They
+	// are open to the home network by nature, so the caller must not enable them
+	// while the access token is required.
+	DLNA bool
 	// Hosts are extra local addresses to listen on. Loopback is always bound in
 	// addition, because tunnels and the local UI connect through it. A server
 	// must refuse unspecified addresses (0.0.0.0, ::): listening on every
 	// interface would also expose VPN and container networks.
 	Hosts []netip.Addr
+}
+
+// Announcement is what a running server tells the local network about itself.
+type Announcement struct {
+	// Name is the display name ("Living room").
+	Name string
+	Port int
+	// Addrs are the LAN addresses the server listens on, never loopback.
+	Addrs []netip.Addr
+	// DLNA says whether Smart TV discovery is wanted.
+	DLNA bool
+}
+
+// ErrNotAnnounced is returned by Announce when this kind of discovery is not
+// wanted for this run. It is a choice, not a failure, and is not logged as one.
+var ErrNotAnnounced = errors.New("this kind of discovery is not wanted")
+
+// Discovery makes a running server findable on the local network without
+// anyone typing its address: by name (mDNS, "eincast.local") or by TVs (SSDP).
+// One implementation per protocol.
+type Discovery interface {
+	// Name is a short label for logs and the UI ("mdns", "dlna").
+	Name() string
+	// Announce makes the server findable and returns once it is. stop withdraws
+	// it again and is safe to call more than once. urls are friendlier addresses
+	// the announcement gives the server, such as http://eincast.local:8765, or
+	// none. A failure here never stops the server: the address and QR code still
+	// work.
+	Announce(ctx context.Context, a Announcement) (stop func(), urls []string, err error)
 }
 
 // WebServer starts the HTTP interface that devices connect to.
@@ -184,10 +271,14 @@ type Settings struct {
 	Port int
 	// Name is the server's display name.
 	Name string
-	// LibraryRoot is the folder chosen last time, rescanned at startup.
-	LibraryRoot string
+	// Libraries are the folders the person added, rescanned at startup.
+	Libraries []media.Library
 	// RequireToken turns on the access token: devices must present it.
 	RequireToken bool
+	// DLNA turns on Smart TV discovery. It is off by default and cannot be on
+	// together with RequireToken: a TV cannot present a token, so the server
+	// would either lock it out or show the library to the whole network.
+	DLNA bool
 }
 
 // ErrNoSettings means nothing has been saved yet (first run). It is not a failure.
@@ -215,10 +306,11 @@ type SecretStore interface {
 	Delete(key string) error
 }
 
-// LibraryMemory remembers which folder the user chose, so the next launch can
-// open it without asking again.
+// LibraryMemory remembers which folders the person added, so the next launch
+// can open them without asking again.
 type LibraryMemory interface {
-	RememberRoot(root string) error
-	// LastRoot is the remembered folder, or "" if none.
-	LastRoot() string
+	// Libraries returns the remembered libraries in the order they were added.
+	Libraries() []media.Library
+	// SaveLibraries replaces the remembered list.
+	SaveLibraries([]media.Library) error
 }

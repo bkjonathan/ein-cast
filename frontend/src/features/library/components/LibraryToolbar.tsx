@@ -1,9 +1,10 @@
 import { Search } from "lucide-react";
 import { useMemo } from "react";
-import type { LibraryItem } from "@/shared/bridge";
+import type { LibraryItem, LibraryState } from "@/shared/bridge";
 import { cn } from "@/shared/lib/cn";
 import { GlassToolbar } from "@/shared/ui/glass";
 import { Input } from "@/shared/ui/input";
+import { effectiveLibrary } from "../derive";
 import { countByKind, sortLabels, type KindFilter, type SortKey } from "../filter";
 import { useLibraryStore } from "../store";
 
@@ -17,8 +18,20 @@ const chips: readonly { key: KindFilter; label: string }[] = [
 const sortKeys = Object.keys(sortLabels) as SortKey[];
 
 /** Kind chips (with counts), search box and sort order. */
-export function LibraryToolbar({ items, shown }: { items: LibraryItem[]; shown: number }) {
+export function LibraryToolbar({
+  libraries,
+  items,
+  shown,
+}: {
+  libraries: LibraryState[];
+  /** The files of the chosen library; the chips count these. */
+  items: LibraryItem[];
+  shown: number;
+}) {
   const kind = useLibraryStore((s) => s.kind);
+  const chosen = useLibraryStore((s) => s.library);
+  const setLibrary = useLibraryStore((s) => s.setLibrary);
+  const library = effectiveLibrary(chosen, libraries);
   const query = useLibraryStore((s) => s.query);
   const sort = useLibraryStore((s) => s.sort);
   const setKind = useLibraryStore((s) => s.setKind);
@@ -28,6 +41,23 @@ export function LibraryToolbar({ items, shown }: { items: LibraryItem[]; shown: 
 
   return (
     <GlassToolbar className="flex-wrap">
+      {libraries.length > 1 && (
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          Library
+          <select
+            value={library}
+            onChange={(e) => setLibrary(e.target.value)}
+            className="app-no-drag glass h-8 max-w-40 rounded-glass-sm bg-transparent px-2 text-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <option value="all">All</option>
+            {libraries.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="flex gap-1" role="group" aria-label="Kind of file">
         {chips.map(({ key, label }) => (
           <button

@@ -1,16 +1,17 @@
 // A bridge module: allowed to import ../wailsjs/runtime.
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import {
+  toLibraryState,
   toLogLine,
   toRemoteStatus,
   toServerStatus,
+  type RawLibraryState,
   type RawLogLine,
   type RawRemoteStatus,
   type RawServerStatus,
 } from "./mappers";
 import type {
-  LibraryStatus,
-  LibrarySummary,
+  LibraryState,
   LogLine,
   RemoteStatus,
   ServerStatus,
@@ -19,10 +20,10 @@ import type {
 
 /** Every event Go emits, with its payload. Mirrors internal/bridge/events.go. */
 export interface EventMap {
-  "library:scanned": LibrarySummary;
+  "library:scanned": LibraryState[];
   "server:state": ServerStatus;
   "log:line": LogLine;
-  "library:status": LibraryStatus;
+  "library:status": LibraryState[];
   "settings:changed": Settings;
   "remote:status": RemoteStatus;
 }
@@ -33,10 +34,10 @@ export type EventName = keyof EventMap;
 // into the frontend type; Go is the only producer, so plain DTOs are asserted
 // and anything with a narrowed field goes through a checked mapper.
 const decoders: { [K in EventName]: (raw: unknown) => EventMap[K] } = {
-  "library:scanned": (raw) => raw as LibrarySummary,
+  "library:scanned": (raw) => (raw as RawLibraryState[]).map(toLibraryState),
   "server:state": (raw) => toServerStatus(raw as RawServerStatus),
   "log:line": (raw) => toLogLine(raw as RawLogLine),
-  "library:status": (raw) => raw as LibraryStatus,
+  "library:status": (raw) => (raw as RawLibraryState[]).map(toLibraryState),
   "settings:changed": (raw) => raw as Settings,
   "remote:status": (raw) => toRemoteStatus(raw as RawRemoteStatus),
 };

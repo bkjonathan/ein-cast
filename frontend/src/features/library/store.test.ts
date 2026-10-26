@@ -1,22 +1,28 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { LibraryStatus, LibrarySummary } from "@/shared/bridge";
-import { idleStatus, useLibraryStore } from "./store";
+import type { LibraryState } from "@/shared/bridge";
+import { useLibraryStore } from "./store";
 
-const summary = (root: string): LibrarySummary => ({
-  root,
+const lib = (id: string, over: Partial<LibraryState> = {}): LibraryState => ({
+  id,
+  name: id,
+  root: `/media/${id}`,
   total: 1,
   totalSize: 10,
   counts: { video: 1, audio: 0, image: 0 },
+  scanning: false,
+  error: "",
+  watching: false,
+  ...over,
 });
-const status = (over: Partial<LibraryStatus> = {}): LibraryStatus => ({ ...idleStatus, ...over });
 
 beforeEach(() =>
   useLibraryStore.setState({
-    summary: null,
-    status: null,
-    items: [],
+    libraries: [],
     hydrated: false,
+    heard: false,
+    items: [],
     kind: "all",
+    library: "all",
     query: "",
     sort: "name",
   }),
@@ -24,57 +30,56 @@ beforeEach(() =>
 
 describe("library store", () => {
   it("starts empty and not hydrated", () => {
-    expect(useLibraryStore.getState()).toMatchObject({ summary: null, status: null, hydrated: false });
+    expect(useLibraryStore.getState()).toMatchObject({ libraries: [], hydrated: false, heard: false });
   });
 
-  it("hydrate(null, status) marks hydrated without inventing a library", () => {
-    useLibraryStore.getState().hydrate(null, status());
-    expect(useLibraryStore.getState()).toMatchObject({ summary: null, hydrated: true });
+  it("hydrate([]) marks hydrated without inventing a library", () => {
+    useLibraryStore.getState().hydrate([]);
+    expect(useLibraryStore.getState()).toMatchObject({ libraries: [], hydrated: true });
   });
 
-  it("hydrate adopts Go's existing library and status", () => {
-    useLibraryStore.getState().hydrate(summary("/a"), status({ root: "/a" }));
-    expect(useLibraryStore.getState().summary?.root).toBe("/a");
-    expect(useLibraryStore.getState().status?.root).toBe("/a");
+  it("hydrate adopts Go's libraries", () => {
+    useLibraryStore.getState().hydrate([lib("a"), lib("b")]);
+    expect(useLibraryStore.getState().libraries.map((l) => l.id)).toEqual(["a", "b"]);
   });
 
-  it("applyScanned replaces the library", () => {
-    useLibraryStore.getState().applyScanned(summary("/a"));
-    useLibraryStore.getState().applyScanned(summary("/b"));
-    expect(useLibraryStore.getState().summary?.root).toBe("/b");
+  it("apply replaces the whole list: a removed library disappears", () => {
+    useLibraryStore.getState().apply([lib("a"), lib("b")]);
+    useLibraryStore.getState().apply([lib("b")]);
+    expect(useLibraryStore.getState().libraries.map((l) => l.id)).toEqual(["b"]);
   });
 
-  it("events that beat the startup queries are not overwritten by them", () => {
-    useLibraryStore.getState().applyScanned(summary("/new"));
-    useLibraryStore.getState().applyStatus(status({ root: "/new" }));
-    useLibraryStore.getState().hydrate(summary("/stale"), status({ scanning: true, root: "/stale" }));
-
-    expect(useLibraryStore.getState().summary?.root).toBe("/new");
-    expect(useLibraryStore.getState().status).toEqual(status({ root: "/new" }));
+  it("apply also hydrates: an event is an answer", () => {
+    useLibraryStore.getState().apply([lib("a")]);
+    expect(useLibraryStore.getState()).toMatchObject({ hydrated: true, heard: true });
   });
 
-  it("keeps a failed restore's reason, so the first-run screen can show it", () => {
-    useLibraryStore.getState().hydrate(null, status({ root: "/gone", error: "That folder no longer exists." }));
-    expect(useLibraryStore.getState().status?.error).toMatch(/no longer exists/);
-    expect(useLibraryStore.getState().summary).toBeNull();
+  it("events that beat the startup query are not overwritten by it", () => {
+    useLibraryStore.getState().apply([lib("new", { scanning: true })]);
+    useLibraryStore.getState().hydrate([lib("stale")]);
+
+    expect(useLibraryStore.getState().libraries.map((l) => l.id)).toEqual(["new"]);
+    expect(useLibraryStore.getState().hydrated).toBe(true);
   });
 
-  it("a later status event clears the error", () => {
-    useLibraryStore.getState().applyStatus(status({ error: "boom" }));
-    useLibraryStore.getState().applyStatus(status({ scanning: true }));
-    expect(useLibraryStore.getState().status).toEqual(status({ scanning: true }));
+  it("a later event clears an earlier error", () => {
+    useLibraryStore.getState().apply([lib("a", { error: "That folder no longer exists." })]);
+    useLibraryStore.getState().apply([lib("a", { scanning: true })]);
+    expect(useLibraryStore.getState().libraries[0]).toMatchObject({ error: "", scanning: true });
   });
 
-  it("keeps the file list and the browsing choices apart from Go's summary", () => {
-    const item = { id: "a", name: "a.mp4", relPath: "a.mp4", kind: "video" as const, size: 1, modTime: 1 };
+  it("keeps the file list and the browsing choices apart from Go's libraries", () => {
+    const item = { id: "a", libraryId: "a", name: "a.mp4", relPath: "a.mp4", kind: "video" as const, size: 1, modTime: 1 };
     useLibraryStore.getState().setItems([item]);
     useLibraryStore.getState().setKind("audio");
+    useLibraryStore.getState().setLibrary("a");
     useLibraryStore.getState().setQuery("x");
     useLibraryStore.getState().setSort("newest");
-    useLibraryStore.getState().applyScanned(summary("/a"));
+    useLibraryStore.getState().apply([lib("a")]);
     expect(useLibraryStore.getState()).toMatchObject({
       items: [item],
       kind: "audio",
+      library: "a",
       query: "x",
       sort: "newest",
     });

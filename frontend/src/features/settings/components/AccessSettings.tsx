@@ -33,8 +33,8 @@ export function AccessSettings() {
           role="switch"
           aria-checked={on}
           aria-label="Require an access token"
-          disabled={pending}
-          onClick={() => save({ port: saved.port, name: saved.name, requireToken: !on })}
+          disabled={pending || (!on && saved.dlna)}
+          onClick={() => save({ port: saved.port, name: saved.name, requireToken: !on, dlna: saved.dlna })}
           className={cn(
             "app-no-drag relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50",
             on ? "bg-primary" : "bg-(--glass-surface-hover)",
@@ -49,7 +49,13 @@ export function AccessSettings() {
         </button>
       </header>
 
-      {!on && (
+      {!on && saved.dlna && (
+        <p className="text-sm text-muted-foreground">
+          Smart TV discovery is on, and TVs can't send a token. Turn it off below to use the token.
+        </p>
+      )}
+
+      {!on && !saved.dlna && (
         <p className="flex items-center gap-2 text-sm text-warning">
           <ShieldAlert className="size-4 shrink-0" aria-hidden />
           Recommended: turn this on if other people use your network.

@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"eincast/internal/adapters/dlna"
 	"eincast/internal/app"
 )
 
@@ -33,7 +34,9 @@ type Server struct {
 	lib     Library
 	access  Access
 	remote  Remote
-	thumbs  Thumbnails // nil: no thumbnails are offered
+	thumbs  Thumbnails  // nil: no thumbnails are offered
+	hls     Transcoding // nil: no conversion is offered
+	dlnaID  string      // the server's UPnP identity; empty: no DLNA pages
 	version string
 	log     *slog.Logger
 }
@@ -47,6 +50,18 @@ type Option func(*Server)
 // answers "not found" and the player page shows no pictures.
 func WithThumbnails(t Thumbnails) Option {
 	return func(s *Server) { s.thumbs = t }
+}
+
+// WithDLNA lets the server answer smart TVs under /dlna/ when a run asks for it
+// (ServeConfig.DLNA), identifying itself as uuid on the network.
+func WithDLNA(uuid string) Option {
+	return func(s *Server) { s.dlnaID = uuid }
+}
+
+// WithTranscoding serves converted (HLS) streams at /hls/{id}/…. Without it that
+// route answers "not found" and the player page only plays files as they are.
+func WithTranscoding(t Transcoding) Option {
+	return func(s *Server) { s.hls = t }
 }
 
 // New builds a Server. version appears in the Server header and /api/health.
@@ -176,7 +191,11 @@ func addrStrings(addrs []netip.AddrPort) []string {
 
 // newAPI builds the handler state for one run.
 func (s *Server) newAPI(cfg app.ServeConfig) *api {
-	return &api{lib: s.lib, access: s.access, remote: s.remote, thumbs: s.thumbs, version: s.version, name: cfg.Name, log: s.log}
+	a := &api{lib: s.lib, access: s.access, remote: s.remote, thumbs: s.thumbs, hls: s.hls, version: s.version, name: cfg.Name, log: s.log}
+	if cfg.DLNA && s.dlnaID != "" {
+		a.dlna = dlna.NewHandler(dlna.Config{Library: s.lib, Name: cfg.Name, UUID: s.dlnaID, Version: s.version})
+	}
+	return a
 }
 
 // running is one live server. It implements app.RunningServer.

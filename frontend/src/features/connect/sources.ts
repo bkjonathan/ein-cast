@@ -24,9 +24,14 @@ export interface ConnectSource {
 }
 
 /**
- * Everything the Connect card can offer right now: each LAN address, then the
- * remote address if remote access is up. Pure, so the rules are tested apart
- * from the component.
+ * Everything the Connect card can offer right now: each LAN address, then any
+ * name the network announced for the server (eincast.local), then the remote
+ * address if remote access is up. Pure, so the rules are tested apart from the
+ * component.
+ *
+ * Numeric addresses come first because they work on every device; a .local name
+ * needs the device to speak mDNS, which phones and computers from Apple and
+ * Microsoft do and some Android versions and older TVs do not.
  */
 export function connectSources(
   server: ServerStatus,
@@ -34,7 +39,7 @@ export function connectSources(
   lanToken: string,
   remoteLabel: string,
 ): ConnectSource[] {
-  const sources: ConnectSource[] = server.lanUrls.map((base) => ({
+  const sources: ConnectSource[] = [...server.lanUrls, ...server.nameUrls].map((base) => ({
     kind: "lan",
     label: hostOf(base),
     base,

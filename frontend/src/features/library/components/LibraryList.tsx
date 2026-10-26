@@ -4,7 +4,16 @@ import type { LibraryItem } from "@/shared/bridge";
 import { LibraryRow, ROW_HEIGHT } from "./LibraryRow";
 
 /** Virtualized, like the log list: a library of thousands costs a screenful of rows. */
-export function LibraryList({ items, emptyHint }: { items: LibraryItem[]; emptyHint: string }) {
+export function LibraryList({
+  items,
+  emptyHint,
+  libraryNames,
+}: {
+  items: LibraryItem[];
+  emptyHint: string;
+  /** Library ID → name, given when there is more than one library to tell apart. */
+  libraryNames?: ReadonlyMap<string, string>;
+}) {
   const scroller = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -31,6 +40,7 @@ export function LibraryList({ items, emptyHint }: { items: LibraryItem[]; emptyH
             <LibraryRow
               key={item.id}
               item={item}
+              libraryName={libraryNames?.get(item.libraryId)}
               style={{
                 position: "absolute",
                 top: 0,

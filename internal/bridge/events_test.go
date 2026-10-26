@@ -25,22 +25,35 @@ func newTestEmitter(rec *[]emitted) *Emitter {
 	return e
 }
 
-func TestEmitter_LibraryScanned(t *testing.T) {
+func TestEmitter_LibraryScannedCarriesEveryLibrary(t *testing.T) {
 	var got []emitted
 	e := newTestEmitter(&got)
 	e.bind(context.Background())
 
-	e.Publish(app.LibraryScanned{Summary: app.LibrarySummary{
-		Root:  "/m",
-		Stats: media.Stats{Total: 1, TotalSize: 7, Counts: map[media.Kind]int{media.KindAudio: 1}},
+	e.Publish(app.LibraryScanned{Libraries: []app.LibraryState{
+		{Library: media.Library{ID: "a", Name: "Songs", Root: "/m"}, Stats: media.Stats{Total: 1, TotalSize: 7, Counts: map[media.Kind]int{media.KindAudio: 1}}},
+		{Library: media.Library{ID: "b", Name: "Films", Root: "/f"}},
 	}})
 
 	if len(got) != 1 || got[0].name != "library:scanned" || len(got[0].data) != 1 {
 		t.Fatalf("emitted = %+v", got)
 	}
-	want := LibrarySummaryDTO{Root: "/m", Total: 1, TotalSize: 7, Counts: KindCountsDTO{Audio: 1}}
-	if dto, ok := got[0].data[0].(LibrarySummaryDTO); !ok || dto != want {
+	want := []LibraryStateDTO{
+		{ID: "a", Name: "Songs", Root: "/m", Total: 1, TotalSize: 7, Counts: KindCountsDTO{Audio: 1}},
+		{ID: "b", Name: "Films", Root: "/f"},
+	}
+	if dto, ok := got[0].data[0].([]LibraryStateDTO); !ok || !reflect.DeepEqual(dto, want) {
 		t.Fatalf("payload = %#v, want %#v", got[0].data[0], want)
+	}
+}
+
+func TestEmitter_AnEmptyLibraryListIsAnEmptyArray(t *testing.T) {
+	var got []emitted
+	e := newTestEmitter(&got)
+	e.bind(context.Background())
+	e.Publish(app.LibraryScanned{})
+	if dto, _ := got[0].data[0].([]LibraryStateDTO); dto == nil || len(dto) != 0 {
+		t.Fatalf("payload = %#v, want an empty non-nil slice (JSON [] not null)", got[0].data[0])
 	}
 }
 
@@ -68,6 +81,7 @@ func TestEmitter_ServerStateChanged(t *testing.T) {
 	want := ServerStateDTO{
 		State: "running", Name: "Den", Port: 8765,
 		LocalURL: "http://127.0.0.1:8765", LANURLs: []string{"http://192.168.1.20:8765"},
+		NameURLs: []string{}, Discovery: []string{}, // JSON [] rather than null
 	}
 	if dto, ok := got[0].data[0].(ServerStateDTO); !ok || !reflect.DeepEqual(dto, want) {
 		t.Fatalf("payload = %#v, want %#v", got[0].data[0], want)
@@ -97,17 +111,18 @@ func TestEmitter_LibraryStatusAndSettings(t *testing.T) {
 	e := newTestEmitter(&got)
 	e.bind(context.Background())
 
-	e.Publish(app.LibraryStatusChanged{Status: app.LibraryStatus{Root: "/m", Error: "gone"}})
+	e.Publish(app.LibraryStatusChanged{Libraries: []app.LibraryState{{Library: media.Library{ID: "a", Name: "m", Root: "/m"}, Error: "gone", Watching: true}}})
 	e.Publish(app.SettingsChanged{View: app.SettingsView{
-		Settings: app.Settings{Port: 9000, Name: "Den", RequireToken: true, LibraryRoot: "/private"},
+		Settings: app.Settings{Port: 9000, Name: "Den", RequireToken: true, Libraries: []media.Library{{ID: "a", Name: "m", Root: "/private"}}},
 		Token:    "tok", TokenPersisted: true,
 	}})
 
 	if len(got) != 2 || got[0].name != "library:status" || got[1].name != "settings:changed" {
 		t.Fatalf("emitted = %+v", got)
 	}
-	if dto, _ := got[0].data[0].(LibraryStatusDTO); dto != (LibraryStatusDTO{Root: "/m", Error: "gone"}) {
-		t.Errorf("status payload = %+v", dto)
+	wantStatus := []LibraryStateDTO{{ID: "a", Name: "m", Root: "/m", Error: "gone", Watching: true}}
+	if dto, _ := got[0].data[0].([]LibraryStateDTO); !reflect.DeepEqual(dto, wantStatus) {
+		t.Errorf("status payload = %+v, want %+v", dto, wantStatus)
 	}
 	want := SettingsDTO{Port: 9000, Name: "Den", RequireToken: true, AccessToken: "tok", TokenPersisted: true}
 	if dto, _ := got[1].data[0].(SettingsDTO); dto != want {

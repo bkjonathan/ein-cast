@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 
 	"eincast/internal/app"
+	"eincast/internal/domain/media"
 )
 
 const (
@@ -40,11 +41,23 @@ func New(dir string) *Store {
 // file is the on-disk shape. It is separate from app.Settings so the file format
 // and the in-memory type can evolve independently.
 type file struct {
-	Version      int    `json:"version"`
-	Port         int    `json:"port"`
-	Name         string `json:"name"`
-	LibraryRoot  string `json:"libraryRoot"`
-	RequireToken bool   `json:"requireToken"`
+	Version int    `json:"version"`
+	Port    int    `json:"port"`
+	Name    string `json:"name"`
+	// LibraryRoot is the single folder of versions before v1.0. It is read, to be
+	// turned into a library, and no longer written.
+	LibraryRoot  string        `json:"libraryRoot,omitempty"`
+	Libraries    []libraryFile `json:"libraries,omitempty"`
+	RequireToken bool          `json:"requireToken"`
+	// DLNA is absent from files written before v0.5, which reads as false: off.
+	DLNA bool `json:"dlna"`
+}
+
+// libraryFile is one remembered library. The ID is not stored: it is derived from
+// the folder, so it cannot disagree with it.
+type libraryFile struct {
+	Name string `json:"name"`
+	Root string `json:"root"`
 }
 
 func (s *Store) path() string { return filepath.Join(s.dir, fileName) }
@@ -75,8 +88,9 @@ func (s *Store) Load() (app.Settings, error) {
 	return app.Settings{
 		Port:         f.Port,
 		Name:         f.Name,
-		LibraryRoot:  f.LibraryRoot,
+		Libraries:    librariesFrom(f),
 		RequireToken: f.RequireToken,
+		DLNA:         f.DLNA,
 	}, nil
 }
 
@@ -89,8 +103,9 @@ func (s *Store) Save(in app.Settings) error {
 		Version:      schemaVersion,
 		Port:         in.Port,
 		Name:         in.Name,
-		LibraryRoot:  in.LibraryRoot,
+		Libraries:    librariesTo(in.Libraries),
 		RequireToken: in.RequireToken,
+		DLNA:         in.DLNA,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode settings: %w", err)
@@ -137,4 +152,34 @@ func (s *Store) Save(in app.Settings) error {
 // or refused; the per-user config directory is already private there.
 func isChmodUnsupported(err error) bool {
 	return errors.Is(err, errors.ErrUnsupported)
+}
+
+// librariesFrom reads the list of libraries, turning the single folder of an
+// older file into a one-library list. The conversion is deterministic (an ID comes
+// from the folder), so loading the same old file twice gives the same result and
+// nothing has to be written back first.
+func librariesFrom(f file) []media.Library {
+	var out []media.Library
+	for _, l := range f.Libraries {
+		if l.Root == "" {
+			continue
+		}
+		lib := media.NewLibrary(l.Root)
+		if l.Name != "" {
+			lib.Name = l.Name
+		}
+		out = append(out, lib)
+	}
+	if len(out) == 0 && f.LibraryRoot != "" {
+		out = append(out, media.NewLibrary(f.LibraryRoot))
+	}
+	return out
+}
+
+func librariesTo(libs []media.Library) []libraryFile {
+	out := make([]libraryFile, len(libs))
+	for i, l := range libs {
+		out[i] = libraryFile{Name: l.Name, Root: l.Root}
+	}
+	return out
 }

@@ -25,18 +25,29 @@ type KindCountsDTO struct {
 	Image int `json:"image"`
 }
 
-// LibrarySummaryDTO describes the loaded library. Root is the folder the user
-// picked (shown in the UI); individual file paths never cross the bridge.
-type LibrarySummaryDTO struct {
+// LibraryStateDTO is one library as the UI shows it: what it is, what is in it,
+// and what is happening to it. Root is the folder the person picked (shown in
+// the UI); individual file paths never cross the bridge.
+type LibraryStateDTO struct {
+	ID        string        `json:"id"`
+	Name      string        `json:"name"`
 	Root      string        `json:"root"`
 	Total     int           `json:"total"`
 	TotalSize int64         `json:"totalSize"`
 	Counts    KindCountsDTO `json:"counts"`
+	// Scanning is true while a scan the person asked for is running.
+	Scanning bool `json:"scanning"`
+	// Error is a short, user-facing reason the last scan failed; empty if it did not.
+	Error string `json:"error"`
+	// Watching is true while the folder is watched for changes.
+	Watching bool `json:"watching"`
 }
 
-func toLibrarySummaryDTO(s app.LibrarySummary) LibrarySummaryDTO {
-	return LibrarySummaryDTO{
-		Root:      s.Root,
+func toLibraryStateDTO(s app.LibraryState) LibraryStateDTO {
+	return LibraryStateDTO{
+		ID:        string(s.Library.ID),
+		Name:      s.Library.Name,
+		Root:      s.Library.Root,
 		Total:     s.Stats.Total,
 		TotalSize: s.Stats.TotalSize,
 		Counts: KindCountsDTO{
@@ -44,30 +55,45 @@ func toLibrarySummaryDTO(s app.LibrarySummary) LibrarySummaryDTO {
 			Audio: s.Stats.Counts[media.KindAudio],
 			Image: s.Stats.Counts[media.KindImage],
 		},
+		Scanning: s.Scanning,
+		Error:    s.Error,
+		Watching: s.Watching,
 	}
+}
+
+// toLibraryStateDTOs maps every library, as a non-nil slice (JSON [] not null).
+func toLibraryStateDTOs(in []app.LibraryState) []LibraryStateDTO {
+	out := make([]LibraryStateDTO, len(in))
+	for i, s := range in {
+		out[i] = toLibraryStateDTO(s)
+	}
+	return out
 }
 
 // LibraryItemDTO is one file in the library. It has no absolute path (see
 // ADR 0005); Kind is "video", "audio" or "image", ModTime is Unix milliseconds.
 type LibraryItemDTO struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	RelPath string `json:"relPath"`
-	Kind    string `json:"kind"`
-	Size    int64  `json:"size"`
-	ModTime int64  `json:"modTime"`
+	ID string `json:"id"`
+	// LibraryID is the library the file is in.
+	LibraryID string `json:"libraryId"`
+	Name      string `json:"name"`
+	RelPath   string `json:"relPath"`
+	Kind      string `json:"kind"`
+	Size      int64  `json:"size"`
+	ModTime   int64  `json:"modTime"`
 }
 
 func toLibraryItemDTOs(items []media.Item) []LibraryItemDTO {
 	out := make([]LibraryItemDTO, len(items)) // non-nil: JSON [] rather than null
 	for i, it := range items {
 		out[i] = LibraryItemDTO{
-			ID:      string(it.ID),
-			Name:    it.Name,
-			RelPath: it.RelPath,
-			Kind:    string(it.Kind),
-			Size:    it.Size,
-			ModTime: it.ModTime.UnixMilli(),
+			ID:        string(it.ID),
+			LibraryID: string(it.LibraryID),
+			Name:      it.Name,
+			RelPath:   it.RelPath,
+			Kind:      string(it.Kind),
+			Size:      it.Size,
+			ModTime:   it.ModTime.UnixMilli(),
 		}
 	}
 	return out
@@ -85,7 +111,12 @@ type ServerStateDTO struct {
 	// LANURLs reach it from other devices, most likely first; empty if the
 	// machine has no usable network.
 	LANURLs []string `json:"lanUrls"`
-	Error   string   `json:"error"`
+	// NameURLs are friendlier addresses announced on the network, such as
+	// http://eincast.local:8765; empty when none is.
+	NameURLs []string `json:"nameUrls"`
+	// Discovery lists what is announcing the server: "mdns", "dlna".
+	Discovery []string `json:"discovery"`
+	Error     string   `json:"error"`
 }
 
 func toServerStateDTO(s app.ServerStatus) ServerStateDTO {
@@ -94,12 +125,14 @@ func toServerStateDTO(s app.ServerStatus) ServerStateDTO {
 		lan = []string{} // JSON [] rather than null
 	}
 	return ServerStateDTO{
-		State:    s.State.String(),
-		Name:     s.Name,
-		Port:     s.Port,
-		LocalURL: s.LocalURL,
-		LANURLs:  lan,
-		Error:    s.Error,
+		State:     s.State.String(),
+		Name:      s.Name,
+		Port:      s.Port,
+		LocalURL:  s.LocalURL,
+		LANURLs:   lan,
+		NameURLs:  nonNil(s.NameURLs),
+		Discovery: nonNil(s.Discovery),
+		Error:     s.Error,
 	}
 }
 
@@ -205,19 +238,6 @@ func toRemoteFieldStateDTOs(in []app.FieldState) []RemoteFieldStateDTO {
 	return out
 }
 
-// LibraryStatusDTO says whether a scan is running, why the last one failed, and
-// whether the folder is being watched for changes.
-type LibraryStatusDTO struct {
-	Scanning bool   `json:"scanning"`
-	Root     string `json:"root"`
-	Error    string `json:"error"`
-	Watching bool   `json:"watching"`
-}
-
-func toLibraryStatusDTO(s app.LibraryStatus) LibraryStatusDTO {
-	return LibraryStatusDTO{Scanning: s.Scanning, Root: s.Root, Error: s.Error, Watching: s.Watching}
-}
-
 // SettingsDTO is what the Settings screen shows. AccessToken is empty unless the
 // token is switched on; TokenPersisted is false when it could not be saved to
 // the system credential store.
@@ -225,6 +245,7 @@ type SettingsDTO struct {
 	Port           int    `json:"port"`
 	Name           string `json:"name"`
 	RequireToken   bool   `json:"requireToken"`
+	DLNA           bool   `json:"dlna"`
 	AccessToken    string `json:"accessToken"`
 	TokenPersisted bool   `json:"tokenPersisted"`
 }
@@ -234,6 +255,7 @@ func toSettingsDTO(v app.SettingsView) SettingsDTO {
 		Port:           v.Port,
 		Name:           v.Name,
 		RequireToken:   v.RequireToken,
+		DLNA:           v.DLNA,
 		AccessToken:    v.Token,
 		TokenPersisted: v.TokenPersisted,
 	}
@@ -245,6 +267,7 @@ type SettingsInputDTO struct {
 	Port         int    `json:"port"`
 	Name         string `json:"name"`
 	RequireToken bool   `json:"requireToken"`
+	DLNA         bool   `json:"dlna"`
 }
 
 // LogAttrDTO is one key/value pair of a log line.
@@ -291,4 +314,12 @@ func levelName(l slog.Level) string {
 	default:
 		return "error"
 	}
+}
+
+// nonNil makes a nil slice an empty one, so JSON carries [] rather than null.
+func nonNil(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }

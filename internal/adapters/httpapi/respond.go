@@ -22,6 +22,8 @@ const (
 	codeInternal     = "internal"
 	codeUnauthorized = "unauthorized"
 	codeForbidden    = "forbidden"
+	codeBusy         = "busy"
+	codeNotConvert   = "not_convertible"
 )
 
 // writeJSON marshals first, so a marshalling failure becomes a clean 500

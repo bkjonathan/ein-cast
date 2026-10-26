@@ -21,23 +21,46 @@ import (
 )
 
 type fakeLibrary struct {
-	scanErr    error
-	scanned    []string
-	summary    app.LibrarySummary
-	hasSummary bool
+	state []app.LibraryState
+	items []media.Item
 
+	addErr     error
+	added      []string
+	removeErr  error
+	removed    []media.LibraryID
+	renameErr  error
+	renamed    [][2]string
 	rescanErr  error
-	rescans    int
+	rescanned  []media.LibraryID
+	rescanAll  int
 	restoreErr error
 	restores   int
 	watching   chan struct{} // closed when Watch is called
-	status     app.LibraryStatus
-	items      []media.Item
 }
 
-func (f *fakeLibrary) Rescan(context.Context) (app.LibrarySummary, error) {
-	f.rescans++
-	return f.summary, f.rescanErr
+func (f *fakeLibrary) Add(_ context.Context, root string) (app.LibraryState, error) {
+	f.added = append(f.added, root)
+	return app.LibraryState{Library: media.NewLibrary(root)}, f.addErr
+}
+
+func (f *fakeLibrary) Remove(id media.LibraryID) error {
+	f.removed = append(f.removed, id)
+	return f.removeErr
+}
+
+func (f *fakeLibrary) Rename(id media.LibraryID, name string) error {
+	f.renamed = append(f.renamed, [2]string{string(id), name})
+	return f.renameErr
+}
+
+func (f *fakeLibrary) Rescan(_ context.Context, id media.LibraryID) error {
+	f.rescanned = append(f.rescanned, id)
+	return f.rescanErr
+}
+
+func (f *fakeLibrary) RescanAll(context.Context) error {
+	f.rescanAll++
+	return f.rescanErr
 }
 
 func (f *fakeLibrary) Restore(context.Context) error {
@@ -45,7 +68,7 @@ func (f *fakeLibrary) Restore(context.Context) error {
 	return f.restoreErr
 }
 
-func (f *fakeLibrary) Status() app.LibraryStatus { return f.status }
+func (f *fakeLibrary) State() []app.LibraryState { return f.state }
 
 func (f *fakeLibrary) List() []media.Item { return f.items }
 
@@ -77,13 +100,6 @@ func (f *fakeSettings) RotateToken() (app.SettingsView, error) {
 	f.rotations++
 	return f.view, f.rotateErr
 }
-
-func (f *fakeLibrary) ScanFolder(_ context.Context, path string) (app.LibrarySummary, error) {
-	f.scanned = append(f.scanned, path)
-	return f.summary, f.scanErr
-}
-
-func (f *fakeLibrary) Summary() (app.LibrarySummary, bool) { return f.summary, f.hasSummary }
 
 type fakeStreaming struct {
 	startErr, stopErr error
@@ -160,12 +176,12 @@ func TestListLibrary(t *testing.T) {
 	t.Run("maps items without exposing disk paths", func(t *testing.T) {
 		mod := time.UnixMilli(1_700_000_000_123)
 		lib := &fakeLibrary{items: []media.Item{{
-			ID: "abc", Name: "a.mkv", RelPath: "shows/a.mkv", Path: "/secret/shows/a.mkv",
+			ID: "abc", LibraryID: "lib1", Name: "a.mkv", RelPath: "shows/a.mkv", Path: "/secret/shows/a.mkv",
 			Kind: media.KindVideo, Size: 42, ModTime: mod,
 		}}}
 		got := newTestApp(lib).ListLibrary()
 		want := []LibraryItemDTO{{
-			ID: "abc", Name: "a.mkv", RelPath: "shows/a.mkv", Kind: "video", Size: 42, ModTime: mod.UnixMilli(),
+			ID: "abc", LibraryID: "lib1", Name: "a.mkv", RelPath: "shows/a.mkv", Kind: "video", Size: 42, ModTime: mod.UnixMilli(),
 		}}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("ListLibrary() = %+v, want %+v", got, want)
@@ -282,21 +298,21 @@ func TestSetWindowTheme(t *testing.T) {
 func TestChooseFolder(t *testing.T) {
 	boom := errors.New("boom")
 	tests := []struct {
-		name        string
-		pickPath    string
-		pickErr     error
-		scanErr     error
-		wantErr     error
-		wantScanned []string
+		name      string
+		pickPath  string
+		pickErr   error
+		addErr    error
+		wantErr   error
+		wantAdded []string
 	}{
-		{name: "picked and scanned", pickPath: "/media", wantScanned: []string{"/media"}},
+		{name: "picked and added", pickPath: "/media", wantAdded: []string{"/media"}},
 		{name: "dialog cancelled is not an error", pickPath: ""},
 		{name: "dialog fails", pickErr: boom, wantErr: boom},
-		{name: "scan fails", pickPath: "/media", scanErr: boom, wantErr: boom, wantScanned: []string{"/media"}},
+		{name: "adding fails", pickPath: "/media", addErr: boom, wantErr: boom, wantAdded: []string{"/media"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lib := &fakeLibrary{scanErr: tt.scanErr}
+			lib := &fakeLibrary{addErr: tt.addErr}
 			a := newTestApp(lib)
 			a.pickFolder = func(context.Context) (string, error) { return tt.pickPath, tt.pickErr }
 
@@ -304,33 +320,65 @@ func TestChooseFolder(t *testing.T) {
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("ChooseFolder() error = %v, want %v", err, tt.wantErr)
 			}
-			if len(lib.scanned) != len(tt.wantScanned) || (len(lib.scanned) > 0 && lib.scanned[0] != tt.wantScanned[0]) {
-				t.Fatalf("scanned = %v, want %v", lib.scanned, tt.wantScanned)
+			if !reflect.DeepEqual(lib.added, tt.wantAdded) {
+				t.Fatalf("added = %v, want %v", lib.added, tt.wantAdded)
 			}
 		})
 	}
 }
 
-func TestGetLibrarySummary(t *testing.T) {
-	t.Run("nil before first scan", func(t *testing.T) {
-		if got := newTestApp(&fakeLibrary{}).GetLibrarySummary(); got != nil {
-			t.Fatalf("GetLibrarySummary() = %+v, want nil", got)
+func TestListLibraries(t *testing.T) {
+	t.Run("empty is an empty list, not nil", func(t *testing.T) {
+		if got := newTestApp(&fakeLibrary{}).ListLibraries(); got == nil || len(got) != 0 {
+			t.Fatalf("ListLibraries() = %#v, want an empty non-nil slice", got)
 		}
 	})
 
-	t.Run("maps to DTO", func(t *testing.T) {
-		lib := &fakeLibrary{hasSummary: true, summary: app.LibrarySummary{
-			Root: "/m",
-			Stats: media.Stats{Total: 3, TotalSize: 99, Counts: map[media.Kind]int{
-				media.KindVideo: 2, media.KindImage: 1,
-			}},
+	t.Run("maps every library to a DTO", func(t *testing.T) {
+		films := media.Library{ID: "f1", Name: "Films", Root: "/m/films"}
+		music := media.Library{ID: "m1", Name: "Music", Root: "/m/music"}
+		lib := &fakeLibrary{state: []app.LibraryState{
+			{Library: films, Stats: media.Stats{Total: 3, TotalSize: 99, Counts: map[media.Kind]int{media.KindVideo: 2, media.KindImage: 1}}, Watching: true},
+			{Library: music, Scanning: true, Error: "That folder no longer exists."},
 		}}
-		got := newTestApp(lib).GetLibrarySummary()
-		want := LibrarySummaryDTO{Root: "/m", Total: 3, TotalSize: 99, Counts: KindCountsDTO{Video: 2, Image: 1}}
-		if got == nil || *got != want {
-			t.Fatalf("GetLibrarySummary() = %+v, want %+v", got, want)
+		got := newTestApp(lib).ListLibraries()
+		want := []LibraryStateDTO{
+			{ID: "f1", Name: "Films", Root: "/m/films", Total: 3, TotalSize: 99, Counts: KindCountsDTO{Video: 2, Image: 1}, Watching: true},
+			{ID: "m1", Name: "Music", Root: "/m/music", Scanning: true, Error: "That folder no longer exists."},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("ListLibraries() = %+v, want %+v", got, want)
 		}
 	})
+}
+
+func TestLibraryCommands_PassTheIDAndReturnTheErrors(t *testing.T) {
+	boom := errors.New("boom")
+	lib := &fakeLibrary{}
+	a := newTestApp(lib)
+
+	if err := a.RemoveLibrary("f1"); err != nil || !reflect.DeepEqual(lib.removed, []media.LibraryID{"f1"}) {
+		t.Fatalf("RemoveLibrary: %v %v", err, lib.removed)
+	}
+	if err := a.RenameLibrary("f1", "Movie night"); err != nil || !reflect.DeepEqual(lib.renamed, [][2]string{{"f1", "Movie night"}}) {
+		t.Fatalf("RenameLibrary: %v %v", err, lib.renamed)
+	}
+	if err := a.RescanLibrary("f1"); err != nil || !reflect.DeepEqual(lib.rescanned, []media.LibraryID{"f1"}) {
+		t.Fatalf("RescanLibrary: %v %v", err, lib.rescanned)
+	}
+	if err := a.RescanAllLibraries(); err != nil || lib.rescanAll != 1 {
+		t.Fatalf("RescanAllLibraries: %v %d", err, lib.rescanAll)
+	}
+
+	lib.removeErr, lib.renameErr, lib.rescanErr = boom, boom, boom
+	for name, err := range map[string]error{
+		"remove": a.RemoveLibrary("x"), "rename": a.RenameLibrary("x", "y"),
+		"rescan": a.RescanLibrary("x"), "rescan all": a.RescanAllLibraries(),
+	} {
+		if !errors.Is(err, boom) {
+			t.Errorf("%s: error = %v, want %v", name, err, boom)
+		}
+	}
 }
 
 type appCtxKey struct{}
@@ -348,6 +396,28 @@ func TestStartServer_UsesAppContextAndSavedSettings(t *testing.T) {
 	}
 	if want := streaming.NewConfig(streaming.WithPort(9123), streaming.WithName("Den")); st.startCfg != want {
 		t.Errorf("config = %+v, want %+v (the saved settings)", st.startCfg, want)
+	}
+}
+
+func TestStartServer_SmartTVDiscoveryFollowsTheSettingButNeverWithTheToken(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in   app.Settings
+		want bool
+	}{
+		"on":                      {app.Settings{Port: 9000, Name: "Den", DLNA: true}, true},
+		"off":                     {app.Settings{Port: 9000, Name: "Den"}, false},
+		"token wins over the TVs": {app.Settings{Port: 9000, Name: "Den", DLNA: true, RequireToken: true}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, st := newTestAppWithStreaming(&fakeLibrary{})
+			a.settings = &fakeSettings{view: app.SettingsView{Settings: tc.in}}
+			if err := a.StartServer(); err != nil {
+				t.Fatal(err)
+			}
+			if st.startCfg.DLNA != tc.want {
+				t.Errorf("DLNA = %v, want %v", st.startCfg.DLNA, tc.want)
+			}
+		})
 	}
 }
 
@@ -369,7 +439,7 @@ func TestGetServerState(t *testing.T) {
 	st.status = app.ServerStatus{State: server.Failed, Name: "Den", Error: "port in use"}
 
 	got := a.GetServerState()
-	want := ServerStateDTO{State: "failed", Name: "Den", Error: "port in use", LANURLs: []string{}}
+	want := ServerStateDTO{State: "failed", Name: "Den", Error: "port in use", LANURLs: []string{}, NameURLs: []string{}, Discovery: []string{}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("GetServerState() = %#v, want %#v", got, want)
 	}
@@ -384,6 +454,7 @@ func TestGetServerState(t *testing.T) {
 	want = ServerStateDTO{
 		State: "running", Name: "Den", Port: 8765,
 		LocalURL: "http://127.0.0.1:8765", LANURLs: []string{"http://192.168.1.20:8765"},
+		NameURLs: []string{}, Discovery: []string{},
 	}
 	if got := a.GetServerState(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("GetServerState() = %#v, want %#v", got, want)
@@ -529,28 +600,6 @@ func TestForwardLogs_ReturnsWhenFeedCloses(t *testing.T) {
 	}
 }
 
-func TestRescanLibrary(t *testing.T) {
-	boom := errors.New("a scan is already running")
-	lib := &fakeLibrary{}
-	a := newTestApp(lib)
-	if err := a.RescanLibrary(); err != nil || lib.rescans != 1 {
-		t.Fatalf("RescanLibrary() = %v after %d rescans", err, lib.rescans)
-	}
-	lib.rescanErr = boom
-	if err := a.RescanLibrary(); !errors.Is(err, boom) {
-		t.Errorf("error = %v, want %v", err, boom)
-	}
-}
-
-func TestGetLibraryStatus(t *testing.T) {
-	lib := &fakeLibrary{status: app.LibraryStatus{Scanning: false, Root: "/gone", Error: "That folder no longer exists.", Watching: true}}
-	got := newTestApp(lib).GetLibraryStatus()
-	want := LibraryStatusDTO{Root: "/gone", Error: "That folder no longer exists.", Watching: true}
-	if got != want {
-		t.Fatalf("GetLibraryStatus() = %+v, want %+v", got, want)
-	}
-}
-
 func TestStartup_StartsWatchingTheLibraryUntilShutdown(t *testing.T) {
 	lib := &fakeLibrary{watching: make(chan struct{})}
 	a := newTestApp(lib)
@@ -564,6 +613,42 @@ func TestStartup_StartsWatchingTheLibraryUntilShutdown(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("startup did not start the library watch")
 	}
+}
+
+type fakeConversions struct {
+	running chan struct{}
+	stopped int
+}
+
+func (f *fakeConversions) Run(ctx context.Context) {
+	close(f.running)
+	<-ctx.Done()
+}
+func (f *fakeConversions) StopAll() { f.stopped++ }
+
+func TestConversions_RunWithTheAppAndStopOnShutdown(t *testing.T) {
+	conv := &fakeConversions{running: make(chan struct{})}
+	a := newTestApp(&fakeLibrary{})
+	a.convert = conv
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a.startup(ctx)
+	select {
+	case <-conv.running:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startup did not start the conversion sweeper")
+	}
+
+	a.shutdown(ctx)
+	if conv.stopped != 1 {
+		t.Errorf("StopAll called %d times on shutdown, want 1", conv.stopped)
+	}
+}
+
+func TestShutdown_WithoutConversionsIsFine(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	a.shutdown(context.Background()) // must not panic on a nil Conversions
 }
 
 func TestRestoreLibrary(t *testing.T) {
@@ -593,8 +678,8 @@ func TestGetSettings_ExposesTheTokenOnlyWhenOn(t *testing.T) {
 		t.Fatalf("GetSettings() = %+v, want %+v", got, want)
 	}
 
-	// The DTO has no field for the library folder: it is not a setting the form edits.
-	fs.view = app.SettingsView{Settings: app.Settings{Port: 9000, Name: "Den", LibraryRoot: "/private/path"}}
+	// The DTO has no field for the library folders: they are not settings the form edits.
+	fs.view = app.SettingsView{Settings: app.Settings{Port: 9000, Name: "Den", Libraries: []media.Library{media.NewLibrary("/private/path")}}}
 	if got := a.GetSettings(); got.AccessToken != "" || got.RequireToken {
 		t.Errorf("GetSettings() = %+v, want no token when it is off", got)
 	}
@@ -605,6 +690,12 @@ func TestUpdateSettings_PassesTheFormValuesAndReturnsValidationErrors(t *testing
 	fs := &fakeSettings{}
 	a.settings = fs
 
+	if err := a.UpdateSettings(SettingsInputDTO{Port: 9100, Name: "Den", RequireToken: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.UpdateSettings(SettingsInputDTO{Port: 9100, Name: "Den", DLNA: true}); err != nil || !fs.gotInput.DLNA {
+		t.Fatalf("the TV setting did not reach the settings service: %v %+v", err, fs.gotInput)
+	}
 	if err := a.UpdateSettings(SettingsInputDTO{Port: 9100, Name: "Den", RequireToken: true}); err != nil {
 		t.Fatal(err)
 	}

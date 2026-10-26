@@ -15,10 +15,18 @@ function folderOf(relPath: string): string {
   return cut < 0 ? "" : relPath.slice(0, cut);
 }
 
-/** One file: icon, name, the folder it lives in, and its size. */
-export function LibraryRow({ item, style }: { item: LibraryItem; style: CSSProperties }) {
+/** One file: icon, name, the folder it lives in (with its library, when there are several), and its size. */
+export function LibraryRow({
+  item,
+  style,
+  libraryName,
+}: {
+  item: LibraryItem;
+  style: CSSProperties;
+  libraryName?: string | undefined;
+}) {
   const Icon = icons[item.kind];
-  const folder = folderOf(item.relPath);
+  const folder = [libraryName, folderOf(item.relPath)].filter(Boolean).join(" · ");
   const picture = useThumbnail(item);
   return (
     <div style={style} title={item.relPath} className="flex items-center gap-3 px-4">

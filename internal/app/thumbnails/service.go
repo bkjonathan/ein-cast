@@ -26,8 +26,6 @@ const version = 1
 // consumer.
 type Items interface {
 	Get(id media.ID) (media.Item, error)
-	// Root is the library folder.
-	Root() string
 }
 
 // Thumbnail is a made preview image.
@@ -143,11 +141,11 @@ func (s *Service) attempt(key string, it media.Item) (*job, error) {
 	j := &job{done: make(chan struct{})}
 	s.inflight[key] = j
 	// It ends when ffmpeg finishes or the timeout kills it; nobody has to stop it.
-	go s.run(key, it, s.items.Root(), j)
+	go s.run(key, it, j)
 	return j, nil
 }
 
-func (s *Service) run(key string, it media.Item, root string, j *job) {
+func (s *Service) run(key string, it media.Item, j *job) {
 	s.slots <- struct{}{}
 	defer func() { <-s.slots }()
 
@@ -155,7 +153,7 @@ func (s *Service) run(key string, it media.Item, root string, j *job) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.opts.Timeout)
 	defer cancel()
 
-	data, err := s.grab.Grab(ctx, app.GrabRequest{Root: root, Path: it.Path, Kind: it.Kind, Width: Width})
+	data, err := s.grab.Grab(ctx, app.GrabRequest{Root: it.Root, Path: it.Path, Kind: it.Kind, Width: Width})
 	if err == nil {
 		if putErr := s.cache.Put(key, data); putErr != nil {
 			s.log.Warn("could not remember a thumbnail", slog.String("error", putErr.Error()))

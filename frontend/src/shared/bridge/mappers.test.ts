@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { toLibraryItem, toLogLine, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
+import { toLibraryItem, toLibraryState, toLogLine, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
 
 const raw = (state: string) => ({
   state,
   name: "Den",
   port: 8765,
   localUrl: "http://127.0.0.1:8765",
-  lanUrls: ["http://192.168.1.20:8765"],
+  lanUrls: ["http://192.168.1.20:8765"], nameUrls: [], discovery: [],
   error: "",
 });
 
@@ -21,7 +21,7 @@ describe("toServerStatus", () => {
       name: "Den",
       port: 8765,
       localUrl: "http://127.0.0.1:8765",
-      lanUrls: ["http://192.168.1.20:8765"],
+      lanUrls: ["http://192.168.1.20:8765"], nameUrls: [], discovery: [],
       error: "",
     });
   });
@@ -117,6 +117,7 @@ describe("toRemoteStatus needsSetup", () => {
 describe("toLibraryItem", () => {
   const raw = (kind: string) => ({
     id: "ab12",
+    libraryId: "L1",
     name: "a.mp3",
     relPath: "music/a.mp3",
     kind,
@@ -130,5 +131,22 @@ describe("toLibraryItem", () => {
 
   it("fails loudly on a kind it does not know", () => {
     expect(() => toLibraryItem(raw("document"))).toThrow(/unknown media kind/);
+  });
+});
+
+describe("toLibraryState", () => {
+  const raw = {
+    id: "f1", name: "Films", root: "/m/films", total: 3, totalSize: 99,
+    counts: { video: 2, audio: 0, image: 1 }, scanning: false, error: "gone", watching: true,
+  };
+
+  it("copies every field", () => {
+    expect(toLibraryState(raw)).toStrictEqual(raw);
+  });
+
+  it("does not share the counts object with the wire value", () => {
+    const got = toLibraryState(raw);
+    got.counts.video = 99;
+    expect(raw.counts.video).toBe(2);
   });
 });

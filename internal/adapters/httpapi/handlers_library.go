@@ -17,10 +17,22 @@ type itemJSON struct {
 	Kind    media.Kind `json:"kind"`
 	Size    int64      `json:"size"`
 	ModTime time.Time  `json:"modTime"`
+	// Subtitles lists the tracks of a video, in order. A track is fetched as
+	// /subtitle/{id}/{position}; its file name and disk path are not exposed.
+	Subtitles []subtitleJSON `json:"subtitles"`
+}
+
+type subtitleJSON struct {
+	Label string `json:"label"`
+	Lang  string `json:"lang"`
 }
 
 func toItemJSON(it media.Item) itemJSON {
-	return itemJSON{ID: it.ID, Name: it.Name, Kind: it.Kind, Size: it.Size, ModTime: it.ModTime}
+	subs := make([]subtitleJSON, len(it.Subtitles)) // non-nil: [] rather than null
+	for i, s := range it.Subtitles {
+		subs[i] = subtitleJSON{Label: s.Label, Lang: s.Lang}
+	}
+	return itemJSON{ID: it.ID, Name: it.Name, Kind: it.Kind, Size: it.Size, ModTime: it.ModTime, Subtitles: subs}
 }
 
 // handleLibrary lists every item.

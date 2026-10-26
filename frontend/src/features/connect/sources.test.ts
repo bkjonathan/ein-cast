@@ -3,7 +3,7 @@ import type { RemoteStatus, ServerStatus } from "@/shared/bridge";
 import { connectSources } from "./sources";
 
 const server = (lanUrls: string[]): ServerStatus => ({
-  state: "running", name: "Den", port: 8765, localUrl: "http://127.0.0.1:8765", lanUrls, error: "",
+  state: "running", name: "Den", port: 8765, localUrl: "http://127.0.0.1:8765", lanUrls, nameUrls: [], discovery: [], error: "",
 });
 
 const remote = (over: Partial<RemoteStatus> = {}): RemoteStatus => ({
@@ -16,6 +16,14 @@ describe("connectSources", () => {
     expect(connectSources(server(["http://192.168.1.20:8765", "http://10.0.0.4:8765"]), null, "tok", "Tailscale")).toStrictEqual([
       { kind: "lan", label: "192.168.1.20", base: "http://192.168.1.20:8765", token: "tok", playlist: true },
       { kind: "lan", label: "10.0.0.4", base: "http://10.0.0.4:8765", token: "tok", playlist: true },
+    ]);
+  });
+
+  it("offers the announced name after the numeric addresses, with the same token rules", () => {
+    const status: ServerStatus = { ...server(["http://192.168.1.20:8765"]), nameUrls: ["http://eincast.local:8765"], discovery: ["mdns"] };
+    expect(connectSources(status, null, "tok", "Tailscale")).toStrictEqual([
+      { kind: "lan", label: "192.168.1.20", base: "http://192.168.1.20:8765", token: "tok", playlist: true },
+      { kind: "lan", label: "eincast.local", base: "http://eincast.local:8765", token: "tok", playlist: true },
     ]);
   });
 

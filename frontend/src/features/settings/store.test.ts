@@ -6,6 +6,7 @@ const settings = (over: Partial<Settings> = {}): Settings => ({
   port: 8765,
   name: "EinCast",
   requireToken: false,
+  dlna: false,
   accessToken: "",
   tokenPersisted: false,
   ...over,

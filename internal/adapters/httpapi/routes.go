@@ -12,8 +12,6 @@ import (
 type Library interface {
 	List() []media.Item
 	Get(id media.ID) (media.Item, error)
-	// Root is the library folder, used to confirm served files stay inside it.
-	Root() string
 }
 
 // api holds what handlers share. Handlers parse the request, call the library,
@@ -23,6 +21,8 @@ type api struct {
 	access  Access
 	remote  Remote
 	thumbs  Thumbnails
+	hls     Transcoding
+	dlna    http.Handler // nil unless Smart TV discovery is on for this run
 	version string
 	name    string
 	log     *slog.Logger
@@ -39,8 +39,14 @@ func (a *api) routes() http.Handler {
 	mux.HandleFunc("GET /api/library/{id}", a.handleLibraryItem)
 	mux.HandleFunc("GET /stream/{id}", a.handleStream)
 	mux.HandleFunc("GET /thumb/{id}", a.handleThumbnail)
+	mux.HandleFunc("GET /hls/{id}/{file}", a.handleHLS)
+	mux.HandleFunc("GET /subtitle/{id}/{track}", a.handleSubtitle)
 	mux.HandleFunc("GET /playlist.m3u", a.handlePlaylist)
 	mux.HandleFunc("POST /login", a.handleLogin)
+	if a.dlna != nil {
+		// No method in the pattern: UPnP eventing uses SUBSCRIBE and UNSUBSCRIBE.
+		mux.Handle("/dlna/", a.dlna)
+	}
 	mux.HandleFunc("/", a.handleNotFound)
 	return mux
 }

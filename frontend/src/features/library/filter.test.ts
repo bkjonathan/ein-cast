@@ -4,6 +4,7 @@ import { browseItems, countByKind } from "./filter";
 
 const item = (over: Partial<LibraryItem> & { relPath: string }): LibraryItem => ({
   id: over.relPath,
+  libraryId: "L1",
   name: over.relPath.split("/").at(-1) ?? over.relPath,
   kind: "video",
   size: 1,
@@ -66,6 +67,31 @@ describe("browseItems", () => {
     const before = [...items];
     expect(browseItems(items, "all", "   ", "name")).toHaveLength(4);
     expect(items).toEqual(before);
+  });
+});
+
+describe("browseItems by library", () => {
+  const two = [
+    item({ relPath: "a.mkv", libraryId: "films" }),
+    item({ relPath: "b.mkv", libraryId: "films" }),
+    item({ relPath: "a.mkv", id: "other-a", libraryId: "home" }),
+  ];
+
+  it("shows every library by default and one on request", () => {
+    expect(browseItems(two, "all", "", "name")).toHaveLength(3);
+    expect(browseItems(two, "all", "", "name", "all")).toHaveLength(3);
+    expect(browseItems(two, "all", "", "name", "films")).toHaveLength(2);
+    expect(browseItems(two, "all", "", "name", "home").map((i) => i.id)).toEqual(["other-a"]);
+  });
+
+  it("combines with the kind chip and the search", () => {
+    expect(browseItems(two, "audio", "", "name", "films")).toEqual([]);
+    expect(browseItems(two, "all", "b.mkv", "name", "films").map((i) => i.relPath)).toEqual(["b.mkv"]);
+    expect(browseItems(two, "all", "b.mkv", "name", "home")).toEqual([]);
+  });
+
+  it("a library with no items gives an empty list, not everything", () => {
+    expect(browseItems(two, "all", "", "name", "nope")).toEqual([]);
   });
 });
 

@@ -24,7 +24,7 @@ vi.mock("@/features/remote", async (importOriginal) => ({
 
 const server = (over: Partial<ServerStatus> = {}): ServerStatus => ({
   state: "running", name: "Den", port: 8765, localUrl: "http://127.0.0.1:8765",
-  lanUrls: ["http://192.168.1.20:8765"], error: "", ...over,
+  lanUrls: ["http://192.168.1.20:8765"], nameUrls: [], discovery: [], error: "", ...over,
 });
 
 const remote = (over: Partial<RemoteStatus> = {}): RemoteStatus => ({
@@ -77,7 +77,7 @@ describe("ConnectCard", () => {
 
   it("a public tunnel shows the PIN advice and no bare playlist link, and never the LAN token", () => {
     setServer(server({ lanUrls: [] }));
-    setSettings({ port: 8765, name: "Den", requireToken: true, accessToken: "SECRET-LAN-TOKEN", tokenPersisted: true });
+    setSettings({ port: 8765, name: "Den", requireToken: true, dlna: false, accessToken: "SECRET-LAN-TOKEN", tokenPersisted: true });
     setRemote(remote({ public: true, provider: "cloudflare-quick", url: "https://abc.trycloudflare.com" }));
     const html = render();
 
@@ -90,7 +90,7 @@ describe("ConnectCard", () => {
   });
 
   it("the LAN token is still added to LAN links", () => {
-    setSettings({ port: 8765, name: "Den", requireToken: true, accessToken: "SECRET-LAN-TOKEN", tokenPersisted: true });
+    setSettings({ port: 8765, name: "Den", requireToken: true, dlna: false, accessToken: "SECRET-LAN-TOKEN", tokenPersisted: true });
     expect(render()).toContain("t=SECRET-LAN-TOKEN");
   });
 

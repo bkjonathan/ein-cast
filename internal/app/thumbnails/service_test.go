@@ -27,7 +27,6 @@ func (f *fakeItems) Get(id media.ID) (media.Item, error) {
 	}
 	return media.Item{}, fmt.Errorf("get %q: %w", id, media.ErrNotFound)
 }
-func (f *fakeItems) Root() string { return "/lib" }
 
 func (f *fakeItems) set(it media.Item) {
 	f.mu.Lock()
@@ -115,9 +114,9 @@ var modTime = time.Unix(1_700_000_000, 0)
 func newRig(opts Options) *rig {
 	r := &rig{
 		items: &fakeItems{items: map[media.ID]media.Item{
-			"v1": {ID: "v1", Name: "a.mkv", Path: "/lib/a.mkv", Kind: media.KindVideo, Size: 10, ModTime: modTime},
-			"v2": {ID: "v2", Name: "b.mkv", Path: "/lib/b.mkv", Kind: media.KindVideo, Size: 20, ModTime: modTime},
-			"v3": {ID: "v3", Name: "c.mkv", Path: "/lib/c.mkv", Kind: media.KindVideo, Size: 30, ModTime: modTime},
+			"v1": {ID: "v1", Name: "a.mkv", Root: "/lib", Path: "/lib/a.mkv", Kind: media.KindVideo, Size: 10, ModTime: modTime},
+			"v2": {ID: "v2", Name: "b.mkv", Root: "/lib", Path: "/lib/b.mkv", Kind: media.KindVideo, Size: 20, ModTime: modTime},
+			"v3": {ID: "v3", Name: "c.mkv", Root: "/lib", Path: "/lib/c.mkv", Kind: media.KindVideo, Size: 30, ModTime: modTime},
 		}},
 		cache: &fakeCache{data: map[string][]byte{}},
 		grab:  &fakeGrabber{},

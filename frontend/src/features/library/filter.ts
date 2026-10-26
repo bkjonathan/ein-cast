@@ -26,7 +26,7 @@ export function countByKind(items: readonly LibraryItem[]): Record<KindFilter, n
 }
 
 /**
- * Applies the kind chip, the search box and the sort order. Search is a
+ * Applies the library and kind choices, the search box and the sort order. Search is a
  * case-insensitive substring match on the path inside the library (so a folder
  * name finds everything in it); every word must match somewhere, in any order.
  * The input array is never reordered.
@@ -36,9 +36,11 @@ export function browseItems(
   kind: KindFilter,
   query: string,
   sort: SortKey,
+  library = "all",
 ): LibraryItem[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = items.filter((it) => {
+    if (library !== "all" && it.libraryId !== library) return false;
     if (kind !== "all" && it.kind !== kind) return false;
     if (words.length === 0) return true;
     const haystack = it.relPath.toLowerCase();

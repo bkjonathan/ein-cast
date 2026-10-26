@@ -34,6 +34,7 @@ export namespace bridge {
 	}
 	export class LibraryItemDTO {
 	    id: string;
+	    libraryId: string;
 	    name: string;
 	    relPath: string;
 	    kind: string;
@@ -47,6 +48,7 @@ export namespace bridge {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.libraryId = source["libraryId"];
 	        this.name = source["name"];
 	        this.relPath = source["relPath"];
 	        this.kind = source["kind"];
@@ -54,40 +56,32 @@ export namespace bridge {
 	        this.modTime = source["modTime"];
 	    }
 	}
-	export class LibraryStatusDTO {
-	    scanning: boolean;
-	    root: string;
-	    error: string;
-	    watching: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new LibraryStatusDTO(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.scanning = source["scanning"];
-	        this.root = source["root"];
-	        this.error = source["error"];
-	        this.watching = source["watching"];
-	    }
-	}
-	export class LibrarySummaryDTO {
+	export class LibraryStateDTO {
+	    id: string;
+	    name: string;
 	    root: string;
 	    total: number;
 	    totalSize: number;
 	    counts: KindCountsDTO;
+	    scanning: boolean;
+	    error: string;
+	    watching: boolean;
 	
 	    static createFrom(source: any = {}) {
-	        return new LibrarySummaryDTO(source);
+	        return new LibraryStateDTO(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
 	        this.root = source["root"];
 	        this.total = source["total"];
 	        this.totalSize = source["totalSize"];
 	        this.counts = this.convertValues(source["counts"], KindCountsDTO);
+	        this.scanning = source["scanning"];
+	        this.error = source["error"];
+	        this.watching = source["watching"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -268,6 +262,8 @@ export namespace bridge {
 	    port: number;
 	    localUrl: string;
 	    lanUrls: string[];
+	    nameUrls: string[];
+	    discovery: string[];
 	    error: string;
 	
 	    static createFrom(source: any = {}) {
@@ -281,6 +277,8 @@ export namespace bridge {
 	        this.port = source["port"];
 	        this.localUrl = source["localUrl"];
 	        this.lanUrls = source["lanUrls"];
+	        this.nameUrls = source["nameUrls"];
+	        this.discovery = source["discovery"];
 	        this.error = source["error"];
 	    }
 	}
@@ -288,6 +286,7 @@ export namespace bridge {
 	    port: number;
 	    name: string;
 	    requireToken: boolean;
+	    dlna: boolean;
 	    accessToken: string;
 	    tokenPersisted: boolean;
 	
@@ -300,6 +299,7 @@ export namespace bridge {
 	        this.port = source["port"];
 	        this.name = source["name"];
 	        this.requireToken = source["requireToken"];
+	        this.dlna = source["dlna"];
 	        this.accessToken = source["accessToken"];
 	        this.tokenPersisted = source["tokenPersisted"];
 	    }
@@ -308,6 +308,7 @@ export namespace bridge {
 	    port: number;
 	    name: string;
 	    requireToken: boolean;
+	    dlna: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsInputDTO(source);
@@ -318,6 +319,7 @@ export namespace bridge {
 	        this.port = source["port"];
 	        this.name = source["name"];
 	        this.requireToken = source["requireToken"];
+	        this.dlna = source["dlna"];
 	    }
 	}
 

@@ -17,11 +17,13 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
+	"eincast/internal/adapters/dlna"
 	"eincast/internal/adapters/ffmpeg"
 	"eincast/internal/adapters/fsscan"
 	"eincast/internal/adapters/fswatch"
 	"eincast/internal/adapters/httpapi"
 	"eincast/internal/adapters/logbus"
+	"eincast/internal/adapters/mdns"
 	"eincast/internal/adapters/memrepo"
 	"eincast/internal/adapters/netinfo"
 	"eincast/internal/adapters/secrets"
@@ -37,6 +39,7 @@ import (
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/app/thumbnails"
+	"eincast/internal/app/transcode"
 	"eincast/internal/bridge"
 )
 
@@ -93,22 +96,41 @@ func main() {
 	thumbCache.Prune(thumbnailMaxAge)
 	thumbnailService := thumbnails.NewService(libraryService, ffmpeg.New(log), thumbCache, log, thumbnails.DefaultOptions)
 
+	// Videos a device cannot play as they are are converted to HLS by the same
+	// ffmpeg, into temporary folders that are emptied at every start and stopped
+	// with the app.
+	conversions := transcode.NewService(libraryService,
+		ffmpeg.NewTranscoder(cacheDir(log, "hls"), log), log, transcode.DefaultOptions)
+
+	// Smart TVs identify a server by a UUID; deriving it from the computer's name
+	// keeps it the same on every run without storing anything.
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = appName
+	}
+	deviceID := dlna.DeviceUUID(hostname)
+
 	webServer := httpapi.New(libraryService, settingsService, remoteService, version, log,
-		httpapi.WithThumbnails(thumbnailService))
+		httpapi.WithThumbnails(thumbnailService), httpapi.WithTranscoding(conversions),
+		httpapi.WithDLNA(deviceID))
 	// The server withdraws public access before it stops, so a tunnel never
 	// outlives the server it points at.
 	streamingService := streaming.NewService(webServer, netinfo.New(), emitter, log,
-		streaming.WithPublicAccess(remoteService))
+		streaming.WithPublicAccess(remoteService),
+		// Once the server runs, make it findable: by name for computers and phones,
+		// and, only when the person turned it on, by TVs.
+		streaming.WithDiscovery(mdns.New(log), dlna.NewAnnouncer(deviceID, version, log)))
 	app := bridge.New(bridge.Deps{
-		Info:       bridge.Info{Name: appName, Version: version},
-		Library:    libraryService,
-		Settings:   settingsService,
-		Streaming:  streamingService,
-		Remote:     remoteService,
-		Thumbnails: thumbnailService,
-		Logs:       logs,
-		Emitter:    emitter,
-		Log:        log,
+		Info:        bridge.Info{Name: appName, Version: version},
+		Library:     libraryService,
+		Settings:    settingsService,
+		Streaming:   streamingService,
+		Remote:      remoteService,
+		Thumbnails:  thumbnailService,
+		Conversions: conversions,
+		Logs:        logs,
+		Emitter:     emitter,
+		Log:         log,
 	})
 
 	err = wails.Run(&options.App{
@@ -166,7 +188,7 @@ func settingsDir(log *slog.Logger) string {
 func cacheDir(log *slog.Logger, name string) string {
 	base, err := os.UserCacheDir()
 	if err != nil {
-		log.Warn("no user cache directory; thumbnails will be kept in the temp directory",
+		log.Warn("no user cache directory; cached files will be kept in the temp directory",
 			slog.String("error", err.Error()))
 		base = os.TempDir()
 	}

@@ -44,4 +44,7 @@ button.item img.thumb {
   flex: none; width: 3.5rem; height: 3.5rem; max-height: none; border-radius: 8px; object-fit: cover; background: var(--line);
 }
 button.item { align-items: center; }
+.item .resume-tag { color: var(--accent); white-space: nowrap; font-size: .85rem; }
+.linkbutton { font: inherit; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.linkbutton:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }

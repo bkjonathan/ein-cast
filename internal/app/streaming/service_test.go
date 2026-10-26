@@ -594,3 +594,169 @@ func TestLocal_NotAfterACrash(t *testing.T) {
 		t.Errorf("error = %v, want ErrServerNotRunning", err)
 	}
 }
+
+// fakeDiscovery is an app.Discovery that records what it was told and when.
+type fakeDiscovery struct {
+	name string
+	urls []string
+	err  error
+	web  *fakeWeb
+
+	mu         sync.Mutex
+	got        []app.Announcement
+	stops      int
+	serverStop int // how many times the server had been stopped when stop ran
+}
+
+func (f *fakeDiscovery) Name() string { return f.name }
+
+func (f *fakeDiscovery) Announce(_ context.Context, a app.Announcement) (func(), []string, error) {
+	f.mu.Lock()
+	f.got = append(f.got, a)
+	f.mu.Unlock()
+	if f.err != nil {
+		return nil, nil, f.err
+	}
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.stops++
+		if f.web != nil && len(f.web.runs) > 0 {
+			f.serverStop = f.web.last().stoppedCount()
+		}
+	}, f.urls, nil
+}
+
+func (f *fakeDiscovery) stopCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stops
+}
+
+func lanWeb() *fakeWeb {
+	return &fakeWeb{startFn: func() (*fakeRun, error) {
+		r := newFakeRun()
+		r.addrs = []netip.AddrPort{
+			netip.MustParseAddrPort("127.0.0.1:9000"),
+			netip.MustParseAddrPort("192.168.1.20:9000"),
+		}
+		return r, nil
+	}}
+}
+
+func newServiceWithDiscovery(web *fakeWeb, ds ...app.Discovery) (*Service, *fakeEvents) {
+	ev := &fakeEvents{}
+	return NewService(web, fakeNet{}, ev, slog.New(slog.DiscardHandler), WithDiscovery(ds...)), ev
+}
+
+func TestDiscovery_AnnouncesTheLANAddressesOnceRunning(t *testing.T) {
+	web := lanWeb()
+	d := &fakeDiscovery{name: "mdns", urls: []string{"http://eincast.local:9000"}}
+	svc, ev := newServiceWithDiscovery(web, d)
+
+	if err := svc.Start(context.Background(), NewConfig(WithPort(9000), WithName("Den"), WithDLNA(true))); err != nil {
+		t.Fatal(err)
+	}
+
+	want := app.Announcement{Name: "Den", Port: 9000, Addrs: []netip.Addr{netip.MustParseAddr("192.168.1.20")}, DLNA: true}
+	if len(d.got) != 1 || d.got[0].Name != want.Name || d.got[0].Port != 9000 || !d.got[0].DLNA ||
+		!slices.Equal(d.got[0].Addrs, want.Addrs) {
+		t.Errorf("announced %+v, want %+v (loopback must never be announced)", d.got, want)
+	}
+	st := svc.Status()
+	if !slices.Equal(st.NameURLs, d.urls) || !slices.Equal(st.Discovery, []string{"mdns"}) {
+		t.Errorf("Status() NameURLs=%v Discovery=%v", st.NameURLs, st.Discovery)
+	}
+	ev.mu.Lock()
+	last := ev.got[len(ev.got)-1]
+	ev.mu.Unlock()
+	if !slices.Equal(last.NameURLs, d.urls) {
+		t.Errorf("the UI was not told the announced names: %+v", last)
+	}
+	if !web.gotCfg.DLNA {
+		t.Error("the server was not asked to serve the DLNA pages")
+	}
+}
+
+func TestDiscovery_IsWithdrawnBeforeTheServerStopsAndForgottenAfter(t *testing.T) {
+	web := lanWeb()
+	d := &fakeDiscovery{name: "mdns", urls: []string{"http://eincast.local:9000"}, web: web}
+	svc, _ := newServiceWithDiscovery(web, d)
+	if err := svc.Start(context.Background(), NewConfig(WithPort(9000))); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if d.stopCount() != 1 || d.serverStop != 0 {
+		t.Errorf("withdrawn %d times, with the server stopped %d times; want once, before it stopped", d.stopCount(), d.serverStop)
+	}
+	if st := svc.Status(); len(st.NameURLs) != 0 || len(st.Discovery) != 0 {
+		t.Errorf("Status() after stop = %+v, want no announced names", st)
+	}
+}
+
+func TestDiscovery_IsWithdrawnWhenTheServerCrashes(t *testing.T) {
+	web := lanWeb()
+	d := &fakeDiscovery{name: "mdns"}
+	svc, _ := newServiceWithDiscovery(web, d)
+	if err := svc.Start(context.Background(), NewConfig(WithPort(9000))); err != nil {
+		t.Fatal(err)
+	}
+
+	web.last().end(errors.New("listener closed"))
+	eventually(t, func() bool { return svc.Status().State == server.Failed })
+	if d.stopCount() != 1 {
+		t.Errorf("withdrawn %d times after a crash, want 1: the network would keep pointing at nothing", d.stopCount())
+	}
+}
+
+func TestDiscovery_OneThatFailsDoesNotStopTheOthersOrTheServer(t *testing.T) {
+	web := lanWeb()
+	bad := &fakeDiscovery{name: "mdns", err: errors.New("multicast is blocked")}
+	skipped := &fakeDiscovery{name: "dlna", err: app.ErrNotAnnounced}
+	good := &fakeDiscovery{name: "other", urls: []string{"http://x"}}
+	svc, _ := newServiceWithDiscovery(web, bad, skipped, good)
+
+	if err := svc.Start(context.Background(), NewConfig(WithPort(9000))); err != nil {
+		t.Fatalf("Start() = %v: a discovery failure must not fail the server", err)
+	}
+	st := svc.Status()
+	if st.State != server.Running || !slices.Equal(st.Discovery, []string{"other"}) || !slices.Equal(st.NameURLs, []string{"http://x"}) {
+		t.Errorf("Status() = %+v", st)
+	}
+	if err := svc.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if good.stopCount() != 1 || bad.stopCount() != 0 || skipped.stopCount() != 0 {
+		t.Errorf("stops: good=%d bad=%d skipped=%d", good.stopCount(), bad.stopCount(), skipped.stopCount())
+	}
+}
+
+func TestDiscovery_ARestartAnnouncesAgain(t *testing.T) {
+	web := lanWeb()
+	d := &fakeDiscovery{name: "mdns", urls: []string{"http://eincast.local:9000"}}
+	svc, _ := newServiceWithDiscovery(web, d)
+	for range 2 {
+		if err := svc.Start(context.Background(), NewConfig(WithPort(9000))); err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.Stop(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(d.got) != 2 || d.stopCount() != 2 {
+		t.Errorf("announced %d times, withdrawn %d times, want 2 and 2", len(d.got), d.stopCount())
+	}
+}
+
+func TestDiscovery_NoneConfiguredChangesNothing(t *testing.T) {
+	svc, _ := newService(lanWeb())
+	if err := svc.Start(context.Background(), NewConfig(WithPort(9000))); err != nil {
+		t.Fatal(err)
+	}
+	if st := svc.Status(); len(st.NameURLs) != 0 || len(st.Discovery) != 0 {
+		t.Errorf("Status() = %+v", st)
+	}
+}

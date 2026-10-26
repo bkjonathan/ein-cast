@@ -31,6 +31,18 @@ export function needsRestart(
   );
 }
 
+/**
+ * Smart TV discovery is announced when the server starts, so the running server
+ * differs from the saved setting until it is restarted. `discovery` is what Go
+ * reports as active ("mdns", "dlna").
+ */
+export function tvNeedsRestart(
+  running: { state: string; discovery: string[] } | null,
+  saved: Pick<Settings, "dlna">,
+): boolean {
+  return running !== null && running.state === "running" && running.discovery.includes("dlna") !== saved.dlna;
+}
+
 /** Port text to a number; anything unparsable becomes 0, which Go rejects with a clear message. */
 export function parsePort(text: string): number {
   const n = Number(text.trim());

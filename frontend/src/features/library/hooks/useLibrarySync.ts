@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef } from "react";
-import { getLibraryStatus, getLibrarySummary, listLibrary } from "@/shared/bridge";
+import { listLibraries, listLibrary } from "@/shared/bridge";
 import { useWailsEvent } from "@/shared/hooks/useWailsEvent";
-import { idleStatus, useLibraryStore } from "../store";
+import { useLibraryStore } from "../store";
 
 /** Keeps the library store in step with Go. Mount once, near the root. */
 export function useLibrarySync(): void {
-  const applyScanned = useLibraryStore((s) => s.applyScanned);
-  const applyStatus = useLibraryStore((s) => s.applyStatus);
+  const apply = useLibraryStore((s) => s.apply);
   const hydrate = useLibraryStore((s) => s.hydrate);
   const setItems = useLibraryStore((s) => s.setItems);
 
@@ -23,17 +22,19 @@ export function useLibrarySync(): void {
       .catch(() => undefined);
   }, [setItems]);
 
-  useWailsEvent("library:scanned", (summary) => {
-    applyScanned(summary);
+  // The files changed: a scan found something new, or a library came or went.
+  useWailsEvent("library:scanned", (libraries) => {
+    apply(libraries);
     refreshItems();
   });
-  useWailsEvent("library:status", applyStatus);
+  // Only what is happening changed (scanning, watching, a rename): the files did not.
+  useWailsEvent("library:status", apply);
 
   useEffect(() => {
-    Promise.all([getLibrarySummary(), getLibraryStatus()])
-      .then(([summary, status]) => hydrate(summary, status))
-      // No Go runtime (plain-browser dev): behave as "nothing scanned yet".
-      .catch(() => hydrate(null, idleStatus));
+    listLibraries()
+      .then(hydrate)
+      // No Go runtime (plain-browser dev): behave as "no libraries yet".
+      .catch(() => hydrate([]));
     refreshItems();
   }, [hydrate, refreshItems]);
 }

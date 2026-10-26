@@ -31,11 +31,13 @@ type Info struct {
 // Library is the part of the library use cases the bridge needs. It is declared
 // here, at the consumer, so the bridge can be tested with a fake.
 type Library interface {
-	ScanFolder(ctx context.Context, path string) (app.LibrarySummary, error)
-	Rescan(ctx context.Context) (app.LibrarySummary, error)
+	Add(ctx context.Context, root string) (app.LibraryState, error)
+	Remove(id media.LibraryID) error
+	Rename(id media.LibraryID, name string) error
+	Rescan(ctx context.Context, id media.LibraryID) error
+	RescanAll(ctx context.Context) error
 	Restore(ctx context.Context) error
-	Summary() (app.LibrarySummary, bool)
-	Status() app.LibraryStatus
+	State() []app.LibraryState
 	List() []media.Item
 	// Watch keeps the library in step with its folder until ctx ends.
 	Watch(ctx context.Context)
@@ -77,6 +79,15 @@ type Thumbnails interface {
 	Available() bool
 }
 
+// Conversions is the part of video conversion the bridge manages: it lives as
+// long as the app, and nothing it started may outlive it.
+type Conversions interface {
+	// Run cleans up idle conversions until ctx ends.
+	Run(ctx context.Context)
+	// StopAll stops every conversion and deletes its files.
+	StopAll()
+}
+
 // App is the Wails-bound facade. Every exported method is callable from JS, so
 // keep this surface small and stable (and keep lifecycle hooks unexported).
 type App struct {
@@ -85,7 +96,8 @@ type App struct {
 	settings  Settings
 	streaming Streaming
 	remote    Remote
-	thumbs    Thumbnails // nil: no thumbnails
+	thumbs    Thumbnails  // nil: no thumbnails
+	convert   Conversions // nil: no conversion
 	logs      app.LogStream
 	emitter   *Emitter
 	log       *slog.Logger
@@ -111,9 +123,11 @@ type Deps struct {
 	Remote    Remote
 	// Thumbnails may be nil; the UI then shows icons only.
 	Thumbnails Thumbnails
-	Logs       app.LogStream
-	Emitter    *Emitter
-	Log        *slog.Logger
+	// Conversions may be nil.
+	Conversions Conversions
+	Logs        app.LogStream
+	Emitter     *Emitter
+	Log         *slog.Logger
 }
 
 // New builds the facade from its dependencies.
@@ -125,6 +139,7 @@ func New(d Deps) *App {
 		streaming:  d.Streaming,
 		remote:     d.Remote,
 		thumbs:     d.Thumbnails,
+		convert:    d.Conversions,
 		logs:       d.Logs,
 		emitter:    d.Emitter,
 		log:        d.Log,
@@ -163,6 +178,10 @@ func (a *App) shutdown(ctx context.Context) {
 		// Nothing more to do while quitting, but leave a trace.
 		a.log.Warn("stop server on shutdown", slog.String("error", err.Error()))
 	}
+	// No ffmpeg or temporary file may outlive the app.
+	if a.convert != nil {
+		a.convert.StopAll()
+	}
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -173,6 +192,9 @@ func (a *App) startup(ctx context.Context) {
 	go a.forwardLogs(ctx)
 	// Follows the library folder on disk; also ends with the app context.
 	go a.library.Watch(ctx)
+	if a.convert != nil {
+		go a.convert.Run(ctx)
+	}
 	// Reopen the last folder in the background so the window appears at once.
 	go a.restoreLibrary(ctx)
 }
@@ -217,9 +239,11 @@ func (a *App) AppInfo() AppInfoDTO {
 	}
 }
 
-// ChooseFolder opens the native folder picker and scans the chosen folder. The
-// result arrives as a "library:scanned" event; this method only reports
-// failure. Cancelling the dialog is not an error.
+// ChooseFolder opens the native folder picker and adds the chosen folder as a
+// library, scanning it. The result arrives as "library:status" and
+// "library:scanned" events; this method only reports failure (a folder that is
+// already in the library, one that cannot be read). Cancelling the dialog is not
+// an error.
 func (a *App) ChooseFolder() error {
 	path, err := a.pickFolder(a.ctx)
 	if err != nil {
@@ -228,20 +252,35 @@ func (a *App) ChooseFolder() error {
 	if path == "" {
 		return nil
 	}
-	_, err = a.library.ScanFolder(a.ctx, path)
+	_, err = a.library.Add(a.ctx, path)
 	return err
 }
 
-// GetLibrarySummary returns the current library, or nil before the first scan.
-// The UI calls it on load so a reloaded webview recovers state from Go, which
-// stays the source of truth.
-func (a *App) GetLibrarySummary() *LibrarySummaryDTO {
-	summary, ok := a.library.Summary()
-	if !ok {
-		return nil
-	}
-	dto := toLibrarySummaryDTO(summary)
-	return &dto
+// ListLibraries returns every library with what is in it and what is happening
+// to it. The UI calls it on load so a reloaded webview recovers state from Go,
+// which stays the source of truth.
+func (a *App) ListLibraries() []LibraryStateDTO {
+	return toLibraryStateDTOs(a.library.State())
+}
+
+// RemoveLibrary takes a library out of the list. Its folder on disk is untouched.
+func (a *App) RemoveLibrary(id string) error {
+	return a.library.Remove(media.LibraryID(id))
+}
+
+// RenameLibrary changes the name a library is shown as.
+func (a *App) RenameLibrary(id, name string) error {
+	return a.library.Rename(media.LibraryID(id), name)
+}
+
+// RescanLibrary scans one library again. The result arrives as events.
+func (a *App) RescanLibrary(id string) error {
+	return a.library.Rescan(a.ctx, media.LibraryID(id))
+}
+
+// RescanAllLibraries scans every library again.
+func (a *App) RescanAllLibraries() error {
+	return a.library.RescanAll(a.ctx)
 }
 
 // ListLibrary returns every item in the library, in scan order. The UI calls it
@@ -300,6 +339,9 @@ func (a *App) StartServer() error {
 	return a.streaming.Start(a.ctx, streaming.NewConfig(
 		streaming.WithPort(s.Port),
 		streaming.WithName(s.Name),
+		// Never together with the token (settings refuses that too): a TV cannot
+		// present it, so this is a second lock on the same door.
+		streaming.WithDLNA(s.DLNA && !s.RequireToken),
 	))
 }
 
@@ -313,18 +355,6 @@ func (a *App) GetServerState() ServerStateDTO {
 	return toServerStateDTO(a.streaming.Status())
 }
 
-// RescanLibrary scans the current folder again. The result arrives as a
-// "library:scanned" event; failures also appear in "library:status".
-func (a *App) RescanLibrary() error {
-	_, err := a.library.Rescan(a.ctx)
-	return err
-}
-
-// GetLibraryStatus returns whether a scan is running and why the last one failed.
-func (a *App) GetLibraryStatus() LibraryStatusDTO {
-	return toLibraryStatusDTO(a.library.Status())
-}
-
 // GetSettings returns the saved settings and, when switched on, the access token.
 func (a *App) GetSettings() SettingsDTO {
 	return toSettingsDTO(a.settings.Get())
@@ -332,9 +362,10 @@ func (a *App) GetSettings() SettingsDTO {
 
 // UpdateSettings validates and saves the settings. The new values arrive as a
 // "settings:changed" event; a rejected value is returned as an error. A new
-// port or name applies the next time the server starts; the token applies at once.
+// port, name or Smart TV setting applies the next time the server starts; the
+// token applies at once.
 func (a *App) UpdateSettings(in SettingsInputDTO) error {
-	_, err := a.settings.Update(settings.Input{Port: in.Port, Name: in.Name, RequireToken: in.RequireToken})
+	_, err := a.settings.Update(settings.Input{Port: in.Port, Name: in.Name, RequireToken: in.RequireToken, DLNA: in.DLNA})
 	return err
 }
 

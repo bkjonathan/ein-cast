@@ -4,6 +4,7 @@ import { createThumbnailLoader, thumbnailKey } from "./thumbnailCache";
 
 const item = (id: string, over: Partial<LibraryItem> = {}): LibraryItem => ({
   id,
+  libraryId: "L1",
   name: `${id}.mp4`,
   relPath: `${id}.mp4`,
   kind: "video",

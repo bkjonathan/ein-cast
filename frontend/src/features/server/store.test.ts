@@ -7,7 +7,7 @@ const status = (state: ServerStatus["state"]): ServerStatus => ({
   name: "Den",
   port: 0,
   localUrl: "",
-  lanUrls: [],
+  lanUrls: [], nameUrls: [], discovery: [],
   error: "",
 });
 

@@ -20,6 +20,8 @@ const (
 type Config struct {
 	Port int
 	Name string
+	// DLNA turns on Smart TV discovery and the pages TVs browse.
+	DLNA bool
 }
 
 // Option customizes a Config.
@@ -33,6 +35,11 @@ func WithPort(port int) Option {
 // WithName sets the server's display name.
 func WithName(name string) Option {
 	return func(c *Config) { c.Name = strings.TrimSpace(name) }
+}
+
+// WithDLNA turns Smart TV (DLNA) discovery on or off.
+func WithDLNA(on bool) Option {
+	return func(c *Config) { c.DLNA = on }
 }
 
 // NewConfig returns the defaults with opts applied. It does not validate:

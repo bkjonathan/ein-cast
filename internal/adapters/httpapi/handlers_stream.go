@@ -3,13 +3,11 @@ package httpapi
 import (
 	"errors"
 	"io/fs"
-	"mime"
 	"net/http"
 	"os"
-	"path"
-	"strings"
 
 	"eincast/internal/adapters/safepath"
+	"eincast/internal/domain/media"
 )
 
 // handleStream serves a file's bytes. http.ServeContent gives us Range
@@ -23,7 +21,7 @@ func (a *api) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	realPath, err := safepath.Inside(a.lib.Root(), it.Path)
+	realPath, err := safepath.Inside(it.Root, it.Path)
 	if err != nil {
 		// Possible if a file was swapped for a symlink after the scan. Log the
 		// real reason; tell the client nothing beyond "not found".
@@ -46,8 +44,21 @@ func (a *api) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", contentType(it.Name))
+	w.Header().Set("Content-Type", media.ContentType(it.Name))
+	a.dlnaHeaders(w, r)
 	http.ServeContent(w, r, it.Name, info.ModTime(), f)
+}
+
+// dlnaHeaders answers a TV that asks for DLNA's content features, which it does
+// by sending "getcontentFeatures.dlna.org: 1" with the request. Several TVs
+// refuse to play a file whose response lacks them. Only while Smart TV
+// discovery is on.
+func (a *api) dlnaHeaders(w http.ResponseWriter, r *http.Request) {
+	if a.dlna == nil || r.Header.Get("getcontentFeatures.dlna.org") != "1" {
+		return
+	}
+	w.Header().Set("transferMode.dlna.org", "Streaming")
+	w.Header().Set("contentFeatures.dlna.org", "DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000")
 }
 
 func (a *api) fileError(w http.ResponseWriter, r *http.Request, err error) {
@@ -58,45 +69,4 @@ func (a *api) fileError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	a.log.ErrorContext(r.Context(), "open media failed", errAttr(err))
 	writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
-}
-
-// contentType picks a MIME type by extension. Types that operating systems
-// often get wrong or omit (notably .mkv) are pinned first, so playback does not
-// depend on the host's mime database.
-func contentType(name string) string {
-	ext := strings.ToLower(path.Ext(name))
-	switch ext {
-	case ".mkv":
-		return "video/x-matroska"
-	case ".m4v":
-		return "video/x-m4v"
-	case ".ts":
-		return "video/mp2t"
-	case ".avi":
-		return "video/x-msvideo"
-	case ".wmv":
-		return "video/x-ms-wmv"
-	case ".flv":
-		return "video/x-flv"
-	case ".3gp":
-		return "video/3gpp"
-	case ".flac":
-		return "audio/flac"
-	case ".opus":
-		return "audio/ogg; codecs=opus"
-	case ".m4a":
-		return "audio/mp4"
-	case ".wma":
-		return "audio/x-ms-wma"
-	case ".aif", ".aiff":
-		return "audio/aiff"
-	case ".heic":
-		return "image/heic"
-	case ".avif":
-		return "image/avif"
-	}
-	if t := mime.TypeByExtension(ext); t != "" {
-		return t
-	}
-	return "application/octet-stream"
 }

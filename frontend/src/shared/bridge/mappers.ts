@@ -1,5 +1,6 @@
 import type {
   LibraryItem,
+  LibraryState,
   LogLevel,
   LogLine,
   MediaKind,
@@ -26,6 +27,8 @@ export interface RawServerStatus {
   port: number;
   localUrl: string;
   lanUrls: string[];
+  nameUrls: string[];
+  discovery: string[];
   error: string;
 }
 
@@ -46,6 +49,8 @@ export function toServerStatus(raw: RawServerStatus): ServerStatus {
     port: raw.port,
     localUrl: raw.localUrl,
     lanUrls: [...raw.lanUrls],
+    nameUrls: [...raw.nameUrls],
+    discovery: [...raw.discovery],
     error: raw.error,
   };
 }
@@ -145,6 +150,7 @@ const mediaKinds: readonly MediaKind[] = ["video", "audio", "image"];
 /** The wire shape of a library item, before `kind` is narrowed. */
 export interface RawLibraryItem {
   id: string;
+  libraryId: string;
   name: string;
   relPath: string;
   kind: string;
@@ -161,10 +167,38 @@ export function toLibraryItem(raw: RawLibraryItem): LibraryItem {
   if (!kind) throw new Error(`unknown media kind from Go: "${raw.kind}"`);
   return {
     id: raw.id,
+    libraryId: raw.libraryId,
     name: raw.name,
     relPath: raw.relPath,
     kind,
     size: raw.size,
     modTime: raw.modTime,
+  };
+}
+
+/** The wire shape of a library. Its counts are copied, so a caller cannot change Go's object. */
+export interface RawLibraryState {
+  id: string;
+  name: string;
+  root: string;
+  total: number;
+  totalSize: number;
+  counts: { video: number; audio: number; image: number };
+  scanning: boolean;
+  error: string;
+  watching: boolean;
+}
+
+export function toLibraryState(raw: RawLibraryState): LibraryState {
+  return {
+    id: raw.id,
+    name: raw.name,
+    root: raw.root,
+    total: raw.total,
+    totalSize: raw.totalSize,
+    counts: { video: raw.counts.video, audio: raw.counts.audio, image: raw.counts.image },
+    scanning: raw.scanning,
+    error: raw.error,
+    watching: raw.watching,
   };
 }

@@ -14,7 +14,7 @@ export function ServerSettings() {
   return <ServerForm key={`${saved.port}|${saved.name}`} saved={saved} />;
 }
 
-function ServerForm({ saved }: { saved: { port: number; name: string; requireToken: boolean } }) {
+function ServerForm({ saved }: { saved: { port: number; name: string; requireToken: boolean; dlna: boolean } }) {
   const [form, setForm] = useState(() => formFrom(saved));
   const { save, pending, error } = useSettingsCommands();
   const running = useServerStore((s) => s.status);
@@ -27,7 +27,7 @@ function ServerForm({ saved }: { saved: { port: number; name: string; requireTok
         // A real form, so Enter saves.
         onSubmit={(e) => {
           e.preventDefault();
-          void save({ port: parsePort(form.port), name: form.name, requireToken: saved.requireToken });
+          void save({ port: parsePort(form.port), name: form.name, requireToken: saved.requireToken, dlna: saved.dlna });
         }}
       >
         <header>

@@ -44,7 +44,6 @@ type fakeLibrary struct {
 }
 
 func (f *fakeLibrary) List() []media.Item { return f.items }
-func (f *fakeLibrary) Root() string       { return f.root }
 func (f *fakeLibrary) Get(id media.ID) (media.Item, error) {
 	for _, it := range f.items {
 		if it.ID == id {
@@ -77,6 +76,9 @@ func writeFile(t *testing.T, root, rel string, data []byte) string {
 	return p
 }
 
+// testLibrary is the library every fixture item belongs to.
+const testLibrary media.LibraryID = "testlib"
+
 func itemFor(t *testing.T, root, rel string, kind media.Kind) media.Item {
 	t.Helper()
 	p := filepath.Join(root, filepath.FromSlash(rel))
@@ -85,7 +87,8 @@ func itemFor(t *testing.T, root, rel string, kind media.Kind) media.Item {
 		t.Fatal(err)
 	}
 	return media.Item{
-		ID: media.NewID(rel), Name: filepath.Base(rel), RelPath: rel,
+		ID: media.NewID(testLibrary, rel), LibraryID: testLibrary, Root: root,
+		Name: filepath.Base(rel), RelPath: rel,
 		Path: p, Kind: kind, Size: info.Size(), ModTime: info.ModTime(),
 	}
 }
@@ -232,13 +235,13 @@ func TestLibrary_ListHidesInternalFields(t *testing.T) {
 		for k := range it {
 			keys = append(keys, k)
 		}
-		for _, want := range []string{"id", "name", "kind", "size", "modTime"} {
+		for _, want := range []string{"id", "name", "kind", "size", "modTime", "subtitles"} {
 			if _, ok := it[want]; !ok {
 				t.Errorf("item missing %q: %v", want, it)
 			}
 		}
-		if len(keys) != 5 {
-			t.Errorf("item has keys %v; only id, name, kind, size, modTime may be exposed", keys)
+		if len(keys) != 6 {
+			t.Errorf("item has keys %v; only id, name, kind, size, modTime, subtitles may be exposed", keys)
 		}
 	}
 	if strings.Contains(fmt.Sprint(items), f.root) {
@@ -399,10 +402,25 @@ func TestStream_FileDeletedSinceScan(t *testing.T) {
 	assertErrorShape(t, f.get("/stream/"+string(f.movie.ID)), 404, "not_found")
 }
 
-func TestStream_NoLibraryLoaded(t *testing.T) {
+func TestStream_AnItemWithoutALibraryRootIsNeverServed(t *testing.T) {
 	f := newFixture(t)
-	f.lib.root = ""
+	f.lib.items[0].Root = ""
 	assertErrorShape(t, f.get("/stream/"+string(f.movie.ID)), 404, "not_found")
+}
+
+// With several libraries the guard is per item: a file must be inside the
+// library it claims to belong to, not merely inside some library.
+func TestStream_AFileOutsideItsOwnLibraryIsRefused(t *testing.T) {
+	f := newFixture(t)
+	other := t.TempDir() // another library's folder
+	f.lib.items[0].Root = other
+	assertErrorShape(t, f.get("/stream/"+string(f.movie.ID)), 404, "not_found")
+
+	// And still served from the right one.
+	f.lib.items[0].Root = f.root
+	if got := f.get("/stream/" + string(f.movie.ID)).StatusCode; got != 200 {
+		t.Errorf("status = %d with the right root", got)
+	}
 }
 
 func TestPlaylist(t *testing.T) {

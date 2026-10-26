@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useWindowTheme } from "@/features/appearance";
-import { LibraryView, useLibraryStore, useLibrarySync } from "@/features/library";
+import { isFirstScan, LibraryView, useLibraryStore, useLibrarySync } from "@/features/library";
 import { LogsView, useLogSync } from "@/features/logs";
 import { OnboardingScreen, ScanningScreen } from "@/features/onboarding";
 import { RemoteView, useRemoteSync } from "@/features/remote";
@@ -24,18 +24,20 @@ export function App() {
   useWindowTheme();
 
   const hydrated = useLibraryStore((s) => s.hydrated);
-  const hasLibrary = useLibraryStore((s) => s.summary !== null);
-  const status = useLibraryStore((s) => s.status);
+  const libraries = useLibraryStore((s) => s.libraries);
 
   return (
     <div className="flex h-full flex-col">
       <TitleBar name={info?.name ?? "EinCast"} onOpenRemote={() => setActive("remote")} />
       <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3">
-        {!hydrated ? null : !hasLibrary ? (
-          // No library yet: either the first run, or the last folder is still
-          // being (re)opened, or it could not be opened.
+        {!hydrated ? null : libraries.length === 0 || isFirstScan(libraries) ? (
+          // Nothing to show yet: the first run, or the very first scan.
           <div className="min-w-0 flex-1">
-            {status?.scanning ? <ScanningScreen root={status.root} /> : <OnboardingScreen />}
+            {libraries.length === 0 ? (
+              <OnboardingScreen />
+            ) : (
+              <ScanningScreen root={libraries.find((l) => l.scanning)?.root ?? ""} />
+            )}
           </div>
         ) : (
           <>

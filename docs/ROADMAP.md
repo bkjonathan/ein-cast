@@ -8,9 +8,9 @@ instead of adding it early.
 | **v0.1 MVP** | Pick folder, scan, LAN HTTP server, device player page, M3U playlist, QR connect, live logs, glass UI | In progress — Phases 1–6 done; Phase 7 is the remote-access phase (v0.3) |
 | v0.2 | Settings persistence and manual rescan (Phase 6), file watcher (`fsnotify`), library search/filter, thumbnails (ffmpeg), dark/light toggle | Done in Phase 8 (see below) |
 | v0.3 Remote access | Tunnel providers (Tailscale, Cloudflare quick/named, ngrok), PIN auth, signed stream links, public-access badge, remote session list | In progress — see phase 7 steps below |
-| v0.4 Playback | ffmpeg HLS transcoding, subtitles (.srt → WebVTT), resume position per device | |
-| v0.5 TV | DLNA/UPnP, mDNS `eincast.local` | |
-| v1.0 | Multiple libraries, user profiles, auto-update, signed + notarized builds | |
+| v0.4 Playback | ffmpeg HLS transcoding, subtitles (.srt → WebVTT), resume position per device | Done in Phase 9 (see below) |
+| v0.5 TV | DLNA/UPnP, mDNS `eincast.local` | Done in Phase 10 (see below) |
+| v1.0 | Multiple libraries, user profiles, auto-update, signed + notarized builds | In progress — multiple libraries done in Phase 11; the rest below |
 
 ## v0.1 phases
 
@@ -33,7 +33,60 @@ instead of adding it early.
    - **8b** — `fsnotify` folder watcher with quiet, debounced rescans (ADR 0014): **done**
    - **8c** — On-demand ffmpeg thumbnails in the desktop list and on the player page, disk cache (ADR 0015): **done**
 
+## v0.4 phase
+
+9. **Playback** — one phase, two steps:
+   - **9a** — Sidecar `.srt`/`.vtt` subtitles served as WebVTT; resume position per device, in the browser (ADR 0017): **done**
+   - **9b** — On-demand ffmpeg HLS conversion for Safari/iOS/TVs, shared sessions, bounded and self-cleaning (ADR 0018): **done**
+
+## v0.5 phase
+
+10. **TV** — one phase, three steps:
+   - **10a** — `Discovery` port, announced by `streaming.Service`; mDNS `eincast.local` and an `_http._tcp` service; the Connect card offers the name (ADR 0019): **done**
+   - **10b** — DLNA MediaServer over HTTP: device and service descriptions, ContentDirectory Browse with a folder tree, ConnectionManager, DIDL-Lite, `/stream` DLNA headers (ADR 0020): **done**
+   - **10c** — SSDP responder (announce, answer, goodbye), opt-in "Smart TVs" setting, exclusive with the access token: **done**
+
+## v1.0 phases
+
+11. **Multiple libraries** (done): a list of folders with their own identity, scanning and watching; IDs include the library; per-item path guard; Libraries panel in Settings; library filter (ADR 0021).
+
+Still to do for v1.0, none of it started:
+- **User profiles (kids/adults):** needs a design decision first. What does a profile restrict (which libraries? which kinds?), how does a device become a profile (a PIN per profile? a link per profile?), and how does that coexist with the access token and the tunnel PIN. The multi-library work is the part it builds on.
+- **Auto-update:** needs somewhere to publish releases and a way to verify them (a signing key); both are outside the code.
+- **Signed and notarized builds** (macOS notarization, a Windows code-signing certificate): need credentials, and a CI job to use them (`.github/workflows/ci.yml` only builds and tests today).
+
 ## Seams needed later
+
+- **Upgrade renumbers item IDs (11):** a one-time loss of resume positions saved in browsers (ADR 0021). Nothing to do unless it matters to someone.
+- **Per-library views on DLNA and the device page (11):** both list all libraries merged (DLNA merges folders of the same name). A top-level folder per library when there are several is the seam.
+- **Library order (11):** libraries appear in the order they were added; there is no reordering.
+- **Libraries on removable drives (11):** a missing folder stays listed with its error and is picked up again by a rescan (or a change event once it is back, if it was being watched). There is no "check again when a drive is mounted".
+- **Statistics cost (11):** `State()` sums every library's items on each event; caching them per library is the seam if a library grows to hundreds of thousands of files.
+
+- **No real TV yet (10b/10c):** discovery was checked with a second process over real multicast on this Mac, and the browse path with a test that plays a TV's part. TV firmwares differ (Samsung, LG, Sony, Android TV, Kodi, VLC). Before v0.5 is called finished: try at least one TV and one app (VLC's UPnP list is the easiest), and expect small changes in `didl.go` (`protocolInfo`, `DLNA.ORG_PN`, `dc:date`) or `handler.go`.
+- **Subtitles to TVs (10b):** the listing has no caption `<res>`. Samsung wants `sec:CaptionInfoEx` and a `CaptionInfo.sec` header, others a second `<res>` with `text/srt`. Needs a per-vendor decision and a route that serves `.srt` (today `/subtitle/{id}/{n}` serves WebVTT).
+- **Thumbnails in the DLNA listing (10b):** `upnp:albumArtURI` pointing at `/thumb/{id}` would show pictures on the TV.
+- **Converted streams for TVs (10b):** a TV that cannot decode a file gets no HLS fallback over DLNA.
+- **DLNA search and sort (10b):** `Search` is not implemented and `SortCriteria` is ignored; the capabilities say so.
+- **UPnP eventing (10b):** subscriptions are accepted and never delivered, on purpose (ADR 0020); a TV learns the library changed from `SystemUpdateID` when it browses.
+- **Applying the TV setting without a restart (10c):** announced at server start, like the port. Live toggling needs `streaming.Service` to start and stop one discovery by name.
+- **mDNS name conflicts (10a):** two EinCasts on one network both claim `eincast.local`. Probing and renaming (`eincast-2.local`) is the seam.
+- **Network changes (10a/10c):** the announced addresses are fixed at start, like the listeners (see "Network changes" above).
+- **SSDP on IPv6 (10c):** IPv4 only; the server listens on IPv4 only.
+- **Client isolation and firewalls (10a/10c):** a Wi-Fi with client isolation, or a firewall dropping UDP 1900 / 5353, hides the server. The address and QR code still work; the log says what was announced. A Settings hint could point this out.
+
+- **HLS on Chrome/Firefox (9b):** only devices that play HLS natively get converted streams. `hls.js` (a vendored script, a CSP line) would cover computers; the page's `canPlayHLS()` is the one decision to change.
+- **HLS never run on a real Apple device or TV (9b):** the output is verified against the real ffmpeg and a handwritten player. Before relying on it: open an MKV from an iPhone and an iPad on the LAN, then through a tunnel (segments authenticate by cookie only), and from a smart TV browser if there is one. Check seeking, pausing for a minute, and subtitles on a converted stream.
+- **Seeking ahead during an encode (9b):** a full encode is playable from the start but cannot be jumped past what is done. A per-segment on-demand encoder is the larger alternative (ADR 0018).
+- **Resume during an encode (9b):** a still-converting stream has no known length, so no position is saved until it ends. If that matters, the page could save against the source's duration from `/api/library`.
+- **Hardware encoding (9b):** `libx264` only. VideoToolbox/NVENC/QuickSync would be extra `plan` branches behind `hlsArgs`.
+- **Audio and subtitle track choice (9b):** the first audio stream is used, and embedded subtitles are ignored. A track picker needs the probe's stream list exposed per item.
+- **Embedded subtitles and image subtitles (9a):** only sidecar `.srt`/`.vtt`. Extracting tracks from MKV needs ffmpeg and a cache like thumbnails'.
+- **Subtitle sync and styling (9a):** none; the file is shown as written.
+- **Resume across addresses (9a):** positions live in the browser's storage per origin, so the LAN address and a tunnel address do not share them.
+- **Desktop Library list (9a):** does not show which videos have subtitles or are converted.
+- **Conversion limits (9b):** 2 at once, 2 minutes idle, 30 s before a busy slot is taken over; all constants in `transcode.DefaultOptions`, not yet settings.
+- **Disk use of conversions (9b):** an encode of a long film writes gigabytes into the cache folder until it is swept. There is no free-space check.
 
 - **Watcher on very large libraries (8b):** on macOS every watched file costs a file handle (kqueue). When the system refuses, nothing is watched and the Library screen says so; Rescan still works. If that is common, the seam is a polling `FolderWatcher` behind the same port (a stat-walk every few seconds) used as the fallback.
 - **Watcher on network shares (8b):** some SMB/NFS mounts deliver no change notifications, and nothing tells EinCast. The folder shows "Watching" and never signals. A "check every N minutes" setting is the seam.

@@ -68,9 +68,9 @@ func (e *Emitter) Publish(ev app.Event) {
 
 	switch ev := ev.(type) {
 	case app.LibraryScanned:
-		e.emit(ctx, EventLibraryScanned, toLibrarySummaryDTO(ev.Summary))
+		e.emit(ctx, EventLibraryScanned, toLibraryStateDTOs(ev.Libraries))
 	case app.LibraryStatusChanged:
-		e.emit(ctx, EventLibraryStatus, toLibraryStatusDTO(ev.Status))
+		e.emit(ctx, EventLibraryStatus, toLibraryStateDTOs(ev.Libraries))
 	case app.SettingsChanged:
 		e.emit(ctx, EventSettings, toSettingsDTO(ev.View))
 	case app.RemoteStatusChanged:

@@ -175,7 +175,12 @@ func (r *run) forget(path string) bool {
 	return true
 }
 
+// isMedia reports whether a file name can change the library: a media file, or
+// a subtitle that may belong to a video.
 func isMedia(name string) bool {
+	if media.IsSubtitleFile(name) {
+		return true
+	}
 	_, err := media.DetectKind(name)
 	return err == nil
 }

@@ -18,7 +18,9 @@ describe("onEvent", () => {
     const off = onEvent("library:scanned", handler);
 
     expect(runtime.EventsOn).toHaveBeenCalledWith("library:scanned", expect.any(Function));
-    const payload = { root: "/m", total: 0, totalSize: 0, counts: { video: 0, audio: 0, image: 0 } };
+    const payload = [
+      { id: "f1", name: "Films", root: "/m", total: 0, totalSize: 0, counts: { video: 0, audio: 0, image: 0 }, scanning: false, error: "", watching: false },
+    ];
     deliver(payload);
     expect(handler).toHaveBeenCalledWith(payload);
 
@@ -35,14 +37,14 @@ describe("onEvent", () => {
 
     const handler = vi.fn();
     onEvent("server:state", handler);
-    deliver({ state: "failed", name: "Den", port: 0, localUrl: "", lanUrls: [], error: "port in use" });
+    deliver({ state: "failed", name: "Den", port: 0, localUrl: "", lanUrls: [], nameUrls: [], discovery: [], error: "port in use" });
 
     expect(handler).toHaveBeenCalledWith({
       state: "failed",
       name: "Den",
       port: 0,
       localUrl: "",
-      lanUrls: [],
+      lanUrls: [], nameUrls: [], discovery: [],
       error: "port in use",
     });
   });
@@ -57,7 +59,7 @@ describe("onEvent", () => {
     const handler = vi.fn();
     onEvent("server:state", handler);
 
-    expect(() => deliver({ state: "paused", name: "", port: 0, localUrl: "", lanUrls: [], error: "" })).toThrow();
+    expect(() => deliver({ state: "paused", name: "", port: 0, localUrl: "", lanUrls: [], nameUrls: [], discovery: [], error: "" })).toThrow();
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -79,8 +81,7 @@ describe("onEvent", () => {
   });
 
   it.each([
-    ["library:status", { scanning: true, root: "/m", error: "", watching: false }],
-    ["settings:changed", { port: 9000, name: "Den", requireToken: true, accessToken: "t", tokenPersisted: true }],
+    ["settings:changed", { port: 9000, name: "Den", requireToken: true, dlna: false, accessToken: "t", tokenPersisted: true }],
   ] as const)("delivers %s payloads", (name, payload) => {
     let deliver: (payload: unknown) => void = () => undefined;
     runtime.EventsOn.mockImplementation((_n: string, cb: (p: unknown) => void) => {
@@ -92,6 +93,25 @@ describe("onEvent", () => {
     deliver(payload);
     expect(runtime.EventsOn).toHaveBeenLastCalledWith(name, expect.any(Function));
     expect(handler).toHaveBeenCalledWith(payload);
+  });
+
+  it.each(["library:status", "library:scanned"] as const)("decodes %s into a list of libraries", (name) => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_n: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+    const handler = vi.fn();
+    onEvent(name, handler);
+    const wire = {
+      id: "f1", name: "Films", root: "/m", total: 1, totalSize: 7,
+      counts: { video: 1, audio: 0, image: 0 }, scanning: true, error: "", watching: false,
+    };
+    deliver([wire]);
+    expect(runtime.EventsOn).toHaveBeenLastCalledWith(name, expect.any(Function));
+    expect(handler).toHaveBeenCalledWith([wire]);
+    deliver([]);
+    expect(handler).toHaveBeenLastCalledWith([]);
   });
 
   it("decodes remote:status payloads and rejects unknown states", () => {

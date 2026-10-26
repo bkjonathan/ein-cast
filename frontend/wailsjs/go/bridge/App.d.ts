@@ -16,10 +16,6 @@ export function DisableRemote():Promise<void>;
 
 export function EnableRemote(arg1:string):Promise<void>;
 
-export function GetLibraryStatus():Promise<bridge.LibraryStatusDTO>;
-
-export function GetLibrarySummary():Promise<bridge.LibrarySummaryDTO>;
-
 export function GetLogHistory():Promise<Array<bridge.LogLineDTO>>;
 
 export function GetRemoteProviderConfig(arg1:string):Promise<Array<bridge.RemoteFieldStateDTO>>;
@@ -32,11 +28,19 @@ export function GetSettings():Promise<bridge.SettingsDTO>;
 
 export function GetThumbnail(arg1:string):Promise<string>;
 
+export function ListLibraries():Promise<Array<bridge.LibraryStateDTO>>;
+
 export function ListLibrary():Promise<Array<bridge.LibraryItemDTO>>;
 
 export function ListRemoteProviders():Promise<Array<bridge.RemoteProviderDTO>>;
 
-export function RescanLibrary():Promise<void>;
+export function RemoveLibrary(arg1:string):Promise<void>;
+
+export function RenameLibrary(arg1:string,arg2:string):Promise<void>;
+
+export function RescanAllLibraries():Promise<void>;
+
+export function RescanLibrary(arg1:string):Promise<void>;
 
 export function RotateAccessToken():Promise<void>;
 

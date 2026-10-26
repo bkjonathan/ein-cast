@@ -46,7 +46,7 @@ const remote = (over: Partial<RemoteStatus> = {}): RemoteStatus => ({
 });
 
 const server = (state: ServerStatus["state"]): ServerStatus => ({
-  state, name: "Den", port: 8765, localUrl: "", lanUrls: [], error: "",
+  state, name: "Den", port: 8765, localUrl: "", lanUrls: [], nameUrls: [], discovery: [], error: "",
 });
 
 function show(status: RemoteStatus | null, providers: RemoteProvider[], serverState: ServerStatus["state"] = "running") {

@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	"eincast/internal/app"
+	"eincast/internal/domain/media"
 )
 
 type fakeStore struct {
@@ -107,28 +109,28 @@ func TestLoad_FirstRunUsesDefaults(t *testing.T) {
 	s.Load()
 
 	got := s.Get()
-	if got.Settings != Default() || got.Token != "" || s.Required() {
+	if !reflect.DeepEqual(got.Settings, Default()) || got.Token != "" || s.Required() {
 		t.Fatalf("Get() = %+v, want the defaults with no token", got)
 	}
 }
 
 func TestLoad_RestoresSavedSettings(t *testing.T) {
-	saved := app.Settings{Port: 9000, Name: "Den", LibraryRoot: "/media"}
+	saved := app.Settings{Port: 9000, Name: "Den", Libraries: []media.Library{media.NewLibrary("/media")}}
 	s, _ := newTestService(&fakeStore{data: &saved}, newSecrets())
 	s.Load()
 
-	if got := s.Get().Settings; got != saved {
+	if got := s.Get().Settings; !reflect.DeepEqual(got, saved) {
 		t.Fatalf("Get() = %+v, want %+v", got, saved)
 	}
-	if s.LastRoot() != "/media" {
-		t.Errorf("LastRoot() = %q", s.LastRoot())
+	if libs := s.Libraries(); len(libs) != 1 || libs[0].Root != "/media" {
+		t.Errorf("Libraries() = %+v", libs)
 	}
 }
 
 func TestLoad_UnusableFileFallsBackToDefaults(t *testing.T) {
 	s, _ := newTestService(&fakeStore{loadErr: errors.New("corrupt json")}, newSecrets())
 	s.Load()
-	if s.Get().Settings != Default() {
+	if !reflect.DeepEqual(s.Get().Settings, Default()) {
 		t.Fatalf("Get() = %+v, want defaults", s.Get().Settings)
 	}
 }
@@ -143,13 +145,15 @@ func TestLoad_ResetsOnlyTheInvalidFields(t *testing.T) {
 		{"privileged port", app.Settings{Port: 80, Name: "Den"}, app.Settings{Port: Default().Port, Name: "Den"}},
 		{"bad name keeps good port", app.Settings{Port: 9000, Name: "a\nb"}, app.Settings{Port: 9000, Name: Default().Name}},
 		{"empty name", app.Settings{Port: 9000}, app.Settings{Port: 9000, Name: Default().Name}},
-		{"keeps library folder and token flag", app.Settings{Port: 9000, Name: "x", LibraryRoot: "/m", RequireToken: true}, app.Settings{Port: 9000, Name: "x", LibraryRoot: "/m", RequireToken: true}},
+		{"keeps the libraries and token flag", app.Settings{Port: 9000, Name: "x", Libraries: []media.Library{media.NewLibrary("/m")}, RequireToken: true}, app.Settings{Port: 9000, Name: "x", Libraries: []media.Library{media.NewLibrary("/m")}, RequireToken: true}},
+		{"keeps the TV setting", app.Settings{Port: 9000, Name: "x", DLNA: true}, app.Settings{Port: 9000, Name: "x", DLNA: true}},
+		{"a file asking for both keeps the token and drops the TV access", app.Settings{Port: 9000, Name: "x", RequireToken: true, DLNA: true}, app.Settings{Port: 9000, Name: "x", RequireToken: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s, _ := newTestService(&fakeStore{data: &tt.in}, newSecrets())
 			s.Load()
-			if got := s.Get().Settings; got != tt.want {
+			if got := s.Get().Settings; !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("Get() = %+v, want %+v", got, tt.want)
 			}
 		})
@@ -176,6 +180,48 @@ func TestUpdate_SavesAndPublishes(t *testing.T) {
 	}
 }
 
+func TestUpdate_SmartTVDiscoveryIsSavedAndPublished(t *testing.T) {
+	store := &fakeStore{}
+	s, ev := newTestService(store, newSecrets())
+	s.Load()
+	if s.Get().DLNA {
+		t.Fatal("DLNA is on by default: it opens the library to the whole network and must be asked for")
+	}
+
+	view, err := s.Update(Input{Port: 8765, Name: "EinCast", DLNA: true})
+	if err != nil || !view.DLNA {
+		t.Fatalf("Update() = %+v, %v", view, err)
+	}
+	if len(store.saves) != 1 || !store.saves[0].DLNA || len(ev.got) != 1 || !ev.got[0].DLNA {
+		t.Errorf("saves=%+v events=%+v", store.saves, ev.got)
+	}
+}
+
+func TestUpdate_TokenAndSmartTVDiscoveryCannotBothBeOn(t *testing.T) {
+	store := &fakeStore{}
+	s, ev := newTestService(store, newSecrets())
+	s.Load()
+
+	_, err := s.Update(Input{Port: 8765, Name: "EinCast", RequireToken: true, DLNA: true})
+	if !errors.Is(err, ErrDLNAWithToken) {
+		t.Fatalf("error = %v, want ErrDLNAWithToken", err)
+	}
+	if len(store.saves) != 0 || len(ev.got) != 0 || s.Get().RequireToken || s.Get().DLNA {
+		t.Errorf("a refused update changed something: saves=%d events=%d view=%+v", len(store.saves), len(ev.got), s.Get())
+	}
+
+	// Either one alone is fine, and switching from one to the other is two steps.
+	if _, err := s.Update(Input{Port: 8765, Name: "EinCast", DLNA: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(Input{Port: 8765, Name: "EinCast", RequireToken: true, DLNA: true}); !errors.Is(err, ErrDLNAWithToken) {
+		t.Errorf("turning the token on while TVs are on: error = %v", err)
+	}
+	if _, err := s.Update(Input{Port: 8765, Name: "EinCast", RequireToken: true}); err != nil {
+		t.Errorf("token on, TVs off: %v", err)
+	}
+}
+
 func TestUpdate_ValidationFailuresChangeNothing(t *testing.T) {
 	tests := []struct {
 		name string
@@ -198,7 +244,7 @@ func TestUpdate_ValidationFailuresChangeNothing(t *testing.T) {
 			if _, err := s.Update(tt.in); err == nil {
 				t.Fatal("Update() error = nil")
 			}
-			if s.Get() != before || len(store.saves) != 0 || len(ev.got) != 0 {
+			if !reflect.DeepEqual(s.Get(), before) || len(store.saves) != 0 || len(ev.got) != 0 {
 				t.Errorf("a rejected update had effects: state=%+v saves=%d events=%d", s.Get(), len(store.saves), len(ev.got))
 			}
 		})
@@ -382,39 +428,49 @@ func TestRotateToken(t *testing.T) {
 	}
 }
 
-func TestRememberRoot(t *testing.T) {
+func TestSaveLibraries(t *testing.T) {
 	store := &fakeStore{}
 	s, _ := newTestService(store, newSecrets())
 	s.Load()
+	films, music := media.NewLibrary("/media/films"), media.NewLibrary("/media/music")
 
-	if err := s.RememberRoot("/media"); err != nil {
+	if err := s.SaveLibraries([]media.Library{films, music}); err != nil {
 		t.Fatal(err)
 	}
-	if s.LastRoot() != "/media" || len(store.saves) != 1 || store.saves[0].LibraryRoot != "/media" {
-		t.Errorf("LastRoot=%q saves=%+v", s.LastRoot(), store.saves)
-	}
-
-	_ = s.RememberRoot("/media") // unchanged: no needless disk write
-	if len(store.saves) != 1 {
-		t.Errorf("saved %d times, want 1", len(store.saves))
+	if got := s.Libraries(); !reflect.DeepEqual(got, []media.Library{films, music}) || len(store.saves) != 1 ||
+		!reflect.DeepEqual(store.saves[0].Libraries, []media.Library{films, music}) {
+		t.Errorf("Libraries()=%+v saves=%+v", got, store.saves)
 	}
 
 	store.saveErr = errors.New("read-only disk")
-	if err := s.RememberRoot("/other"); err == nil || s.LastRoot() != "/media" {
-		t.Errorf("a failed save must report the error and keep the old value (err=%v last=%q)", err, s.LastRoot())
+	if err := s.SaveLibraries([]media.Library{films}); err == nil || len(s.Libraries()) != 2 {
+		t.Errorf("a failed save must report the error and keep the old list (err=%v libraries=%+v)", err, s.Libraries())
 	}
 }
 
-func TestRememberRoot_PreservesOtherSettings(t *testing.T) {
+func TestSaveLibraries_ReturnsACopy(t *testing.T) {
+	s, _ := newTestService(&fakeStore{}, newSecrets())
+	s.Load()
+	in := []media.Library{media.NewLibrary("/a")}
+	_ = s.SaveLibraries(in)
+
+	in[0].Name = "changed by the caller"
+	s.Libraries()[0].Name = "changed through the result"
+	if got := s.Libraries()[0].Name; got != "a" {
+		t.Errorf("Name = %q: the stored list was changed through a shared slice", got)
+	}
+}
+
+func TestSaveLibraries_PreservesOtherSettings(t *testing.T) {
 	store := &fakeStore{}
 	s, _ := newTestService(store, newSecrets())
 	s.Load()
-	_, _ = s.Update(Input{Port: 9100, Name: "Den"})
-	_ = s.RememberRoot("/media")
+	_, _ = s.Update(Input{Port: 9100, Name: "Den", DLNA: true})
+	_ = s.SaveLibraries([]media.Library{media.NewLibrary("/media")})
 
 	last := store.saves[len(store.saves)-1]
-	if last.Port != 9100 || last.Name != "Den" || last.LibraryRoot != "/media" {
-		t.Errorf("last save = %+v; remembering the folder must not reset other settings", last)
+	if last.Port != 9100 || last.Name != "Den" || !last.DLNA || len(last.Libraries) != 1 {
+		t.Errorf("last save = %+v; remembering the folders must not reset other settings", last)
 	}
 }
 
@@ -460,8 +516,8 @@ func TestConcurrentUse(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 20 {
-				_ = s.RememberRoot("/a")
-				_ = s.RememberRoot("/b")
+				_ = s.SaveLibraries([]media.Library{media.NewLibrary("/a")})
+				_ = s.SaveLibraries([]media.Library{media.NewLibrary("/b")})
 			}
 		}()
 	}

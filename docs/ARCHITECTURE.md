@@ -27,22 +27,26 @@ Arrows point in the direction of the import. `domain` imports nothing; `app`
 never imports Wails, `net/http` or `os`. `scripts/check-deps.sh` fails if that
 changes.
 
-## What exists today (through Phase 8)
+## What exists today (through Phase 11)
 
 | Layer | Contents |
 |---|---|
-| `domain/media` | `Item`, `ID` (hash of relative path), `Kind` + extension detection, `Ignored` (names that are never library content), `Stats`, sentinel errors |
+| `domain/media` | `Item`, `ID` (hash of library and relative path), `Library`/`LibraryID` (identity from the folder), `Overlaps`, `Kind` + extension detection, `Ignored` (names that are never library content), `Subtitle` + `MatchSubtitles` (sidecar rules), `Stats`, sentinel errors |
+| `domain/subtitle` | `ToWebVTT`, `Decode`: SRT/VTT text to WebVTT, UTF-8/UTF-16/Windows-1252 to UTF-8 |
 | `domain/server` | `State`, the transition table, and `Machine` (atomic check-and-set) |
-| `app` | Ports (`Scanner`, `FolderWatcher`, `FrameGrabber`, `ThumbnailCache`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `NetInfo`, `LogStream`, `SettingsStore`, `SecretStore`, `LibraryMemory`), remote-access ports and types (`Tunnel`, `LocalServer`, `TunnelRegistry`, `PublicAccess`, `RemoteStatus`), `Secret` (log-safe wrapper), `LogEntry`, sealed `Event` type |
-| `app/library` | `Service`: `ScanFolder` (one at a time), `Rescan`, `Restore`, `Status`, `Summary`, `Root`, `List`, `Get`; `Watch` rescans quietly after changes on disk settle (ADR 0014) |
+| `app` | Ports (`Scanner`, `Discovery`, `FolderWatcher`, `FrameGrabber`, `ThumbnailCache`, `Transcoder`, `HLSStream`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `NetInfo`, `LogStream`, `SettingsStore`, `SecretStore`, `LibraryMemory`), remote-access ports and types (`Tunnel`, `LocalServer`, `TunnelRegistry`, `PublicAccess`, `RemoteStatus`), `Secret` (log-safe wrapper), `LogEntry`, sealed `Event` type |
+| `app/library` | `Service`: the list of libraries — `Add`, `Remove`, `Rename`, `Rescan`/`RescanAll`, `Restore`, `State`, `List`, `Get` (one scan at a time *per library*); `Watch` supervises one watcher per library and rescans quietly after changes settle (ADRs 0014, 0021) |
+| `app/transcode` | `Service`: one shared HLS conversion per video (`Playlist` waits until playable, `File`), at most two at once, idle ones swept, all stopped on exit (ADR 0018) |
 | `app/thumbnails` | `Service`: `Get` (cache → one shared ffmpeg attempt, two at a time, remembered failures), `Available` (ADR 0015) |
 | `app/settings` | `Service`: load/validate/save preferences, access token (`Required`, `Verify`, `RotateToken`); implements `LibraryMemory` |
-| `app/streaming` | `Config` + functional options, `Service`: `Start`, `Stop`, `Status`, crash watcher, `Local()` (the running server, for tunnels); withdraws public access before the server stops |
+| `app/streaming` | `Config` + functional options (port, name, DLNA), `Service`: `Start`, `Stop`, `Status`, crash watcher, `Local()` (the running server, for tunnels); announces on the network once running (`WithDiscovery`) and withdraws that, then public access, before the server stops |
 | `app/providerconfig` | `Store`: a provider's saved settings in the credential store; cleans and checks values; secrets are write-only |
 | `app/remote` | `Service`: `Enable` (refuses a public provider without a PIN), `Disable`, a per-run watcher, `Status`, `SetPIN`/`ClearPIN`, `Login`, session and signed-link checks, rate limiting |
-| `adapters/fsscan` | `filepath.WalkDir` scanner (skips hidden, system files, symlinks) |
+| `adapters/fsscan` | `filepath.WalkDir` scanner (skips hidden, system files, symlinks); attaches sidecar subtitles to videos |
+| `adapters/mdns` | `Announcer`: publishes `eincast.local` and an `_http._tcp` service for exactly the announced LAN addresses (ADR 0019) |
+| `adapters/dlna` | Smart TV support (ADR 0020): `Handler` (device/service descriptions, ContentDirectory Browse, ConnectionManager, events), `buildTree`/`didl`/`soap`, pure SSDP messages, the `Responder` (UDP 1900, announce, answer, goodbye) and the `Announcer` that starts it |
 | `adapters/fswatch` | `fsnotify` watcher: one signal for any burst of relevant changes, follows new folders, all-or-nothing |
-| `adapters/ffmpeg` | `Grabber`: runs the installed ffmpeg for one JPEG (video frame, cover art, shrunken photo) |
+| `adapters/ffmpeg` | `Grabber`: one JPEG (video frame, cover art, shrunken photo). `Transcoder`: ffprobe → plan (copy or encode) → HLS into a temporary folder, readiness polling, kill-and-delete on `Stop` |
 | `adapters/thumbcache` | Folder of `<key>.jpg` files in the user cache dir; atomic writes, age-based `Prune` |
 | `adapters/safepath` | `Inside(root, file)`: the symlink-safe "stays in the library" check used by streaming and thumbnails |
 | `adapters/memrepo` | `sync.RWMutex`-guarded snapshot repository |
@@ -64,9 +68,12 @@ changes.
 |---|---|
 | `GET /` | The device player page (embedded; list, search, `<video>`/`<audio>`/`<img>`), with a strict CSP |
 | `GET /static/{file}` | The page's script, stylesheet and icon (single path segment, never a directory listing) |
-| `GET /api/health` | `{"status":"ok","version":"…","name":"…","thumbnails":true}` |
-| `GET /api/library` | `[{id, name, kind, size, modTime}]` (never a path) |
+| `GET /api/health` | `{"status":"ok","version":"…","name":"…","thumbnails":true,"transcoding":true}` |
+| `GET /api/library` | `[{id, name, kind, size, modTime, subtitles:[{label, lang}]}]` (never a path) |
 | `GET /api/library/{id}` | One item, or 404 |
+| `/dlna/…` | Only while Smart TVs is on and the token is off: `device.xml`, `cd.xml`, `cm.xml`, `cd/control`, `cm/control`, and the event URLs |
+| `GET /subtitle/{id}/{n}` | Track `n` of a video as WebVTT, or 404 |
+| `GET /hls/{id}/index.m3u8` | Starts (or joins) the HLS conversion and answers once it is playable; `/hls/{id}/seg00000.ts` serves its segments; `503` when busy, `422` when ffmpeg cannot convert it |
 | `GET /thumb/{id}` | A 320 px JPEG of the item, or a plain `404` when it has none |
 | `GET /stream/{id}` | File bytes via `http.ServeContent`: `Range` → `206`, `HEAD`, correct `Content-Type` |
 | `GET /playlist.m3u` | Extended M3U of video + audio with absolute URLs built from the request `Host` |
@@ -108,7 +115,7 @@ The logger never waits for the UI. If the UI cannot keep up, the bus drops
 entries for that subscriber and `Seq` shows the gap. `forwardLogs` is owned by
 the app context and unsubscribes when it ends.
 
-### Flow: user chooses a folder
+### Flow: user adds a folder
 
 ```mermaid
 sequenceDiagram
@@ -120,23 +127,25 @@ sequenceDiagram
     participant Repo as memrepo.Repo
     participant Emit as bridge.Emitter
 
-    User->>UI: click "Choose Media Folder"
+    User->>UI: click "Choose Media Folder" / "Add folder…"
     UI->>Bridge: ChooseFolder()
     Bridge->>Bridge: native directory dialog
-    Bridge->>Svc: ScanFolder(ctx, path)
-    Svc->>Scan: Scan(ctx, path)
-    Scan-->>Svc: []media.Item
-    Svc->>Repo: Replace(path, items)
-    Svc->>Emit: Publish(LibraryScanned)
-    Emit-->>UI: event "library:scanned" (DTO)
-    UI->>UI: store.applyScanned → onboarding gives way to the shell
-    Svc-->>Bridge: summary
-    Bridge-->>UI: resolves (or rejects with the error)
+    Bridge->>Svc: Add(ctx, path)
+    Svc->>Svc: refuse the same folder or an overlapping one
+    Svc->>Emit: Publish(LibraryStatusChanged: the library listed, scanning)
+    Svc->>Scan: Scan(ctx, library)
+    Scan-->>Svc: []media.Item (stamped with the library and its root)
+    Svc->>Repo: Replace(libraryID, items)
+    Svc->>Emit: Publish(LibraryScanned: every library's state)
+    Emit-->>UI: events "library:status", "library:scanned" (DTOs)
+    UI->>UI: store.apply → onboarding gives way to the shell; ListLibrary() re-reads the files
+    Svc-->>Bridge: the library's state
+    Bridge-->>UI: resolves (or rejects: already added, unreadable, …)
 ```
 
 The UI changes screens because of the *event*, not because the command
 resolved: Go is the source of truth. On a webview reload the UI re-reads state
-with `GetLibrarySummary()`.
+with `ListLibraries()`.
 
 ### Flow: startup
 
@@ -156,10 +165,10 @@ sequenceDiagram
     end
     Main->>Main: wails.Run → OnStartup
     par background, owned by the app context
-        Main->>Lib: Restore(ctx): rescan the remembered folder
+        Main->>Lib: Restore(ctx): rescan every remembered library
         Lib-->>UI: "library:status" scanning → "library:scanned" (or an error status)
     and
-        UI->>Main: GetLibrarySummary / GetLibraryStatus / GetSettings / GetServerState
+        UI->>Main: ListLibraries / GetSettings / GetServerState
     end
     UI->>UI: scanning → "Scanning…" screen; failed → "Can't open your library"; done → dashboard
 ```
@@ -300,6 +309,61 @@ sequenceDiagram
     T-->>H: JPEG
     H-->>C: image/jpeg (HTTP) or a data: URL (bridge); 404 / "" when there is none
 ```
+
+### Flow: a smart TV finds and plays a film
+
+```mermaid
+sequenceDiagram
+    participant S as streaming.Service
+    participant A as dlna.Announcer / Responder
+    participant TV
+    participant H as httpapi (/dlna/…, /stream)
+
+    S->>A: Announce(name, port, LAN addresses, DLNA on) once Running
+    A->>TV: NOTIFY ssdp:alive ×5 targets, on each interface (multicast)
+    TV->>A: M-SEARCH ST: MediaServer:1 (multicast)
+    Note over A: after a random delay ≤ MX/2
+    A-->>TV: 200 OK, ST echoed, LOCATION on the TV's own network
+    TV->>H: GET /dlna/device.xml
+    TV->>H: POST /dlna/cd/control  Browse("0")
+    H-->>TV: DIDL-Lite: Videos / Music / Photos
+    TV->>H: Browse(folder) … Browse(film)
+    H-->>TV: item with res = http://<host>/stream/<id>
+    TV->>H: GET /stream/<id>  (Range, getcontentFeatures.dlna.org: 1)
+    H-->>TV: 206 + contentFeatures.dlna.org
+    S->>A: stop (before the server stops): NOTIFY ssdp:byebye
+```
+
+### Flow: an iPhone plays an MKV
+
+```mermaid
+sequenceDiagram
+    participant P as Player page (Safari)
+    participant H as handleHLS
+    participant T as transcode.Service
+    participant F as ffmpeg.Transcoder
+    participant X as ffprobe / ffmpeg
+
+    P->>H: GET /api/health → transcoding: true
+    Note over P: video.canPlayType(HLS) is "maybe", .mkv is not a direct container
+    P->>H: GET /hls/ab12…/index.m3u8
+    H->>T: Playlist(ctx, id)
+    T->>F: Start (none running for this id)
+    F->>X: ffprobe, then ffmpeg -c:v copy (H.264) or libx264, → HLS in a temp folder
+    T->>T: wait for Ready (playlist + 2nd segment)
+    X-->>F: segments appear, playlist grows
+    T-->>H: playlist file
+    H-->>P: 200 index.m3u8 (no-store)
+    loop each segment
+        P->>H: GET /hls/ab12…/seg0000N.ts
+        H->>T: File(id, name) (refreshes the idle clock)
+        H-->>P: 200 video/mp2t
+    end
+    Note over T: no request for 2 minutes → Stop: ffmpeg killed, folder deleted
+```
+
+If direct playback of a file fails instead (an MP4 with HEVC), the page retries once
+through the same route ([ADR 0018](adr/0018-hls-conversion-on-demand.md)).
 
 ### Flow: the user turns on Tailscale
 

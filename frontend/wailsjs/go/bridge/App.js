@@ -30,14 +30,6 @@ export function EnableRemote(arg1) {
   return window['go']['bridge']['App']['EnableRemote'](arg1);
 }
 
-export function GetLibraryStatus() {
-  return window['go']['bridge']['App']['GetLibraryStatus']();
-}
-
-export function GetLibrarySummary() {
-  return window['go']['bridge']['App']['GetLibrarySummary']();
-}
-
 export function GetLogHistory() {
   return window['go']['bridge']['App']['GetLogHistory']();
 }
@@ -62,6 +54,10 @@ export function GetThumbnail(arg1) {
   return window['go']['bridge']['App']['GetThumbnail'](arg1);
 }
 
+export function ListLibraries() {
+  return window['go']['bridge']['App']['ListLibraries']();
+}
+
 export function ListLibrary() {
   return window['go']['bridge']['App']['ListLibrary']();
 }
@@ -70,8 +66,20 @@ export function ListRemoteProviders() {
   return window['go']['bridge']['App']['ListRemoteProviders']();
 }
 
-export function RescanLibrary() {
-  return window['go']['bridge']['App']['RescanLibrary']();
+export function RemoveLibrary(arg1) {
+  return window['go']['bridge']['App']['RemoveLibrary'](arg1);
+}
+
+export function RenameLibrary(arg1, arg2) {
+  return window['go']['bridge']['App']['RenameLibrary'](arg1, arg2);
+}
+
+export function RescanAllLibraries() {
+  return window['go']['bridge']['App']['RescanAllLibraries']();
+}
+
+export function RescanLibrary(arg1) {
+  return window['go']['bridge']['App']['RescanLibrary'](arg1);
 }
 
 export function RotateAccessToken() {

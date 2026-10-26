@@ -12,15 +12,29 @@ type Event interface {
 	event()
 }
 
-// LibrarySummary describes the library currently loaded.
-type LibrarySummary struct {
-	Root  string
+// LibraryState is one library as the UI shows it: what it is, what is in it, and
+// what is happening to it.
+type LibraryState struct {
+	Library media.Library
+	// Stats counts the library's items; zero until the first scan finishes.
 	Stats media.Stats
+	// Scanning is true while the library is being scanned for a person's request.
+	// Quiet rescans after a change on disk do not set it.
+	Scanning bool
+	// Error is a short, user-facing reason the last scan failed; empty if it did
+	// not. The previous contents are kept meanwhile.
+	Error string
+	// Watching is true while the folder is watched for changes, so the library
+	// follows the disk without a manual rescan.
+	Watching bool
 }
 
-// LibraryScanned is published after every successful scan.
+// LibraryScanned is published when what is in the libraries changed: a scan
+// finished with a different result, or a library was added or removed. It
+// carries every library's state, so a listener never has to piece the answer
+// together from several events.
 type LibraryScanned struct {
-	Summary LibrarySummary
+	Libraries []LibraryState
 }
 
 func (LibraryScanned) event() {}
@@ -37,6 +51,11 @@ type ServerStatus struct {
 	// LANURLs reach it from other devices on the network, most likely first.
 	// Empty when the machine has no usable network.
 	LANURLs []string
+	// NameURLs are friendlier addresses announced on the network, such as
+	// http://eincast.local:8765. Empty when nothing announced one.
+	NameURLs []string
+	// Discovery lists the kinds of discovery that are active ("mdns", "dlna").
+	Discovery []string
 	// Error is the failure reason while Failed; empty otherwise.
 	Error string
 }
@@ -48,24 +67,11 @@ type ServerStateChanged struct {
 
 func (ServerStateChanged) event() {}
 
-// LibraryStatus says what the library scanner is doing, including why the last
-// attempt failed, so the UI can show an error that survives a reload.
-type LibraryStatus struct {
-	Scanning bool
-	// Root is the folder being scanned, or the last one attempted.
-	Root string
-	// Error is a short, user-facing reason the last scan failed; empty if it
-	// did not.
-	Error string
-	// Watching is true while the folder is being watched for changes, so the
-	// library follows the disk without a manual rescan.
-	Watching bool
-}
-
-// LibraryStatusChanged is published when a scan starts, succeeds or fails, and
-// when watching the folder starts or stops.
+// LibraryStatusChanged is published when a scan starts, succeeds or fails, when
+// watching a folder starts or stops, and when a library is renamed. Like
+// LibraryScanned it carries every library's state.
 type LibraryStatusChanged struct {
-	Status LibraryStatus
+	Libraries []LibraryState
 }
 
 func (LibraryStatusChanged) event() {}

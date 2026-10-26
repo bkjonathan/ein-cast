@@ -12,12 +12,16 @@ type healthJSON struct {
 	// Thumbnails tells the player page whether /thumb/{id} can make pictures, so
 	// it does not ask for dozens that would all be refused.
 	Thumbnails bool `json:"thumbnails"`
+	// Transcoding tells the player page whether /hls/{id}/… can convert videos a
+	// device cannot play as they are.
+	Transcoding bool `json:"transcoding"`
 }
 
 func (a *api) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, healthJSON{
 		Status: "ok", Version: a.version, Name: a.name,
-		Thumbnails: a.thumbs != nil && a.thumbs.Available(),
+		Thumbnails:  a.thumbs != nil && a.thumbs.Available(),
+		Transcoding: a.hls != nil && a.hls.Available(),
 	})
 }
 

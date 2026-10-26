@@ -18,6 +18,8 @@ export type MediaKind = "video" | "audio" | "image";
  */
 export interface LibraryItem {
   id: string;
+  /** The library the file is in. */
+  libraryId: string;
   name: string;
   /** Slash-separated, relative to the library folder. */
   relPath: string;
@@ -33,19 +35,21 @@ export interface KindCounts {
   image: number;
 }
 
-/** The library Go currently has loaded. File paths never cross the bridge. */
-export interface LibrarySummary {
+/**
+ * One library: a folder the person added, what is in it, and what is happening
+ * to it. File paths never cross the bridge; `root` is the folder itself, which
+ * the person chose and sees.
+ */
+export interface LibraryState {
+  id: string;
+  /** What it is called; starts as the folder's name and can be changed. */
+  name: string;
   root: string;
   total: number;
   totalSize: number;
   counts: KindCounts;
-}
-
-/** What the library scanner is doing, and why the last attempt failed. */
-export interface LibraryStatus {
+  /** A scan the person asked for is running. Quiet rescans after a change on disk do not set it. */
   scanning: boolean;
-  /** The folder being scanned, or the last one attempted. */
-  root: string;
   /** A short, user-facing reason the last scan failed; empty if it did not. */
   error: string;
   /** True while Go watches the folder, so changes on disk reach the library by themselves. */
@@ -57,6 +61,8 @@ export interface Settings {
   port: number;
   name: string;
   requireToken: boolean;
+  /** Smart TV (DLNA) discovery. Never on together with requireToken: Go refuses both. */
+  dlna: boolean;
   /** Empty unless requireToken is on. */
   accessToken: string;
   /** False when the token could not be saved to the system credential store. */
@@ -64,7 +70,7 @@ export interface Settings {
 }
 
 /** The editable part of Settings. */
-export type SettingsInput = Pick<Settings, "port" | "name" | "requireToken">;
+export type SettingsInput = Pick<Settings, "port" | "name" | "requireToken" | "dlna">;
 
 export type ServerState = "idle" | "starting" | "running" | "stopping" | "failed";
 
@@ -78,6 +84,10 @@ export interface ServerStatus {
   localUrl: string;
   /** Reach it from other devices, most likely first. Empty if there is no network. */
   lanUrls: string[];
+  /** Friendlier addresses announced on the network, such as http://eincast.local:8765. */
+  nameUrls: string[];
+  /** What is announcing the server on the network: "mdns", "dlna". */
+  discovery: string[];
   /** Failure reason while failed, otherwise empty. */
   error: string;
 }

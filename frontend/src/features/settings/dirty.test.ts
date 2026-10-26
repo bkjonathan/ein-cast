@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formFrom, isDirty, needsRestart, parsePort } from "./dirty";
+import { formFrom, isDirty, needsRestart, parsePort, tvNeedsRestart } from "./dirty";
 
 const saved = { port: 8765, name: "EinCast" };
 
@@ -33,6 +33,25 @@ describe("needsRestart", () => {
   it("is true when the running port or name differs from the saved one", () => {
     expect(needsRestart(running({ port: 8000 }), saved)).toBe(true);
     expect(needsRestart(running({ name: "Old" }), saved)).toBe(true);
+  });
+});
+
+describe("tvNeedsRestart", () => {
+  const running = (discovery: string[], state = "running") => ({ state, discovery });
+
+  it("is false when nothing runs, whatever was saved", () => {
+    expect(tvNeedsRestart(null, { dlna: true })).toBe(false);
+    expect(tvNeedsRestart(running([], "idle"), { dlna: true })).toBe(false);
+  });
+
+  it("is false when the running server already matches the setting", () => {
+    expect(tvNeedsRestart(running(["mdns", "dlna"]), { dlna: true })).toBe(false);
+    expect(tvNeedsRestart(running(["mdns"]), { dlna: false })).toBe(false);
+  });
+
+  it("is true when the setting was switched on or off after the server started", () => {
+    expect(tvNeedsRestart(running(["mdns"]), { dlna: true })).toBe(true);
+    expect(tvNeedsRestart(running(["mdns", "dlna"]), { dlna: false })).toBe(true);
   });
 });
 

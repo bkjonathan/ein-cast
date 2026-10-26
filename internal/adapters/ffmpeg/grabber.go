@@ -14,7 +14,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 
 	"eincast/internal/adapters/safepath"
 	"eincast/internal/app"
@@ -32,40 +31,12 @@ const seekSeconds = 8
 
 // Grabber runs ffmpeg to make preview images.
 type Grabber struct {
-	log *slog.Logger
-	// find locates the program; a field so tests can point at a stand-in.
-	find func() (string, error)
-
-	mu   sync.Mutex
-	path string // the program, once found
+	finder
 }
 
 // New returns a Grabber that looks for ffmpeg on PATH and where installers put it.
 func New(log *slog.Logger) *Grabber {
-	return &Grabber{log: log.With(slog.String("source", "thumbnails")), find: locate}
-}
-
-// binary returns the ffmpeg location, searching again each time until it is
-// found, so installing ffmpeg while EinCast runs takes effect without a restart.
-func (g *Grabber) binary() (string, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.path != "" {
-		return g.path, nil
-	}
-	p, err := g.find()
-	if err != nil {
-		return "", err
-	}
-	g.path = p
-	g.log.Info("found ffmpeg for thumbnails", slog.String("path", p))
-	return p, nil
-}
-
-// Available reports whether ffmpeg can be found.
-func (g *Grabber) Available() bool {
-	_, err := g.binary()
-	return err == nil
+	return &Grabber{finder{log: log.With(slog.String("source", "thumbnails")), find: locate}}
 }
 
 // Grab makes a JPEG of the first picture ffmpeg can find in the file: a video

@@ -1,55 +1,53 @@
 import { create } from "zustand";
-import type { LibraryItem, LibraryStatus, LibrarySummary } from "@/shared/bridge";
+import type { LibraryItem, LibraryState } from "@/shared/bridge";
 import type { KindFilter, SortKey } from "./filter";
 
-interface LibraryState {
-  /** Null until Go reports a scanned library. */
-  summary: LibrarySummary | null;
-  /** Null until Go reports. Afterwards: is a scan running, and why did the last one fail. */
-  status: LibraryStatus | null;
-  /** Every file in the library, as of the last "library:scanned". */
-  items: LibraryItem[];
+/** "all", or the ID of the one library to show. */
+export type LibraryFilter = "all" | (string & {});
+
+interface LibraryStoreState {
+  /** Every library Go knows about, in the order they were added. */
+  libraries: LibraryState[];
   /** False until the first answer from Go, so the UI doesn't flash onboarding. */
   hydrated: boolean;
+  /** An event arrived, so Go's push is newer than any startup answer. */
+  heard: boolean;
+  /** Every file in every library, as of the last "library:scanned". */
+  items: LibraryItem[];
 
   /** How the Library screen shows `items`: view state, not Go's. */
   kind: KindFilter;
+  library: LibraryFilter;
   query: string;
   sort: SortKey;
   setKind: (kind: KindFilter) => void;
+  setLibrary: (library: LibraryFilter) => void;
   setQuery: (query: string) => void;
   setSort: (sort: SortKey) => void;
   setItems: (items: LibraryItem[]) => void;
-  /** A "library:scanned" event arrived: always the newest truth. */
-  applyScanned: (summary: LibrarySummary) => void;
-  /** A "library:status" event arrived: always the newest truth. */
-  applyStatus: (status: LibraryStatus) => void;
-  /** The startup queries answered. Events that raced ahead of them win. */
-  hydrate: (summary: LibrarySummary | null, status: LibraryStatus) => void;
+
+  /** A "library:scanned" or "library:status" event arrived: always the newest truth. */
+  apply: (libraries: LibraryState[]) => void;
+  /** The startup query answered. Events that raced ahead of it win. */
+  hydrate: (libraries: LibraryState[]) => void;
 }
 
-/** Projection of Go's library state; only events and the startup query write it. */
-export const useLibraryStore = create<LibraryState>()((set) => ({
-  summary: null,
-  status: null,
-  items: [],
+/** Projection of Go's libraries; only events and the startup query write them. */
+export const useLibraryStore = create<LibraryStoreState>()((set) => ({
+  libraries: [],
   hydrated: false,
+  heard: false,
+  items: [],
   kind: "all",
+  library: "all",
   query: "",
   sort: "name",
   setKind: (kind) => set({ kind }),
+  setLibrary: (library) => set({ library }),
   setQuery: (query) => set({ query }),
   setSort: (sort) => set({ sort }),
   setItems: (items) => set({ items }),
-  applyScanned: (summary) => set({ summary }),
-  applyStatus: (status) => set({ status }),
-  hydrate: (summary, status) =>
-    set((state) => ({
-      summary: state.summary ?? summary,
-      status: state.status ?? status,
-      hydrated: true,
-    })),
+  apply: (libraries) => set({ libraries, heard: true, hydrated: true }),
+  hydrate: (libraries) =>
+    set((state) => (state.heard ? { hydrated: true } : { libraries, hydrated: true })),
 }));
-
-/** The status to show while Go has not reported one. */
-export const idleStatus: LibraryStatus = { scanning: false, root: "", error: "", watching: false };

@@ -5,249 +5,140 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
+	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"eincast/internal/app"
 	"eincast/internal/domain/media"
 )
 
-type fakeScanner struct {
-	items   []media.Item
-	err     error
-	gotRoot string
-	gotCtx  context.Context
-}
+func TestAdd_ScansAndRemembersTheFolder(t *testing.T) {
+	r := newRig()
+	r.sc.set("/media/films", file("a.mkv", 10), file("b.mp4", 5))
 
-func (f *fakeScanner) Scan(ctx context.Context, root string) ([]media.Item, error) {
-	f.gotCtx, f.gotRoot = ctx, root
-	return f.items, f.err
-}
-
-type fakeRepo struct {
-	root  string
-	items []media.Item
-}
-
-func (f *fakeRepo) Replace(root string, items []media.Item) { f.root, f.items = root, items }
-func (f *fakeRepo) Root() string                            { return f.root }
-func (f *fakeRepo) List() []media.Item                      { return f.items }
-func (f *fakeRepo) Get(id media.ID) (media.Item, error) {
-	for _, it := range f.items {
-		if it.ID == id {
-			return it, nil
-		}
-	}
-	return media.Item{}, fmt.Errorf("get %q: %w", id, media.ErrNotFound)
-}
-
-type fakeEvents struct {
-	mu  sync.Mutex
-	got []app.Event
-}
-
-func (f *fakeEvents) Publish(ev app.Event) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.got = append(f.got, ev)
-}
-
-func (f *fakeEvents) events() []app.Event {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]app.Event(nil), f.got...)
-}
-
-// scanned filters the events down to LibraryScanned.
-func (f *fakeEvents) scanned() []app.LibraryScanned {
-	var out []app.LibraryScanned
-	for _, e := range f.events() {
-		if s, ok := e.(app.LibraryScanned); ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-// statuses filters the events down to LibraryStatusChanged.
-func (f *fakeEvents) statuses() []app.LibraryStatus {
-	var out []app.LibraryStatus
-	for _, e := range f.events() {
-		if s, ok := e.(app.LibraryStatusChanged); ok {
-			out = append(out, s.Status)
-		}
-	}
-	return out
-}
-
-type fakeMemory struct {
-	root    string
-	err     error
-	remembs []string
-}
-
-func (f *fakeMemory) RememberRoot(r string) error {
-	if f.err != nil {
-		return f.err
-	}
-	f.root = r
-	f.remembs = append(f.remembs, r)
-	return nil
-}
-func (f *fakeMemory) LastRoot() string { return f.root }
-
-type ctxKey struct{}
-
-func newService(sc *fakeScanner, repo *fakeRepo, ev *fakeEvents) *Service {
-	return newServiceWithMemory(sc, repo, &fakeMemory{}, ev)
-}
-
-func newServiceWithMemory(sc *fakeScanner, repo *fakeRepo, mem *fakeMemory, ev *fakeEvents) *Service {
-	return NewService(sc, repo, mem, ev, slog.New(slog.DiscardHandler))
-}
-
-func TestScanFolder_Success(t *testing.T) {
-	items := []media.Item{
-		{ID: "a", Kind: media.KindVideo, Size: 10},
-		{ID: "b", Kind: media.KindAudio, Size: 5},
-	}
-	sc, repo, ev := &fakeScanner{items: items}, &fakeRepo{}, &fakeEvents{}
-	svc := newService(sc, repo, ev)
-
-	ctx := context.WithValue(context.Background(), ctxKey{}, "marker")
-	got, err := svc.ScanFolder(ctx, "/media")
+	st, err := r.svc.Add(context.Background(), "/media/films")
 	if err != nil {
-		t.Fatalf("ScanFolder() error = %v", err)
+		t.Fatalf("Add() error = %v", err)
 	}
 
-	if sc.gotRoot != "/media" || sc.gotCtx != ctx {
-		t.Errorf("scanner got root=%q ctx=%v, want /media and the caller's ctx", sc.gotRoot, sc.gotCtx)
+	lib := media.NewLibrary("/media/films")
+	if st.Library != lib || st.Stats.Total != 2 || st.Stats.TotalSize != 15 || st.Scanning || st.Error != "" {
+		t.Errorf("Add() = %+v", st)
 	}
-	if repo.root != "/media" || len(repo.items) != 2 {
-		t.Errorf("repo = %q/%d items, want /media/2", repo.root, len(repo.items))
+	if lib.Name != "films" {
+		t.Errorf("a library is named after its folder, got %q", lib.Name)
 	}
-	if got.Root != "/media" || got.Stats.Total != 2 || got.Stats.TotalSize != 15 {
-		t.Errorf("summary = %+v", got)
+	if got := r.repo.Items(lib.ID); len(got) != 2 || got[0].LibraryID != lib.ID || got[0].Root != "/media/films" {
+		t.Errorf("repo items = %+v, want the two items stamped with their library", got)
 	}
-	scanned := ev.scanned()
-	if len(scanned) != 1 || scanned[0].Summary.Root != "/media" || scanned[0].Summary.Stats.Total != 2 {
-		t.Errorf("LibraryScanned events = %#v", scanned)
-	}
-}
-
-func TestScanFolder_Errors(t *testing.T) {
-	boom := errors.New("boom")
-	tests := []struct {
-		name    string
-		path    string
-		scanErr error
-		wantErr error
-	}{
-		{"empty path", "", nil, nil},
-		{"scanner fails", "/media", boom, boom},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			previous := []media.Item{{ID: "keep"}}
-			sc := &fakeScanner{err: tt.scanErr}
-			repo := &fakeRepo{root: "/old", items: previous}
-			ev := &fakeEvents{}
-
-			_, err := newService(sc, repo, ev).ScanFolder(context.Background(), tt.path)
-			if err == nil {
-				t.Fatal("ScanFolder() error = nil, want error")
-			}
-			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
-				t.Errorf("error %v does not wrap %v", err, tt.wantErr)
-			}
-			if repo.root != "/old" || len(repo.items) != 1 {
-				t.Errorf("previous library was modified: %q / %v", repo.root, repo.items)
-			}
-			if n := len(ev.scanned()); n != 0 {
-				t.Errorf("published %d LibraryScanned events on failure, want 0", n)
-			}
-		})
+	if got := r.mem.lastSave(); len(got) != 1 || got[0] != lib {
+		t.Errorf("remembered %+v, want [%+v]", got, lib)
 	}
 }
 
-func TestSummary(t *testing.T) {
-	t.Run("before any scan", func(t *testing.T) {
-		svc := newService(&fakeScanner{}, &fakeRepo{}, &fakeEvents{})
-		if _, ok := svc.Summary(); ok {
-			t.Fatal("Summary() ok = true before any scan")
-		}
-	})
-
-	t.Run("after a scan", func(t *testing.T) {
-		repo := &fakeRepo{root: "/media", items: []media.Item{{Kind: media.KindImage, Size: 3}}}
-		got, ok := newService(&fakeScanner{}, repo, &fakeEvents{}).Summary()
-		if !ok || got.Root != "/media" || got.Stats.Counts[media.KindImage] != 1 {
-			t.Fatalf("Summary() = %+v, %v", got, ok)
-		}
-	})
-
-	t.Run("empty folder still counts as scanned", func(t *testing.T) {
-		repo := &fakeRepo{root: "/empty"}
-		got, ok := newService(&fakeScanner{}, repo, &fakeEvents{}).Summary()
-		if !ok || got.Stats.Total != 0 {
-			t.Fatalf("Summary() = %+v, %v", got, ok)
-		}
-	})
-}
-
-func TestGet(t *testing.T) {
-	repo := &fakeRepo{root: "/m", items: []media.Item{{ID: "a", Name: "a.mp4"}}}
-	svc := newService(&fakeScanner{}, repo, &fakeEvents{})
-
-	t.Run("found", func(t *testing.T) {
-		it, err := svc.Get("a")
-		if err != nil || it.Name != "a.mp4" {
-			t.Fatalf("Get(a) = %+v, %v", it, err)
-		}
-	})
-	t.Run("missing wraps ErrNotFound", func(t *testing.T) {
-		if _, err := svc.Get("zzz"); !errors.Is(err, media.ErrNotFound) {
-			t.Fatalf("Get(zzz) error = %v, want ErrNotFound", err)
-		}
-	})
-}
-
-func TestScanFolder_StatusTransitions(t *testing.T) {
-	ev := &fakeEvents{}
-	svc := newService(&fakeScanner{items: []media.Item{{ID: "a"}}}, &fakeRepo{}, ev)
-
-	if _, err := svc.ScanFolder(context.Background(), "/media"); err != nil {
+func TestAdd_EventsComeInTheRightOrder(t *testing.T) {
+	r := newRig()
+	r.sc.set("/media", file("a.mkv", 1))
+	if _, err := r.svc.Add(context.Background(), "/media"); err != nil {
 		t.Fatal(err)
 	}
 
-	got := ev.statuses()
-	want := []app.LibraryStatus{{Scanning: true, Root: "/media"}, {Root: "/media"}}
-	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("statuses = %+v, want %+v", got, want)
+	// The library appears (scanning), its contents arrive, then scanning ends: a
+	// UI that heard "done" first would briefly show an empty library.
+	if got := strings.Join(r.ev.kinds(), ","); got != "status,scanned,status" {
+		t.Fatalf("events = %s, want status,scanned,status", got)
 	}
-
-	// "scanned" must come before "scan finished" so the UI never shows an empty
-	// library between the two.
-	order := []string{}
-	for _, e := range ev.events() {
-		switch e.(type) {
-		case app.LibraryScanned:
-			order = append(order, "scanned")
-		case app.LibraryStatusChanged:
-			order = append(order, "status")
-		}
+	first := r.ev.statuses()[0].Libraries
+	if len(first) != 1 || !first[0].Scanning || first[0].Stats.Total != 0 {
+		t.Errorf("first status = %+v, want the library listed and scanning", first)
 	}
-	if strings.Join(order, ",") != "status,scanned,status" {
-		t.Errorf("event order = %v, want status,scanned,status", order)
-	}
-	if svc.Status() != (app.LibraryStatus{Root: "/media"}) {
-		t.Errorf("Status() = %+v", svc.Status())
+	last := r.ev.statuses()[1].Libraries
+	if len(last) != 1 || last[0].Scanning || last[0].Stats.Total != 1 {
+		t.Errorf("last status = %+v", last)
 	}
 }
 
-func TestScanFolder_FailureIsExplainedInStatus(t *testing.T) {
+func TestAdd_Refusals(t *testing.T) {
+	r := newRig()
+	if _, err := r.svc.Add(context.Background(), "/media/films"); err != nil {
+		t.Fatal(err)
+	}
+	before := r.sc.scans()
+
+	tests := []struct {
+		name string
+		path string
+		want error
+	}{
+		{"the same folder", "/media/films", ErrLibraryExists},
+		{"the same folder written differently", "/media/films/", ErrLibraryExists},
+		{"a folder inside a library", "/media/films/2020", ErrLibraryOverlaps},
+		{"a folder holding a library", "/media", ErrLibraryOverlaps},
+		{"a folder that differs in case only", "/MEDIA/Films/Old", ErrLibraryOverlaps},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := r.svc.Add(context.Background(), tt.path); !errors.Is(err, tt.want) {
+				t.Fatalf("error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+	if r.sc.scans() != before || len(r.svc.Libraries()) != 1 {
+		t.Errorf("a refused folder was scanned (%d scans) or listed (%d libraries)", r.sc.scans()-before, len(r.svc.Libraries()))
+	}
+	if _, err := r.svc.Add(context.Background(), "/media/films-old"); err != nil {
+		t.Errorf("a sibling whose name merely starts the same is not an overlap: %v", err)
+	}
+	if _, err := r.svc.Add(context.Background(), "  "); err == nil {
+		t.Error("an empty path was accepted")
+	}
+}
+
+func TestAdd_AFailedScanLeavesNothingBehind(t *testing.T) {
+	r := newRig()
+	r.sc.set("/good", file("a.mkv", 1))
+	_, _ = r.svc.Add(context.Background(), "/good")
+	boom := fmt.Errorf("walk: %w", fs.ErrNotExist)
+	r.sc.fail("/bad", boom)
+
+	_, err := r.svc.Add(context.Background(), "/bad")
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("error = %v, want it to wrap the cause", err)
+	}
+	if !strings.Contains(err.Error(), "no longer exists") || strings.Contains(err.Error(), "/bad") {
+		t.Errorf("message = %q, want a sentence for the person without paths", err.Error())
+	}
+
+	libs := r.svc.Libraries()
+	if len(libs) != 1 || libs[0].Root != "/good" {
+		t.Errorf("libraries = %+v, want only the good one: a bad choice must not leave a broken entry", libs)
+	}
+	if got := r.mem.lastSave(); len(got) != 1 || got[0].Root != "/good" {
+		t.Errorf("remembered %+v", got)
+	}
+	if r.repo.has(media.NewLibraryID("/bad")) {
+		t.Error("the repository holds the failed library")
+	}
+	if n := len(r.svc.List()); n != 1 {
+		t.Errorf("the good library lost items: %d", n)
+	}
+}
+
+func TestAdd_ASettingsProblemDoesNotLoseTheScan(t *testing.T) {
+	r := newRig()
+	r.mem.err = errors.New("read-only disk")
+	r.sc.set("/media", file("a.mkv", 1))
+
+	if _, err := r.svc.Add(context.Background(), "/media"); err != nil {
+		t.Fatalf("Add() error = %v; a settings problem must not fail the add", err)
+	}
+	if len(r.svc.List()) != 1 {
+		t.Error("the library was not loaded")
+	}
+}
+
+func TestScanFailureIsExplainedInTheState(t *testing.T) {
 	tests := []struct {
 		name    string
 		err     error
@@ -260,171 +151,329 @@ func TestScanFolder_FailureIsExplainedInStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ev := &fakeEvents{}
-			svc := newService(&fakeScanner{err: tt.err}, &fakeRepo{}, ev)
+			lib := media.NewLibrary("/media")
+			r := newRig(lib)
+			r.sc.fail("/media", tt.err)
 
-			if _, err := svc.ScanFolder(context.Background(), "/media"); !errors.Is(err, tt.err) {
+			if err := r.svc.Rescan(context.Background(), lib.ID); !errors.Is(err, tt.err) {
 				t.Fatalf("error = %v, want it to wrap %v", err, tt.err)
 			}
-
-			st := svc.Status()
-			if st.Scanning || st.Root != "/media" || !strings.Contains(st.Error, tt.contain) {
-				t.Errorf("Status() = %+v, want an error containing %q", st, tt.contain)
+			st, _ := r.stateOf(lib.ID)
+			if st.Scanning || !strings.Contains(st.Error, tt.contain) {
+				t.Errorf("state = %+v, want an error containing %q", st, tt.contain)
 			}
 			if strings.Contains(st.Error, "/secret") || strings.Contains(st.Error, "exploded") {
-				t.Errorf("Status().Error leaks system detail: %q", st.Error)
+				t.Errorf("the error leaks system detail: %q", st.Error)
 			}
-			last := ev.statuses()[len(ev.statuses())-1]
-			if last != st {
-				t.Errorf("last published status %+v differs from Status() %+v", last, st)
+			last := r.ev.statuses()[len(r.ev.statuses())-1].Libraries[0]
+			if last.Error != st.Error || last.Scanning {
+				t.Errorf("last published %+v differs from the state %+v", last, st)
 			}
 		})
 	}
 }
 
-func TestScanFolder_SuccessClearsAnEarlierError(t *testing.T) {
-	sc := &fakeScanner{err: errors.New("boom")}
-	svc := newService(sc, &fakeRepo{}, &fakeEvents{})
-	_, _ = svc.ScanFolder(context.Background(), "/bad")
-	if svc.Status().Error == "" {
-		t.Fatal("setup: expected an error status")
-	}
-
-	sc.err = nil
-	if _, err := svc.ScanFolder(context.Background(), "/good"); err != nil {
+func TestRescan_FindsChangesAndKeepsTheOldContentsOnFailure(t *testing.T) {
+	lib := media.NewLibrary("/media")
+	r := newRig(lib)
+	r.sc.set("/media", file("a.mkv", 1))
+	if err := r.svc.Rescan(context.Background(), lib.ID); err != nil {
 		t.Fatal(err)
 	}
-	if st := svc.Status(); st.Error != "" || st.Root != "/good" {
-		t.Errorf("Status() = %+v, want it cleared", st)
+
+	r.sc.set("/media", file("a.mkv", 1), file("b.mkv", 2))
+	if err := r.svc.Rescan(context.Background(), lib.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := r.stateOf(lib.ID); st.Stats.Total != 2 {
+		t.Errorf("after adding a file: %+v", st)
+	}
+
+	r.sc.fail("/media", fs.ErrNotExist)
+	_ = r.svc.Rescan(context.Background(), lib.ID)
+	if got := r.svc.List(); len(got) != 2 {
+		t.Errorf("a failed rescan changed the library: %d items", len(got))
+	}
+
+	r.sc.set("/media", file("a.mkv", 1)) // readable again: the error clears
+	if err := r.svc.Rescan(context.Background(), lib.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := r.stateOf(lib.ID); st.Error != "" || st.Stats.Total != 1 {
+		t.Errorf("state = %+v, want the error cleared", st)
 	}
 }
 
-func TestScanFolder_RemembersTheFolderOnlyOnSuccess(t *testing.T) {
-	mem := &fakeMemory{}
-	sc := &fakeScanner{err: errors.New("boom")}
-	svc := newServiceWithMemory(sc, &fakeRepo{}, mem, &fakeEvents{})
+func TestRescan_OnlyTouchesItsOwnLibrary(t *testing.T) {
+	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	r := newRig(films, music)
+	r.sc.set("/films", file("a.mkv", 1))
+	r.sc.set("/music", file("s.mp3", 1))
+	_ = r.svc.Restore(context.Background())
+	before := r.sc.scansOf("/music")
 
-	_, _ = svc.ScanFolder(context.Background(), "/bad")
-	if len(mem.remembs) != 0 {
-		t.Fatalf("remembered %v after a failed scan", mem.remembs)
+	r.sc.set("/films", file("a.mkv", 1), file("b.mkv", 1))
+	if err := r.svc.Rescan(context.Background(), films.ID); err != nil {
+		t.Fatal(err)
 	}
-
-	sc.err = nil
-	_, _ = svc.ScanFolder(context.Background(), "/good")
-	if len(mem.remembs) != 1 || mem.remembs[0] != "/good" {
-		t.Errorf("remembered = %v, want [/good]", mem.remembs)
+	if r.sc.scansOf("/music") != before {
+		t.Error("rescanning films scanned music too")
 	}
-}
-
-func TestScanFolder_MemoryFailureDoesNotFailTheScan(t *testing.T) {
-	mem := &fakeMemory{err: errors.New("read-only disk")}
-	repo := &fakeRepo{}
-	svc := newServiceWithMemory(&fakeScanner{items: []media.Item{{ID: "a"}}}, repo, mem, &fakeEvents{})
-
-	if _, err := svc.ScanFolder(context.Background(), "/media"); err != nil {
-		t.Fatalf("ScanFolder() error = %v; a settings problem must not lose the scan", err)
+	if got := r.repo.Items(music.ID); len(got) != 1 {
+		t.Errorf("music changed: %+v", got)
 	}
-	if repo.root != "/media" {
-		t.Error("the library was not replaced")
+	if err := r.svc.Rescan(context.Background(), "nope"); !errors.Is(err, ErrNoSuchLibrary) {
+		t.Errorf("unknown library: error = %v", err)
 	}
 }
 
-// blockingScanner holds a scan open until released.
-type blockingScanner struct {
-	entered chan struct{}
-	release chan struct{}
+func TestRescanAll_OneFailureDoesNotStopTheOthers(t *testing.T) {
+	a, b, c := media.NewLibrary("/a"), media.NewLibrary("/b"), media.NewLibrary("/c")
+	r := newRig(a, b, c)
+	r.sc.set("/a", file("1.mkv", 1))
+	r.sc.fail("/b", fs.ErrNotExist)
+	r.sc.set("/c", file("3.mkv", 1))
+
+	err := r.svc.RescanAll(context.Background())
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("error = %v, want the failure reported", err)
+	}
+	if got := r.sc.lastCalls(); !slices.Equal(got, []string{"/a", "/b", "/c"}) {
+		t.Errorf("scanned %v, want all three in order", got)
+	}
+	if len(r.svc.List()) != 2 {
+		t.Errorf("items = %d, want a's and c's", len(r.svc.List()))
+	}
+	if st, _ := r.stateOf(b.ID); st.Error == "" {
+		t.Error("b's failure is not in its state")
+	}
+	if st, _ := r.stateOf(a.ID); st.Error != "" {
+		t.Errorf("a has an error: %q", st.Error)
+	}
 }
 
-func (b *blockingScanner) Scan(context.Context, string) ([]media.Item, error) {
-	close(b.entered)
-	<-b.release
-	return nil, nil
+func TestRemove(t *testing.T) {
+	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	r := newRig(films, music)
+	r.sc.set("/films", file("a.mkv", 1))
+	r.sc.set("/music", file("s.mp3", 1))
+	_ = r.svc.Restore(context.Background())
+	before := len(r.ev.events())
+
+	if err := r.svc.Remove(films.ID); err != nil {
+		t.Fatal(err)
+	}
+	if libs := r.svc.Libraries(); len(libs) != 1 || libs[0].ID != music.ID {
+		t.Errorf("libraries = %+v", libs)
+	}
+	if got := r.svc.List(); len(got) != 1 || got[0].LibraryID != music.ID {
+		t.Errorf("items = %+v, want only music's", got)
+	}
+	if r.repo.has(films.ID) {
+		t.Error("the repository still holds the removed library")
+	}
+	if got := r.mem.lastSave(); len(got) != 1 || got[0].ID != music.ID {
+		t.Errorf("remembered %+v", got)
+	}
+	if len(r.ev.events()) == before {
+		t.Error("the UI was not told")
+	}
+	if got := r.ev.scanned()[len(r.ev.scanned())-1].Libraries; len(got) != 1 {
+		t.Errorf("last LibraryScanned listed %d libraries, want 1", len(got))
+	}
+	if err := r.svc.Remove(films.ID); !errors.Is(err, ErrNoSuchLibrary) {
+		t.Errorf("removing twice: error = %v", err)
+	}
 }
 
-func TestScanFolder_RejectsAnOverlappingScan(t *testing.T) {
-	bs := &blockingScanner{entered: make(chan struct{}), release: make(chan struct{})}
-	svc := NewService(bs, &fakeRepo{}, &fakeMemory{}, &fakeEvents{}, slog.New(slog.DiscardHandler))
+func TestRemove_AScanInFlightIsDiscarded(t *testing.T) {
+	lib := media.NewLibrary("/media")
+	r := newRig(lib)
+	r.sc.set("/media", file("a.mkv", 1))
+	h := newHold()
+	r.sc.hold["/media"] = h
 
 	done := make(chan error, 1)
-	go func() { _, err := svc.ScanFolder(context.Background(), "/a"); done <- err }()
-	<-bs.entered
+	go func() { done <- r.svc.Rescan(context.Background(), lib.ID) }()
+	<-h.entered
 
-	if !svc.Status().Scanning {
-		t.Error("Status().Scanning = false during a scan")
+	if err := r.svc.Remove(lib.ID); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := svc.ScanFolder(context.Background(), "/b"); !errors.Is(err, ErrScanInProgress) {
-		t.Fatalf("second scan error = %v, want ErrScanInProgress", err)
+	close(h.release)
+	if err := <-done; !errors.Is(err, ErrNoSuchLibrary) {
+		t.Errorf("the scan of a removed library: error = %v", err)
 	}
-
-	close(bs.release)
-	if err := <-done; err != nil {
-		t.Fatalf("first scan error = %v", err)
-	}
-	if svc.Status().Scanning {
-		t.Error("Scanning stuck at true after the scan finished")
+	if r.repo.has(lib.ID) || len(r.svc.List()) != 0 {
+		t.Error("a scan that finished after the library was removed put its files back")
 	}
 }
 
-func TestRescan(t *testing.T) {
-	t.Run("scans the current folder again", func(t *testing.T) {
-		sc := &fakeScanner{items: []media.Item{{ID: "a", Size: 1}, {ID: "b", Size: 2}}}
-		repo := &fakeRepo{root: "/media", items: []media.Item{{ID: "a", Size: 1}}}
-		svc := newService(sc, repo, &fakeEvents{})
+func TestRename(t *testing.T) {
+	lib := media.NewLibrary("/media/films")
+	r := newRig(lib)
 
-		sum, err := svc.Rescan(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if sc.gotRoot != "/media" || sum.Stats.Total != 2 || len(repo.items) != 2 {
-			t.Errorf("scanner root=%q summary=%+v repo=%d items", sc.gotRoot, sum, len(repo.items))
-		}
-	})
+	if err := r.svc.Rename(lib.ID, "  Movie night  "); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := r.stateOf(lib.ID)
+	if st.Library.Name != "Movie night" || st.Library.Root != "/media/films" || st.Library.ID != lib.ID {
+		t.Errorf("state = %+v: only the name changes", st.Library)
+	}
+	if got := r.mem.lastSave(); len(got) != 1 || got[0].Name != "Movie night" {
+		t.Errorf("remembered %+v", got)
+	}
+	if len(r.ev.statuses()) == 0 {
+		t.Error("the UI was not told")
+	}
 
-	t.Run("before any folder was chosen", func(t *testing.T) {
-		svc := newService(&fakeScanner{}, &fakeRepo{}, &fakeEvents{})
-		if _, err := svc.Rescan(context.Background()); !errors.Is(err, ErrNoLibrary) {
-			t.Fatalf("error = %v, want ErrNoLibrary", err)
+	for _, bad := range []string{"", "   ", strings.Repeat("x", 65), "a\nb", "tab\there"} {
+		if err := r.svc.Rename(lib.ID, bad); !errors.Is(err, ErrInvalidName) {
+			t.Errorf("Rename(%q) = %v, want ErrInvalidName", bad, err)
 		}
-	})
+	}
+	if err := r.svc.Rename("nope", "x"); !errors.Is(err, ErrNoSuchLibrary) {
+		t.Errorf("unknown library: %v", err)
+	}
+	if st, _ := r.stateOf(lib.ID); st.Library.Name != "Movie night" {
+		t.Errorf("a refused rename changed the name: %q", st.Library.Name)
+	}
+}
 
-	t.Run("a failed rescan keeps the old library", func(t *testing.T) {
-		repo := &fakeRepo{root: "/media", items: []media.Item{{ID: "keep"}}}
-		svc := newService(&fakeScanner{err: fs.ErrNotExist}, repo, &fakeEvents{})
-		_, _ = svc.Rescan(context.Background())
-		if len(repo.items) != 1 || repo.items[0].ID != "keep" {
-			t.Errorf("library changed after a failed rescan: %+v", repo.items)
-		}
-	})
+func TestRename_LongNameInCharactersNotBytes(t *testing.T) {
+	lib := media.NewLibrary("/media")
+	r := newRig(lib)
+	if err := r.svc.Rename(lib.ID, strings.Repeat("မ", 64)); err != nil {
+		t.Errorf("64 characters (192 bytes) refused: %v", err)
+	}
+}
+
+func TestNewService_ListsRememberedLibrariesAtOnce(t *testing.T) {
+	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	r := newRig(films, music)
+
+	// Before Restore scans anything the UI can already show them, so a restart is
+	// not mistaken for a first run.
+	got := r.svc.State()
+	if len(got) != 2 || got[0].Library != films || got[1].Library != music || got[0].Scanning || got[0].Stats.Total != 0 {
+		t.Fatalf("State() = %+v", got)
+	}
+	if r.sc.scans() != 0 {
+		t.Error("constructing the service scanned something")
+	}
 }
 
 func TestRestore(t *testing.T) {
 	t.Run("nothing remembered does nothing", func(t *testing.T) {
-		sc := &fakeScanner{}
-		svc := newServiceWithMemory(sc, &fakeRepo{}, &fakeMemory{}, &fakeEvents{})
-		if err := svc.Restore(context.Background()); err != nil || sc.gotRoot != "" {
-			t.Fatalf("err=%v scannedRoot=%q, want a quiet no-op", err, sc.gotRoot)
+		r := newRig()
+		if err := r.svc.Restore(context.Background()); err != nil || r.sc.scans() != 0 {
+			t.Fatalf("err=%v scans=%d, want a quiet no-op", err, r.sc.scans())
 		}
 	})
 
-	t.Run("reopens the remembered folder", func(t *testing.T) {
-		sc := &fakeScanner{items: []media.Item{{ID: "a"}}}
-		repo := &fakeRepo{}
-		svc := newServiceWithMemory(sc, repo, &fakeMemory{root: "/media"}, &fakeEvents{})
-		if err := svc.Restore(context.Background()); err != nil {
+	t.Run("scans every remembered library", func(t *testing.T) {
+		films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+		r := newRig(films, music)
+		r.sc.set("/films", file("a.mkv", 1))
+		r.sc.set("/music", file("s.mp3", 1), file("t.mp3", 1))
+		if err := r.svc.Restore(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if sc.gotRoot != "/media" || repo.root != "/media" {
-			t.Errorf("scanned %q, repo root %q", sc.gotRoot, repo.root)
+		if st, _ := r.stateOf(music.ID); st.Stats.Total != 2 {
+			t.Errorf("music = %+v", st)
+		}
+		if len(r.svc.List()) != 3 {
+			t.Errorf("items = %d", len(r.svc.List()))
 		}
 	})
 
-	t.Run("a vanished folder is reported through Status", func(t *testing.T) {
-		svc := newServiceWithMemory(&fakeScanner{err: fs.ErrNotExist}, &fakeRepo{}, &fakeMemory{root: "/gone"}, &fakeEvents{})
-		if err := svc.Restore(context.Background()); err == nil {
+	t.Run("a vanished folder is reported through its state and the others still open", func(t *testing.T) {
+		gone, ok := media.NewLibrary("/gone"), media.NewLibrary("/ok")
+		r := newRig(gone, ok)
+		r.sc.fail("/gone", fs.ErrNotExist)
+		r.sc.set("/ok", file("a.mkv", 1))
+
+		if err := r.svc.Restore(context.Background()); err == nil {
 			t.Fatal("Restore() error = nil")
 		}
-		if st := svc.Status(); !strings.Contains(st.Error, "no longer exists") || st.Root != "/gone" {
-			t.Errorf("Status() = %+v", st)
+		if st, _ := r.stateOf(gone.ID); !strings.Contains(st.Error, "no longer exists") {
+			t.Errorf("gone = %+v", st)
+		}
+		if st, _ := r.stateOf(ok.ID); st.Error != "" || st.Stats.Total != 1 {
+			t.Errorf("ok = %+v", st)
+		}
+		if len(r.svc.Libraries()) != 2 {
+			t.Error("a library whose folder is missing was dropped; it may be an unplugged drive")
 		}
 	})
+}
+
+func TestScan_OneLibraryAtATimeButLibrariesDoNotBlockEachOther(t *testing.T) {
+	a, b := media.NewLibrary("/a"), media.NewLibrary("/b")
+	r := newRig(a, b)
+	r.sc.set("/a", file("1.mkv", 1))
+	r.sc.set("/b", file("2.mkv", 1))
+	h := newHold()
+	r.sc.hold["/a"] = h
+
+	done := make(chan error, 1)
+	go func() { done <- r.svc.Rescan(context.Background(), a.ID) }()
+	<-h.entered
+
+	if st, _ := r.stateOf(a.ID); !st.Scanning {
+		t.Error("State().Scanning = false during a scan")
+	}
+	if err := r.svc.Rescan(context.Background(), a.ID); !errors.Is(err, ErrScanInProgress) {
+		t.Fatalf("second scan of the same library: error = %v, want ErrScanInProgress", err)
+	}
+	if err := r.svc.Rescan(context.Background(), b.ID); err != nil {
+		t.Fatalf("scanning b while a is scanned: %v", err)
+	}
+
+	close(h.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := r.stateOf(a.ID); st.Scanning {
+		t.Error("Scanning stuck at true after the scan finished")
+	}
+}
+
+func TestListAndGet_SpanEveryLibrary(t *testing.T) {
+	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	r := newRig(films, music)
+	r.sc.set("/films", file("a.mkv", 1))
+	r.sc.set("/music", file("s.mp3", 1))
+	_ = r.svc.Restore(context.Background())
+
+	if got := r.svc.List(); len(got) != 2 || got[0].LibraryID != films.ID || got[1].LibraryID != music.ID {
+		t.Errorf("List() = %+v", got)
+	}
+	it, err := r.svc.Get("id:s.mp3")
+	if err != nil || it.LibraryID != music.ID || it.Root != "/music" {
+		t.Errorf("Get() = %+v, %v; want the item with its own library's root", it, err)
+	}
+	if _, err := r.svc.Get("zzz"); !errors.Is(err, media.ErrNotFound) {
+		t.Errorf("Get(zzz) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestState_CountsPerLibrary(t *testing.T) {
+	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	r := newRig(films, music)
+	r.sc.set("/films", file("a.mkv", 10))
+	song := file("s.mp3", 4)
+	song.Kind = media.KindAudio
+	r.sc.set("/music", song, song)
+	song2 := song
+	song2.ID = "id:t.mp3"
+	r.sc.set("/music", song, song2)
+	_ = r.svc.Restore(context.Background())
+
+	got := r.svc.State()
+	if got[0].Stats.Total != 1 || got[0].Stats.Counts[media.KindVideo] != 1 ||
+		got[1].Stats.Total != 2 || got[1].Stats.Counts[media.KindAudio] != 2 || got[1].Stats.TotalSize != 8 {
+		t.Errorf("State() = %+v", got)
+	}
+	var _ []app.LibraryState = got
 }

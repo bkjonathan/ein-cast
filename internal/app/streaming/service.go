@@ -22,17 +22,19 @@ const stopTimeout = 5 * time.Second
 // every change goes through the domain state machine, so clicking either at any
 // time is safe: the loser of a race gets an invalid-transition error.
 type Service struct {
-	web    app.WebServer
-	net    app.NetInfo
-	events app.EventPublisher
-	log    *slog.Logger
-	public app.PublicAccess // nil when remote access is not wired in
+	web       app.WebServer
+	net       app.NetInfo
+	events    app.EventPublisher
+	log       *slog.Logger
+	public    app.PublicAccess // nil when remote access is not wired in
+	discovery []app.Discovery  // may be empty
 
 	machine *server.Machine
 
 	mu      sync.Mutex // serializes Start, Stop and the crash watcher
 	current app.RunningServer
-	gen     uint64 // identifies a run, so a stale watcher can recognise itself
+	gen     uint64   // identifies a run, so a stale watcher can recognise itself
+	stops   []func() // withdraw each announcement of the current run
 
 	infoMu sync.RWMutex // guards info so Status never waits on mu
 	info   endpoints
@@ -44,6 +46,8 @@ type endpoints struct {
 	port     int
 	localURL string
 	lanURLs  []string
+	nameURLs []string // announced names, such as http://eincast.local:8765
+	found    []string // the kinds of discovery that are active
 }
 
 // ServiceOption customizes a Service.
@@ -53,6 +57,13 @@ type ServiceOption func(*Service)
 // after it dies, so a tunnel never outlives the server it points at.
 func WithPublicAccess(p app.PublicAccess) ServiceOption {
 	return func(s *Service) { s.public = p }
+}
+
+// WithDiscovery makes the server announce itself on the local network once it
+// is running, and withdraw before it stops. A discovery that fails is logged and
+// skipped; the server runs regardless.
+func WithDiscovery(d ...app.Discovery) ServiceOption {
+	return func(s *Service) { s.discovery = append(s.discovery, d...) }
 }
 
 // NewService builds a Service from its ports.
@@ -80,7 +91,7 @@ func (s *Service) Start(ctx context.Context, cfg Config) error {
 	}
 	s.setInfo(endpoints{name: cfg.Name})
 
-	run, err := s.web.Start(ctx, app.ServeConfig{Port: cfg.Port, Name: cfg.Name, Hosts: s.lanHosts()})
+	run, err := s.web.Start(ctx, app.ServeConfig{Port: cfg.Port, Name: cfg.Name, DLNA: cfg.DLNA, Hosts: s.lanHosts()})
 	if err != nil {
 		s.fail(err)
 		return fmt.Errorf("start server: %w", err)
@@ -99,8 +110,54 @@ func (s *Service) Start(ctx context.Context, cfg Config) error {
 		slog.Int("port", ep.port),
 		slog.Any("urls", append([]string{ep.localURL}, ep.lanURLs...)),
 	)
+	s.announce(ctx, cfg, run)
 	go s.watch(run, s.gen)
 	return nil
+}
+
+// announce tells the local network about the server. Each kind of discovery
+// stands alone: one that fails (a firewall blocking multicast, say) is logged
+// and the others still run.
+func (s *Service) announce(ctx context.Context, cfg Config, run app.RunningServer) {
+	if len(s.discovery) == 0 {
+		return
+	}
+	ann := app.Announcement{Name: cfg.Name, Port: s.info.port, DLNA: cfg.DLNA}
+	for _, ap := range run.Addrs() {
+		if !ap.Addr().IsLoopback() {
+			ann.Addrs = append(ann.Addrs, ap.Addr())
+		}
+	}
+	var found, urls []string
+	for _, d := range s.discovery {
+		stop, got, err := d.Announce(ctx, ann)
+		switch {
+		case errors.Is(err, app.ErrNotAnnounced):
+			continue
+		case err != nil:
+			s.log.Warn("could not announce on the network; the address and QR code still work",
+				slog.String("via", d.Name()), slog.String("error", err.Error()))
+			continue
+		}
+		s.stops = append(s.stops, stop)
+		found = append(found, d.Name())
+		urls = append(urls, got...)
+	}
+	s.infoMu.Lock()
+	s.info.found, s.info.nameURLs = found, urls
+	s.infoMu.Unlock()
+	s.publish()
+	if len(found) > 0 {
+		s.log.Info("announced on the network", slog.Any("via", found), slog.Any("urls", urls))
+	}
+}
+
+// withdrawDiscovery takes every announcement of the current run back.
+func (s *Service) withdrawDiscovery() {
+	for _, stop := range s.stops {
+		stop()
+	}
+	s.stops = nil
 }
 
 // Stop shuts the server down gracefully. Stopping a Failed server just clears
@@ -121,6 +178,7 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	stopCtx, cancel := context.WithTimeout(ctx, stopTimeout)
 	defer cancel()
+	s.withdrawDiscovery()           // first: stop telling people where to find a server that is going away
 	s.withdrawPublicAccess(stopCtx) // the tunnel goes first, then the server behind it
 	if run != nil {
 		if err := run.Stop(stopCtx); err != nil {
@@ -152,11 +210,13 @@ func (s *Service) Status() app.ServerStatus {
 
 	s.infoMu.RLock()
 	status := app.ServerStatus{
-		State:    snap.State,
-		Name:     s.info.name,
-		Port:     s.info.port,
-		LocalURL: s.info.localURL,
-		LANURLs:  slices.Clone(s.info.lanURLs),
+		State:     snap.State,
+		Name:      s.info.name,
+		Port:      s.info.port,
+		LocalURL:  s.info.localURL,
+		LANURLs:   slices.Clone(s.info.lanURLs),
+		NameURLs:  slices.Clone(s.info.nameURLs),
+		Discovery: slices.Clone(s.info.found),
 	}
 	s.infoMu.RUnlock()
 
@@ -186,6 +246,7 @@ func (s *Service) watch(run app.RunningServer, gen uint64) {
 	s.log.Error("server died", slog.String("error", cause.Error()))
 	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 	defer cancel()
+	s.withdrawDiscovery()
 	s.withdrawPublicAccess(ctx)
 	s.clearEndpoints()
 	s.fail(cause)

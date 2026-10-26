@@ -237,3 +237,11 @@ func TestWatch_RejectsAMissingFolder(t *testing.T) {
 		t.Fatal("Watch() error = nil, want an error for a folder that does not exist")
 	}
 }
+
+func TestWatch_SignalsWhenASubtitleAppears(t *testing.T) {
+	root := t.TempDir()
+	ch, _ := newWatch(t, root)
+
+	write(t, filepath.Join(root, "movie.en.srt"), "x")
+	expectSignal(t, ch, "a new subtitle file")
+}

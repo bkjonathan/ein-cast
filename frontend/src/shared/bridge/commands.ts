@@ -7,15 +7,17 @@ import {
   ClearRemoteProviderField as goClearRemoteProviderField,
   DisableRemote as goDisableRemote,
   EnableRemote as goEnableRemote,
-  GetLibraryStatus as goGetLibraryStatus,
-  GetLibrarySummary as goGetLibrarySummary,
   GetLogHistory as goGetLogHistory,
   GetRemoteProviderConfig as goGetRemoteProviderConfig,
   GetRemoteStatus as goGetRemoteStatus,
   ListRemoteProviders as goListRemoteProviders,
   GetServerState as goGetServerState,
   GetThumbnail as goGetThumbnail,
+  ListLibraries as goListLibraries,
   ListLibrary as goListLibrary,
+  RemoveLibrary as goRemoveLibrary,
+  RenameLibrary as goRenameLibrary,
+  RescanAllLibraries as goRescanAllLibraries,
   GetSettings as goGetSettings,
   RescanLibrary as goRescanLibrary,
   RotateAccessToken as goRotateAccessToken,
@@ -27,12 +29,11 @@ import {
   ThumbnailsAvailable as goThumbnailsAvailable,
   UpdateSettings as goUpdateSettings,
 } from "../../../wailsjs/go/bridge/App";
-import { toLibraryItem, toLogLine, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
+import { toLibraryItem, toLibraryState, toLogLine, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
 import type {
   AppInfo,
   LibraryItem,
-  LibraryStatus,
-  LibrarySummary,
+  LibraryState,
   LogLine,
   RemoteFieldState,
   RemoteProvider,
@@ -49,27 +50,28 @@ export async function getAppInfo(): Promise<AppInfo> {
 }
 
 /**
- * Opens the native folder picker and scans the choice. Resolves when Go is done
- * (including when the user cancels); the new library arrives as a
- * "library:scanned" event, not as a return value. Rejects with Go's message.
+ * Opens the native folder picker and adds the choice as a library, scanning it.
+ * Resolves when Go is done (including when the user cancels); the new library
+ * arrives as "library:status" and "library:scanned" events, not as a return
+ * value. Rejects with Go's message, e.g. that the folder is already in the library.
  */
 export async function chooseFolder(): Promise<void> {
   await goChooseFolder();
 }
 
-/** The library Go has loaded right now, or null before the first scan. */
-export async function getLibrarySummary(): Promise<LibrarySummary | null> {
-  // The generated type claims a non-null DTO, but Go returns nil (→ null) before
-  // the first scan.
-  const dto: Awaited<ReturnType<typeof goGetLibrarySummary>> | null =
-    await goGetLibrarySummary();
-  if (!dto) return null;
-  return {
-    root: dto.root,
-    total: dto.total,
-    totalSize: dto.totalSize,
-    counts: { ...dto.counts },
-  };
+/** Every library with what is in it and what is happening to it, in the order they were added. */
+export async function listLibraries(): Promise<LibraryState[]> {
+  return (await goListLibraries()).map(toLibraryState);
+}
+
+/** Takes a library out of the list. Its folder on disk is untouched. Rejects with Go's message. */
+export async function removeLibrary(id: string): Promise<void> {
+  await goRemoveLibrary(id);
+}
+
+/** Changes the name a library is shown as. Rejects with Go's message, e.g. an empty name. */
+export async function renameLibrary(id: string, name: string): Promise<void> {
+  await goRenameLibrary(id, name);
 }
 
 /** Every file in the library, in scan order. Re-ask after each "library:scanned". */
@@ -101,15 +103,14 @@ export async function getLogHistory(): Promise<LogLine[]> {
   return (await goGetLogHistory()).map(toLogLine);
 }
 
-/** Scans the current library folder again. The result arrives as events. */
-export async function rescanLibrary(): Promise<void> {
-  await goRescanLibrary();
+/** Scans one library again. The result arrives as events. */
+export async function rescanLibrary(id: string): Promise<void> {
+  await goRescanLibrary(id);
 }
 
-/** Whether a scan is running, and why the last one failed. */
-export async function getLibraryStatus(): Promise<LibraryStatus> {
-  const dto = await goGetLibraryStatus();
-  return { scanning: dto.scanning, root: dto.root, error: dto.error, watching: dto.watching };
+/** Scans every library again, one after another. Rejects if any failed. */
+export async function rescanAllLibraries(): Promise<void> {
+  await goRescanAllLibraries();
 }
 
 /** The saved settings, and the access token when it is on. */
@@ -119,6 +120,7 @@ export async function getSettings(): Promise<Settings> {
     port: dto.port,
     name: dto.name,
     requireToken: dto.requireToken,
+    dlna: dto.dlna,
     accessToken: dto.accessToken,
     tokenPersisted: dto.tokenPersisted,
   };

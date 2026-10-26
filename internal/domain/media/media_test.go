@@ -42,8 +42,10 @@ func TestDetectKind(t *testing.T) {
 }
 
 func TestNewID(t *testing.T) {
+	lib := NewLibraryID("/media/films")
+
 	t.Run("is 16 hex chars", func(t *testing.T) {
-		id := NewID("movies/a.mp4")
+		id := NewID(lib, "movies/a.mp4")
 		if len(id) != 16 {
 			t.Fatalf("len(%q) = %d, want 16", id, len(id))
 		}
@@ -55,82 +57,28 @@ func TestNewID(t *testing.T) {
 	})
 
 	t.Run("is stable", func(t *testing.T) {
-		if NewID("a/b.mp4") != NewID("a/b.mp4") {
+		if NewID(lib, "a/b.mp4") != NewID(lib, "a/b.mp4") {
 			t.Fatal("same path produced different IDs")
 		}
 	})
 
 	t.Run("known value", func(t *testing.T) {
-		// First 8 bytes of sha256("a.mp4") (checked with shasum); pins the scheme so a change
-		// would break every bookmarked URL and must be deliberate.
-		if got, want := NewID("a.mp4"), ID("e6d48eabd560bc60"); got != want {
-			t.Fatalf("NewID(a.mp4) = %q, want %q", got, want)
+		// First 8 bytes of sha256("lib1|a.mp4"); pins the scheme so a change would
+		// break every bookmarked URL and must be deliberate.
+		if got, want := NewID("lib1", "a.mp4"), ID("88dde587a9371bd0"); got != want {
+			t.Fatalf("NewID(lib1, a.mp4) = %q, want %q", got, want)
 		}
 	})
 
 	t.Run("differs per path", func(t *testing.T) {
-		if NewID("a.mp4") == NewID("b.mp4") {
+		if NewID(lib, "a.mp4") == NewID(lib, "b.mp4") {
 			t.Fatal("different paths produced the same ID")
 		}
 	})
-}
 
-func TestSummarize(t *testing.T) {
-	tests := []struct {
-		name  string
-		items []Item
-		want  Stats
-	}{
-		{"empty", nil, Stats{Counts: map[Kind]int{}}},
-		{
-			"mixed",
-			[]Item{
-				{Kind: KindVideo, Size: 100},
-				{Kind: KindVideo, Size: 50},
-				{Kind: KindAudio, Size: 5},
-			},
-			Stats{Total: 3, TotalSize: 155, Counts: map[Kind]int{KindVideo: 2, KindAudio: 1}},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := Summarize(tt.items)
-			if got.Total != tt.want.Total || got.TotalSize != tt.want.TotalSize {
-				t.Fatalf("Summarize() = %+v, want %+v", got, tt.want)
-			}
-			for _, k := range []Kind{KindVideo, KindAudio, KindImage} {
-				if got.Counts[k] != tt.want.Counts[k] {
-					t.Errorf("Counts[%s] = %d, want %d", k, got.Counts[k], tt.want.Counts[k])
-				}
-			}
-		})
-	}
-}
-
-func TestIgnored(t *testing.T) {
-	tests := []struct {
-		name string
-		want bool
-	}{
-		{".hidden", true},
-		{".DS_Store", true},
-		{"._clip.mp4", true},
-		{"Thumbs.db", true},
-		{"DESKTOP.INI", true},
-		{"$RECYCLE.BIN", true},
-		{"System Volume Information", true},
-		{"__MACOSX", true},
-		{"@eaDir", true},
-		{"movie.mkv", false},
-		{"Season 1", false},
-		{"my.hidden.movie.mkv", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := Ignored(tt.name); got != tt.want {
-				t.Fatalf("Ignored(%q) = %v, want %v", tt.name, got, tt.want)
-			}
-		})
-	}
+	t.Run("differs per library: the same file name in two libraries is two items", func(t *testing.T) {
+		if NewID("lib1", "a.mp4") == NewID("lib2", "a.mp4") {
+			t.Fatal("two libraries produced the same ID for the same relative path")
+		}
+	})
 }

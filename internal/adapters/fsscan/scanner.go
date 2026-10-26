@@ -30,12 +30,15 @@ func New(log *slog.Logger) *Scanner {
 //   - symlinks, so a link inside the library cannot expose files outside it;
 //   - files with an unsupported extension.
 //
+// Subtitle files (.srt, .vtt) are not items. They are attached to the video
+// they belong to (see media.MatchSubtitles).
+//
 // An unreadable subdirectory is logged and skipped rather than failing the
 // whole scan; an unusable root is an error.
-func (s *Scanner) Scan(ctx context.Context, root string) ([]media.Item, error) {
-	absRoot, err := filepath.Abs(root)
+func (s *Scanner) Scan(ctx context.Context, lib media.Library) ([]media.Item, error) {
+	absRoot, err := filepath.Abs(lib.Root)
 	if err != nil {
-		return nil, fmt.Errorf("resolve %q: %w", root, err)
+		return nil, fmt.Errorf("resolve %q: %w", lib.Root, err)
 	}
 	info, err := os.Stat(absRoot)
 	if err != nil {
@@ -46,6 +49,7 @@ func (s *Scanner) Scan(ctx context.Context, root string) ([]media.Item, error) {
 	}
 
 	var items []media.Item
+	subtitles := make(map[string][]string) // folder → subtitle file names in it
 	walk := func(path string, d fs.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -74,7 +78,13 @@ func (s *Scanner) Scan(ctx context.Context, root string) ([]media.Item, error) {
 			return nil // directories to descend into, symlinks, devices, sockets
 		}
 
-		item, ok := s.itemFor(absRoot, path, d)
+		if media.IsSubtitleFile(d.Name()) {
+			dir := filepath.Dir(path)
+			subtitles[dir] = append(subtitles[dir], d.Name())
+			return nil
+		}
+
+		item, ok := s.itemFor(lib.ID, absRoot, path, d)
 		if ok {
 			items = append(items, item)
 		}
@@ -84,12 +94,37 @@ func (s *Scanner) Scan(ctx context.Context, root string) ([]media.Item, error) {
 	if err := filepath.WalkDir(absRoot, walk); err != nil {
 		return nil, fmt.Errorf("walk %q: %w", absRoot, err)
 	}
+	for i := range items {
+		if items[i].Kind == media.KindVideo {
+			items[i].Subtitles = attachSubtitles(absRoot, items[i], subtitles[filepath.Dir(items[i].Path)])
+		}
+	}
 	return items, nil
+}
+
+// attachSubtitles returns the sidecar subtitles of a video, given the subtitle
+// files found in its folder.
+func attachSubtitles(root string, video media.Item, folder []string) []media.Subtitle {
+	matches := media.MatchSubtitles(video.Name, folder)
+	if len(matches) == 0 {
+		return nil
+	}
+	dir := filepath.Dir(video.Path)
+	out := make([]media.Subtitle, len(matches))
+	for i, m := range matches {
+		path := filepath.Join(dir, m.Name)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			rel = m.Name // cannot happen for a path found under root
+		}
+		out[i] = media.Subtitle{Lang: m.Lang, Label: m.Label, RelPath: filepath.ToSlash(rel), Path: path}
+	}
+	return out
 }
 
 // itemFor builds the media.Item for a regular file, or reports false if the
 // file is not servable.
-func (s *Scanner) itemFor(root, path string, d fs.DirEntry) (media.Item, bool) {
+func (s *Scanner) itemFor(libID media.LibraryID, root, path string, d fs.DirEntry) (media.Item, bool) {
 	kind, err := media.DetectKind(d.Name())
 	if err != nil {
 		return media.Item{}, false // unsupported type: expected, not worth a log line
@@ -108,12 +143,14 @@ func (s *Scanner) itemFor(root, path string, d fs.DirEntry) (media.Item, bool) {
 	rel = filepath.ToSlash(rel)
 
 	return media.Item{
-		ID:      media.NewID(rel),
-		Name:    d.Name(),
-		RelPath: rel,
-		Path:    path,
-		Kind:    kind,
-		Size:    info.Size(),
-		ModTime: info.ModTime(),
+		ID:        media.NewID(libID, rel),
+		LibraryID: libID,
+		Root:      root,
+		Name:      d.Name(),
+		RelPath:   rel,
+		Path:      path,
+		Kind:      kind,
+		Size:      info.Size(),
+		ModTime:   info.ModTime(),
 	}, true
 }
