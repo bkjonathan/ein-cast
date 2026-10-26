@@ -354,3 +354,64 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 		time.Sleep(2 * time.Millisecond)
 	}
 }
+
+func TestGet_ThePosterIsWhatIsMadeWhenThereIsOne(t *testing.T) {
+	r := newRig(DefaultOptions)
+	art := media.Artwork{Path: "/lib/poster.jpg", Size: 7, ModTime: modTime}
+	it, _ := r.items.Get("v1")
+	it.Artwork = art
+	r.items.set(it)
+
+	got, err := r.svc.Get(context.Background(), "v1")
+	if err != nil || string(got.JPEG) != "jpeg:/lib/poster.jpg" {
+		t.Fatalf("Get() = %q, %v; want a picture made from the poster", got.JPEG, err)
+	}
+	req := r.grab.gotReq.Load().(app.GrabRequest)
+	if req.Path != "/lib/poster.jpg" || req.Kind != media.KindImage || req.Root != "/lib" {
+		t.Errorf("request = %+v, want the poster, as an image, inside the library", req)
+	}
+}
+
+func TestGet_AddingAPosterMakesANewPictureInsteadOfReusingTheFrame(t *testing.T) {
+	r := newRig(DefaultOptions)
+	if got, _ := r.svc.Get(context.Background(), "v1"); string(got.JPEG) != "jpeg:/lib/a.mkv" {
+		t.Fatalf("first picture = %q", got.JPEG)
+	}
+
+	it, _ := r.items.Get("v1")
+	it.Artwork = media.Artwork{Path: "/lib/poster.jpg", Size: 7, ModTime: modTime}
+	r.items.set(it)
+	if got, _ := r.svc.Get(context.Background(), "v1"); string(got.JPEG) != "jpeg:/lib/poster.jpg" {
+		t.Errorf("picture after adding a poster = %q, want it made from the poster", got.JPEG)
+	}
+}
+
+func TestGet_AReplacedPosterMakesANewPicture(t *testing.T) {
+	r := newRig(DefaultOptions)
+	it, _ := r.items.Get("v1")
+	it.Artwork = media.Artwork{Path: "/lib/poster.jpg", Size: 7, ModTime: modTime}
+	r.items.set(it)
+	_, _ = r.svc.Get(context.Background(), "v1")
+
+	it.Artwork.Size = 9
+	r.items.set(it)
+	_, _ = r.svc.Get(context.Background(), "v1")
+	if r.grab.calls.Load() != 2 {
+		t.Errorf("grabs = %d, want 2: a new poster file needs a new thumbnail", r.grab.calls.Load())
+	}
+}
+
+func TestGet_APosterStillShowsWhenFFmpegIsMissing(t *testing.T) {
+	r := newRig(DefaultOptions)
+	r.grab.available.Store(false)
+	if _, err := r.svc.Get(context.Background(), "v1"); !errors.Is(err, app.ErrThumbnailsUnavailable) {
+		t.Fatalf("no poster, no ffmpeg: error = %v, want unavailable", err)
+	}
+
+	it, _ := r.items.Get("v1")
+	it.Artwork = media.Artwork{Path: "/lib/poster.jpg", Size: 7, ModTime: modTime}
+	r.items.set(it)
+	if got, err := r.svc.Get(context.Background(), "v1"); err != nil || len(got.JPEG) == 0 {
+		t.Errorf("Get() = %q, %v; the grabber is asked even without ffmpeg, since it can serve a small poster as it is", got.JPEG, err)
+	}
+}

@@ -1,8 +1,9 @@
 import { LoaderCircle, RefreshCw } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 import { effectiveLibrary, nameById } from "../derive";
 import { browseItems } from "../filter";
+import { listRows } from "../group";
 import { useLibraryActions } from "../hooks/useLibraryActions";
 import { useThumbnailSupport } from "../hooks/useThumbnail";
 import { useLibraryStore } from "../store";
@@ -31,6 +32,16 @@ export function LibraryView() {
     () => browseItems(items, kind, query, sort, library),
     [items, kind, query, sort, library],
   );
+  // Series that are open. View state, like the filters: Go knows nothing of it.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const toggleShow = (key: string) =>
+    setOpened((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  // A search opens every series, so its matches are not hidden behind closed headers.
+  const rows = useMemo(() => listRows(visible, opened, query.trim() !== ""), [visible, opened, query]);
   const names = useMemo(() => nameById(libraries), [libraries]);
   const problems = libraries.filter((l) => l.error);
   const scanning = libraries.some((l) => l.scanning);
@@ -63,7 +74,8 @@ export function LibraryView() {
       )}
       <GlassPanel className="min-h-0 flex-1 overflow-hidden">
         <LibraryList
-          items={visible}
+          rows={rows}
+          onToggleShow={toggleShow}
           libraryNames={libraries.length > 1 ? names : undefined}
           emptyHint={
             items.length === 0

@@ -182,10 +182,16 @@ describe("getLogHistory", () => {
 describe("listLibrary", () => {
   it("maps every item and narrows the kind", async () => {
     go.ListLibrary.mockResolvedValue([
-      { id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9, extra: 1 },
+      {
+        id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9,
+        title: "Pilot", year: 2014, show: "Fargo", season: 1, episode: 1, poster: true, extra: 1,
+      },
     ]);
     await expect(listLibrary()).resolves.toStrictEqual([
-      { id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9 },
+      {
+        id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9,
+        title: "Pilot", year: 2014, show: "Fargo", season: 1, episode: 1, poster: true,
+      },
     ]);
   });
 

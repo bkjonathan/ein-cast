@@ -2,15 +2,24 @@ import { describe, expect, it } from "vitest";
 import type { LibraryItem } from "@/shared/bridge";
 import { browseItems, countByKind } from "./filter";
 
-const item = (over: Partial<LibraryItem> & { relPath: string }): LibraryItem => ({
-  id: over.relPath,
-  libraryId: "L1",
-  name: over.relPath.split("/").at(-1) ?? over.relPath,
-  kind: "video",
-  size: 1,
-  modTime: 1,
-  ...over,
-});
+const item = (over: Partial<LibraryItem> & { relPath: string }): LibraryItem => {
+  const name = over.relPath.split("/").at(-1) ?? over.relPath;
+  return {
+    id: over.relPath,
+    libraryId: "L1",
+    name,
+    title: name, // no title read from the name: the file name stands in
+    year: 0,
+    show: "",
+    season: 0,
+    episode: 0,
+    poster: false,
+    kind: "video",
+    size: 1,
+    modTime: 1,
+    ...over,
+  };
+};
 
 const items = [
   item({ relPath: "shows/Episode 10.mkv", size: 300, modTime: 10 }),
@@ -99,5 +108,43 @@ describe("countByKind", () => {
   it("counts every kind and the total", () => {
     expect(countByKind(items)).toEqual({ all: 4, video: 2, audio: 1, image: 1 });
     expect(countByKind([])).toEqual({ all: 0, video: 0, audio: 0, image: 0 });
+  });
+});
+
+describe("browseItems: search over metadata", () => {
+  const films = [
+    item({ relPath: "Heat.1995.1080p.mkv", title: "Heat", year: 1995 }),
+    item({ relPath: "Ronin.1998.mkv", title: "Ronin", year: 1998 }),
+    item({ relPath: "tv/F.S01E02.mkv", title: "The Pilot", show: "Fargo", season: 1, episode: 2 }),
+  ];
+
+  it("finds a film by its title, which the file name may not spell the same way", () => {
+    const odd = [item({ relPath: "x7.mkv", title: "Amélie" })];
+    expect(names(browseItems(odd, "all", "amélie", "name"))).toEqual(["x7.mkv"]);
+  });
+
+  it("finds by year", () => {
+    expect(names(browseItems(films, "all", "1998", "name"))).toEqual(["Ronin.1998.mkv"]);
+  });
+
+  it("finds an episode by its series, though neither its name nor its path says so", () => {
+    expect(names(browseItems(films, "all", "fargo", "name"))).toEqual(["F.S01E02.mkv"]);
+  });
+
+  it("matches across Unicode forms", () => {
+    const odd = [item({ relPath: "a.mkv", title: "Caf\u00e9" })];
+    expect(browseItems(odd, "all", "cafe\u0301", "name")).toHaveLength(1);
+  });
+
+  it("is a substring match, not a fuzzy one", () => {
+    expect(browseItems(films, "all", "hete", "name")).toEqual([]);
+  });
+
+  it("sorts by the title a person sees", () => {
+    const sorted = browseItems(
+      [item({ relPath: "z.mkv", title: "Alpha" }), item({ relPath: "a.mkv", title: "Zulu" })],
+      "all", "", "name",
+    );
+    expect(names(sorted)).toEqual(["z.mkv", "a.mkv"]);
   });
 });

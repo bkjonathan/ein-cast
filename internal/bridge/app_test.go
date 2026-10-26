@@ -222,9 +222,29 @@ func TestListLibrary(t *testing.T) {
 		got := newTestApp(lib).ListLibrary()
 		want := []LibraryItemDTO{{
 			ID: "abc", LibraryID: "lib1", Name: "a.mkv", RelPath: "shows/a.mkv", Kind: "video", Size: 42, ModTime: mod.UnixMilli(),
+			Title: "a.mkv", // no title read from the name: the file name stands in
 		}}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("ListLibrary() = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("carries titles, years and the series an episode belongs to", func(t *testing.T) {
+		lib := &fakeLibrary{items: []media.Item{
+			{ID: "m", Name: "Heat.1995.mkv", Kind: media.KindVideo, Meta: media.Meta{Title: "Heat", Year: 1995},
+				Artwork: media.Artwork{Path: "/secret/poster.jpg"}},
+			{ID: "e", Name: "S01E02.mkv", Kind: media.KindVideo, Meta: media.Meta{Title: "Pilot", Show: "Show", Season: 1, Episode: 2}},
+			{ID: "n", Name: "x.mkv", Kind: media.KindVideo, Meta: media.Meta{Title: "x", Episode: 3}}, // numbered but no series
+		}}
+		got := newTestApp(lib).ListLibrary()
+		if got[0].Title != "Heat" || got[0].Year != 1995 || !got[0].Poster || got[0].Show != "" {
+			t.Errorf("movie = %+v", got[0])
+		}
+		if got[1].Show != "Show" || got[1].Season != 1 || got[1].Episode != 2 || got[1].Title != "Pilot" {
+			t.Errorf("episode = %+v", got[1])
+		}
+		if got[2].Show != "" || got[2].Episode != 0 {
+			t.Errorf("an item with no series was filed as an episode: %+v", got[2])
 		}
 	})
 

@@ -27,6 +27,17 @@ export interface LibraryItem {
   size: number;
   /** Last modified, Unix milliseconds. */
   modTime: number;
+  /** What to show: read from the name or a .nfo, else the file name. `name` stays the file name. */
+  title: string;
+  /** Release year, 0 when unknown. */
+  year: number;
+  /** The series an episode belongs to; empty for everything else. */
+  show: string;
+  /** 0 when unknown. */
+  season: number;
+  episode: number;
+  /** True when the thumbnail is a poster found next to the file, not a frame of it. */
+  poster: boolean;
 }
 
 export interface KindCounts {

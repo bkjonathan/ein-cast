@@ -156,6 +156,12 @@ export interface RawLibraryItem {
   kind: string;
   size: number;
   modTime: number;
+  title: string;
+  year: number;
+  show: string;
+  season: number;
+  episode: number;
+  poster: boolean;
 }
 
 /**
@@ -173,6 +179,12 @@ export function toLibraryItem(raw: RawLibraryItem): LibraryItem {
     kind,
     size: raw.size,
     modTime: raw.modTime,
+    title: raw.title,
+    year: raw.year,
+    show: raw.show,
+    season: raw.season,
+    episode: raw.episode,
+    poster: raw.poster,
   };
 }
 

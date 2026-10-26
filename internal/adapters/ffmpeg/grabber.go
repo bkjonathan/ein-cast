@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -44,9 +45,12 @@ func New(log *slog.Logger, opts ...Option) *Grabber {
 
 // Grab makes a JPEG of the first picture ffmpeg can find in the file: a video
 // frame, a song's cover art, or the photo itself, shrunk to fit req.Width.
+//
+// Without ffmpeg a picture that is already small enough is returned as it is
+// (see smallJPEG), so a folder's posters still show.
 func (g *Grabber) Grab(ctx context.Context, req app.GrabRequest) ([]byte, error) {
-	bin, err := g.binary()
-	if err != nil {
+	bin, binErr := g.binary()
+	if binErr != nil && req.Kind != media.KindImage {
 		return nil, app.ErrThumbnailsUnavailable
 	}
 	// ffmpeg opens whatever it is told, so the guard that keeps the HTTP server
@@ -54,6 +58,9 @@ func (g *Grabber) Grab(ctx context.Context, req app.GrabRequest) ([]byte, error)
 	file, err := safepath.Inside(req.Root, req.Path)
 	if err != nil {
 		return nil, fmt.Errorf("thumbnail %q: %w", req.Path, err)
+	}
+	if binErr != nil {
+		return smallJPEG(file, req.Kind)
 	}
 
 	seeks := []int{0}
@@ -72,6 +79,29 @@ func (g *Grabber) Grab(ctx context.Context, req app.GrabRequest) ([]byte, error)
 		lastErr = err
 	}
 	return nil, lastErr
+}
+
+// maxUnshrunk is the largest picture served without being shrunk by ffmpeg: a
+// poster of this size is already a fair thumbnail, and anything bigger would
+// make a page of them slow.
+const maxUnshrunk = 512 << 10
+
+// smallJPEG is what a thumbnail is when ffmpeg is missing: a photo or poster that
+// is a JPEG and small is its own thumbnail. Anything else needs ffmpeg.
+func smallJPEG(file string, kind media.Kind) ([]byte, error) {
+	if kind != media.KindImage {
+		return nil, app.ErrThumbnailsUnavailable
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", app.ErrNoThumbnail, err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxUnshrunk+1))
+	if err != nil || len(data) > maxUnshrunk || !isJPEG(data) {
+		return nil, app.ErrThumbnailsUnavailable
+	}
+	return data, nil
 }
 
 // args builds the command line. The input is given as "file:<path>" so that a

@@ -31,7 +31,7 @@ export function useThumbnail(item: LibraryItem): string | null {
     };
     // The key parts, not the object: a rescan hands out new objects for the
     // same unchanged files.
-  }, [item.id, item.size, item.modTime]);
+  }, [item.id, item.size, item.modTime, item.poster]);
 
   return loaded?.id === item.id ? loaded.url : null;
 }

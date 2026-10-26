@@ -90,13 +90,13 @@ Goal: download → first video playing on a TV in under two minutes, with no sca
 
 Goal: movies and shows look recognisable, with no accounts and no internet needed. This is the biggest gap against Plex/Jellyfin, so do the cheap 80%.
 
-- [ ] **15.1 Filename parser (M).** Domain function (pure, table-driven tests): `Movie.Name.2019.1080p.mkv` → title + year; `Show.S02E05.mkv`, `Show - 2x05`, `Season 2/Episode 5` → show, season, episode. Strip release junk (`1080p`, `BluRay`, `x265`). Keep the original file name always available. ADR 0026.
-- [ ] **15.2 Series grouping (M).** Library items gain optional `Show`, `Season`, `Episode`, `Year` fields (DTO too). Desktop list and player page group episodes under a show and seasons under that, sorted by episode number.
-- [ ] **15.3 Local artwork (M).** Pick up `poster.jpg`, `folder.jpg`, `cover.jpg`, `<name>-poster.jpg` next to the media (same approach as sidecar subtitles). Served through the existing thumbnail route with the same path guard. Fall back to the ffmpeg frame grab.
-- [ ] **15.4 Local `.nfo` reading (S–M).** Read title, year and plot from Kodi-style `.nfo` if present. Many users already have them. Skip if it grows; it is optional.
-- [ ] **15.5 Player page: poster grid + detail view (L).** Rework `web/` into a grid of posters, a "Continue watching" row, a detail view (title, year, plot, play button, subtitle picker). Keep it dependency-free and fast on old TV browsers (existing note).
-- [ ] **15.6 Search over metadata (S).** Search covers title, show, year. Keep the substring match; do not add fuzzy matching yet.
-- [ ] **15.7 Optional online metadata (stretch, M).** A `Metadata` port with a TMDB adapter, **off by default**, using the person's own API key stored in the keychain (like tunnel tokens). Needs a privacy line in the UI: "turning this on sends titles to themoviedb.org". Decide in an ADR whether this ships in 1.1 or 1.2. Recommendation: **1.2**, after 15.1–15.6 prove useful.
+- [x] **15.1 Filename parser (M).** Domain function (pure, table-driven tests): `Movie.Name.2019.1080p.mkv` → title + year; `Show.S02E05.mkv`, `Show - 2x05`, `Season 2/Episode 5` → show, season, episode. Strip release junk (`1080p`, `BluRay`, `x265`). Keep the original file name always available. ADR 0026.
+- [x] **15.2 Series grouping (M).** Library items gain optional `Show`, `Season`, `Episode`, `Year` fields (DTO too). Desktop list and player page group episodes under a show and seasons under that, sorted by episode number.
+- [x] **15.3 Local artwork (M).** Pick up `poster.jpg`, `folder.jpg`, `cover.jpg`, `<name>-poster.jpg` next to the media (same approach as sidecar subtitles). Served through the existing thumbnail route with the same path guard. Fall back to the ffmpeg frame grab.
+- [x] **15.4 Local `.nfo` reading (S–M).** Read title, year and plot from Kodi-style `.nfo` if present. Many users already have them. Skip if it grows; it is optional.
+- [x] **15.5 Player page: poster grid + detail view (L).** Rework `web/` into a grid of posters, a "Continue watching" row, a detail view (title, year, plot, play button, subtitle picker). Keep it dependency-free and fast on old TV browsers (existing note).
+- [x] **15.6 Search over metadata (S).** Search covers title, show, year. Keep the substring match; do not add fuzzy matching yet.
+- [ ] **15.7 Optional online metadata (stretch, M), decided: 1.2 (ADR 0026).** A `Metadata` port with a TMDB adapter, **off by default**, using the person's own API key stored in the keychain (like tunnel tokens). Needs a privacy line in the UI: "turning this on sends titles to themoviedb.org". Decide in an ADR whether this ships in 1.1 or 1.2. Recommendation: **1.2**, after 15.1–15.6 prove useful.
 
 **Done when:** a folder of 20 episodes plus 10 movies shows as 10 posters + 1 show with seasons, on the TV browser and the desktop Library screen, with zero network calls.
 

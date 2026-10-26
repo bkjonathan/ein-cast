@@ -58,6 +58,12 @@ export namespace bridge {
 	    kind: string;
 	    size: number;
 	    modTime: number;
+	    title: string;
+	    year: number;
+	    show: string;
+	    season: number;
+	    episode: number;
+	    poster: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new LibraryItemDTO(source);
@@ -72,6 +78,12 @@ export namespace bridge {
 	        this.kind = source["kind"];
 	        this.size = source["size"];
 	        this.modTime = source["modTime"];
+	        this.title = source["title"];
+	        this.year = source["year"];
+	        this.show = source["show"];
+	        this.season = source["season"];
+	        this.episode = source["episode"];
+	        this.poster = source["poster"];
 	    }
 	}
 	export class LibraryStateDTO {

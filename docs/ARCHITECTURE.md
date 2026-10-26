@@ -42,7 +42,7 @@ changes.
 | `app/streaming` | `Config` + functional options (port, name, DLNA), `Service`: `Start`, `Stop`, `Status`, crash watcher, `Local()` (the running server, for tunnels); announces on the network once running (`WithDiscovery`) and withdraws that, then public access, before the server stops |
 | `app/providerconfig` | `Store`: a provider's saved settings in the credential store; cleans and checks values; secrets are write-only |
 | `app/remote` | `Service`: `Enable` (refuses a public provider without a PIN), `Disable`, a per-run watcher, `Status`, `SetPIN`/`ClearPIN`, `Login`, session and signed-link checks, rate limiting |
-| `adapters/fsscan` | `filepath.WalkDir` scanner (skips hidden, system files, symlinks); attaches sidecar subtitles to videos |
+| `adapters/fsscan` | `filepath.WalkDir` scanner (skips hidden, system files, symlinks); attaches sidecar subtitles, a parsed title/year/series, a `.nfo` description and a poster to videos (ADR 0026) |
 | `adapters/mdns` | `Announcer`: publishes `eincast.local` and an `_http._tcp` service for exactly the announced LAN addresses (ADR 0019) |
 | `adapters/dlna` | Smart TV support (ADR 0020): `Handler` (device/service descriptions, ContentDirectory Browse, ConnectionManager, events), `buildTree`/`didl`/`soap`, pure SSDP messages, the `Responder` (UDP 1900, announce, answer, goodbye) and the `Announcer` that starts it |
 | `adapters/fswatch` | `fsnotify` watcher: one signal for any burst of relevant changes, follows new folders, all-or-nothing |

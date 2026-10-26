@@ -20,6 +20,19 @@ type itemJSON struct {
 	// Subtitles lists the tracks of a video, in order. A track is fetched as
 	// /subtitle/{id}/{position}; its file name and disk path are not exposed.
 	Subtitles []subtitleJSON `json:"subtitles"`
+	// Title is what to show for the item: read from the file name or a .nfo, or
+	// the file name itself. Name stays the file name.
+	Title string `json:"title"`
+	// Year is 0 when unknown. Show, Season and Episode are set for an episode of
+	// a series (Show empty, numbers 0 otherwise). Plot comes from a .nfo only.
+	Year    int    `json:"year"`
+	Show    string `json:"show"`
+	Season  int    `json:"season"`
+	Episode int    `json:"episode"`
+	Plot    string `json:"plot"`
+	// Poster says /thumb/{id} is a poster found next to the file (a portrait
+	// picture), not a frame taken from it.
+	Poster bool `json:"poster"`
 }
 
 type subtitleJSON struct {
@@ -32,7 +45,16 @@ func toItemJSON(it media.Item) itemJSON {
 	for i, s := range it.Subtitles {
 		subs[i] = subtitleJSON{Label: s.Label, Lang: s.Lang}
 	}
-	return itemJSON{ID: it.ID, Name: it.Name, Kind: it.Kind, Size: it.Size, ModTime: it.ModTime, Subtitles: subs}
+	m := it.Meta
+	show, season, episode := "", 0, 0
+	if m.IsEpisode() {
+		show, season, episode = m.Show, m.Season, m.Episode
+	}
+	return itemJSON{
+		ID: it.ID, Name: it.Name, Kind: it.Kind, Size: it.Size, ModTime: it.ModTime, Subtitles: subs,
+		Title: it.DisplayName(), Year: m.Year, Show: show, Season: season, Episode: episode, Plot: m.Plot,
+		Poster: it.Artwork.Present(),
+	}
 }
 
 // handleLibrary lists every item.

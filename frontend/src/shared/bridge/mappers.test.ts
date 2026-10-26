@@ -123,10 +123,22 @@ describe("toLibraryItem", () => {
     kind,
     size: 3,
     modTime: 7,
+    title: "A song",
+    year: 2001,
+    show: "",
+    season: 0,
+    episode: 0,
+    poster: false,
   });
 
   it.each(["video", "audio", "image"])("keeps kind %s", (kind) => {
     expect(toLibraryItem(raw(kind)).kind).toBe(kind);
+  });
+
+  it("keeps the title, year, series and poster Go read from the name", () => {
+    expect(toLibraryItem({ ...raw("video"), show: "Fargo", season: 2, episode: 5, poster: true })).toMatchObject({
+      title: "A song", year: 2001, show: "Fargo", season: 2, episode: 5, poster: true,
+    });
   });
 
   it("fails loudly on a kind it does not know", () => {

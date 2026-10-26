@@ -82,6 +82,16 @@ type LibraryItemDTO struct {
 	Kind      string `json:"kind"`
 	Size      int64  `json:"size"`
 	ModTime   int64  `json:"modTime"`
+	// Title is what to show: read from the name or a .nfo, else the file name.
+	Title string `json:"title"`
+	// Year is 0 when unknown. Show, Season and Episode are set for an episode of
+	// a series, empty and 0 otherwise.
+	Year    int    `json:"year"`
+	Show    string `json:"show"`
+	Season  int    `json:"season"`
+	Episode int    `json:"episode"`
+	// Poster says the thumbnail is a poster found next to the file.
+	Poster bool `json:"poster"`
 }
 
 func toLibraryItemDTOs(items []media.Item) []LibraryItemDTO {
@@ -95,6 +105,12 @@ func toLibraryItemDTOs(items []media.Item) []LibraryItemDTO {
 			Kind:      string(it.Kind),
 			Size:      it.Size,
 			ModTime:   it.ModTime.UnixMilli(),
+			Title:     it.DisplayName(),
+			Year:      it.Meta.Year,
+			Poster:    it.Artwork.Present(),
+		}
+		if it.Meta.IsEpisode() {
+			out[i].Show, out[i].Season, out[i].Episode = it.Meta.Show, it.Meta.Season, it.Meta.Episode
 		}
 	}
 	return out

@@ -315,13 +315,15 @@ func (s *Service) scan(ctx context.Context, lib media.Library, trigger scanTrigg
 	return st, nil
 }
 
-// sameFiles reports whether two scans found the same files, unchanged. Subtitles
-// count: adding or removing one changes what a player offers. Paths need no
+// sameFiles reports whether two scans found the same files, unchanged. Subtitles,
+// the title and series read from the name or a .nfo, and the poster all count:
+// changing one changes what a player shows. Paths need no
 // comparing: both scans walked the same root, and the ID is derived from the path.
 func sameFiles(a, b []media.Item) bool {
 	return slices.EqualFunc(a, b, func(x, y media.Item) bool {
 		return x.ID == y.ID && x.Size == y.Size && x.ModTime.Equal(y.ModTime) &&
-			slices.Equal(subtitlePaths(x), subtitlePaths(y))
+			slices.Equal(subtitlePaths(x), subtitlePaths(y)) &&
+			x.Meta == y.Meta && x.Artwork == y.Artwork
 	})
 }
 

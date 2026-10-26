@@ -250,3 +250,11 @@ func TestWatch_SignalsWhenASubtitleAppears(t *testing.T) {
 	write(t, filepath.Join(root, "movie.en.srt"), "x")
 	expectSignal(t, ch, "a new subtitle file")
 }
+
+func TestWatch_SignalsWhenANFOAppears(t *testing.T) {
+	root := t.TempDir()
+	ch, _ := newWatch(t, root)
+
+	write(t, filepath.Join(root, "movie.nfo"), "<movie/>")
+	expectSignal(t, ch, "a new .nfo file")
+}
