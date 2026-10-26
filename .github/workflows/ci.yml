@@ -74,7 +74,7 @@ jobs:
         run: |
           status=0
           go test -count=1 -timeout 4m ./... 2>&1 | tee test.log || status=$?
-          grep -E '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+' test.log | head -10 | while IFS= read -r line; do
+          { grep -E '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+' test.log || true; } | head -10 | while IFS= read -r line; do
             echo "::error::${line//$'\r'/}"
           done
           exit "${status}"
