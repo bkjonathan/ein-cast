@@ -122,7 +122,7 @@ func TestLoad_RestoresSavedSettings(t *testing.T) {
 	if got := s.Get().Settings; !reflect.DeepEqual(got, saved) {
 		t.Fatalf("Get() = %+v, want %+v", got, saved)
 	}
-	if libs := s.Libraries(); len(libs) != 1 || libs[0].Root != "/media" {
+	if libs := s.Libraries(); len(libs) != 1 || libs[0].Root != media.NewLibrary("/media").Root {
 		t.Errorf("Libraries() = %+v", libs)
 	}
 }

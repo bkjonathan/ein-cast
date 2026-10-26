@@ -106,8 +106,13 @@ func TestWatch_SignalsWhenAFileGrows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 	if _, err := f.WriteString("more"); err != nil {
+		t.Fatal(err)
+	}
+	// Windows reports a change to an open file only once the handle is flushed
+	// and closed, so a download still in progress is noticed when its writer
+	// next closes it, not on every write.
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	expectSignal(t, ch, "an appended write")

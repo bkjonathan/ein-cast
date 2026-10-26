@@ -425,9 +425,10 @@ func TestStream_AFileOutsideItsOwnLibraryIsRefused(t *testing.T) {
 
 func TestPlaylist(t *testing.T) {
 	f := newFixture(t)
-	tricky := writeFile(t, f.root, "weird\nname.flac", []byte("x"))
+	// The name is set on the item rather than on a real file: Windows cannot
+	// create a file whose name holds a newline, and the playlist never opens it.
 	f.lib.items = append(f.lib.items, media.Item{
-		ID: "weird", Name: filepath.Base(tricky), Path: tricky, Kind: media.KindAudio,
+		ID: "weird", Name: "weird\nname.flac", Path: filepath.Join(f.root, "weird.flac"), Kind: media.KindAudio,
 	})
 
 	resp := f.get("/playlist.m3u")

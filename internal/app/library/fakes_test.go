@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -275,3 +276,8 @@ func (r *rig) stateOf(id media.LibraryID) (app.LibraryState, bool) {
 	}
 	return app.LibraryState{}, false
 }
+
+// p turns a slash path into the platform's own form. The service cleans every
+// root it is given, which on Windows rewrites "/media" as "\media"; the tests
+// key their fakes by the same string, so they must write it the same way.
+func p(path string) string { return filepath.FromSlash(path) }

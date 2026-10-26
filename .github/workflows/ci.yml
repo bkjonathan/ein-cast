@@ -66,9 +66,18 @@ jobs:
         if: runner.os == 'macOS'
         run: go test -race -count=1 ./...
 
+      # The timeout turns a hung test into a quick, readable failure instead of
+      # ten minutes of silence; failing lines are repeated as annotations so they
+      # show on the run's summary page.
       - name: Go tests (Windows)
         if: runner.os == 'Windows'
-        run: go test -count=1 ./...
+        run: |
+          status=0
+          go test -count=1 -timeout 4m ./... 2>&1 | tee test.log || status=$?
+          grep -E '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+' test.log | head -10 | while IFS= read -r line; do
+            echo "::error::${line//$'\r'/}"
+          done
+          exit "${status}"
 
       - name: Cross-compile check
         run: scripts/check-cross.sh

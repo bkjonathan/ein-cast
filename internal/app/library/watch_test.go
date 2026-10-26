@@ -148,9 +148,9 @@ func (g *watchRig) add(t *testing.T, root string) media.Library {
 
 func TestWatch_WatchesTheFolderAScanLoaded(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
-	lib := g.add(t, "/media")
+	lib := g.add(t, p("/media"))
 
-	if got := g.w.watched(); len(got) != 1 || got[0] != "/media" {
+	if got := g.w.watched(); len(got) != 1 || got[0] != p("/media") {
 		t.Fatalf("watched = %v, want [/media]", got)
 	}
 	last := g.ev.statuses()[len(g.ev.statuses())-1].Libraries
@@ -161,10 +161,10 @@ func TestWatch_WatchesTheFolderAScanLoaded(t *testing.T) {
 
 func TestWatch_AChangeRescansOnceItSettles(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
-	lib := g.add(t, "/media")
+	lib := g.add(t, p("/media"))
 
-	g.sc.set("/media", file("a.mkv", 1), file("b.mkv", 2))
-	g.w.signal(g.w.indexOf("/media", 0))
+	g.sc.set(p("/media"), file("a.mkv", 1), file("b.mkv", 2))
+	g.w.signal(g.w.indexOf(p("/media"), 0))
 
 	eventually(t, "the rescan to publish", func() bool {
 		st, _ := g.stateOf(lib.ID)
@@ -177,10 +177,10 @@ func TestWatch_AChangeRescansOnceItSettles(t *testing.T) {
 
 func TestWatch_ABurstIsOneScan(t *testing.T) {
 	g := newWatchRig(t, WatchTiming{Quiet: 80 * time.Millisecond, MaxWait: 2 * time.Second})
-	g.add(t, "/media")
+	g.add(t, p("/media"))
 	before := g.sc.scans()
 
-	g.sc.set("/media", file("a.mkv", 1), file("b.mkv", 2))
+	g.sc.set(p("/media"), file("a.mkv", 1), file("b.mkv", 2))
 	for range 5 {
 		g.w.signal(0)
 		time.Sleep(10 * time.Millisecond) // well inside the quiet period
@@ -195,7 +195,7 @@ func TestWatch_ABurstIsOneScan(t *testing.T) {
 
 func TestWatch_ChangesThatNeverStopStillRefreshWithinMaxWait(t *testing.T) {
 	g := newWatchRig(t, WatchTiming{Quiet: 100 * time.Millisecond, MaxWait: 250 * time.Millisecond})
-	g.add(t, "/media")
+	g.add(t, p("/media"))
 	before := g.sc.scans()
 
 	stop := make(chan struct{})
@@ -216,7 +216,7 @@ func TestWatch_ChangesThatNeverStopStillRefreshWithinMaxWait(t *testing.T) {
 
 func TestWatch_NothingChangedSaysNothing(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
-	g.add(t, "/media")
+	g.add(t, p("/media"))
 	before := g.sc.scans()
 	eventsBefore := len(g.ev.events())
 
@@ -231,9 +231,9 @@ func TestWatch_NothingChangedSaysNothing(t *testing.T) {
 
 func TestWatch_AFailedQuietRescanIsReportedAndKeepsTheLibrary(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
-	lib := g.add(t, "/media")
+	lib := g.add(t, p("/media"))
 
-	g.sc.fail("/media", errors.New("walk: no such file or directory")) // the drive was unplugged
+	g.sc.fail(p("/media"), errors.New("walk: no such file or directory")) // the drive was unplugged
 	g.w.signal(0)
 
 	eventually(t, "the failure to show", func() bool {
@@ -247,7 +247,7 @@ func TestWatch_AFailedQuietRescanIsReportedAndKeepsTheLibrary(t *testing.T) {
 		t.Error("a failed rescan must not turn Watching off; the watch itself is fine")
 	}
 
-	g.sc.set("/media", file("a.mkv", 1)) // plugged back in, nothing else changed
+	g.sc.set(p("/media"), file("a.mkv", 1)) // plugged back in, nothing else changed
 	g.w.signal(0)
 	eventually(t, "the error to clear", func() bool {
 		st, _ := g.stateOf(lib.ID)
@@ -258,8 +258,8 @@ func TestWatch_AFailedQuietRescanIsReportedAndKeepsTheLibrary(t *testing.T) {
 func TestWatch_UnwatchableFolderLeavesTheLibraryWorkingAndARescanRetries(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
 	g.w.setErr(errors.New("too many open files"))
-	g.sc.set("/media", file("a.mkv", 1))
-	st, err := g.svc.Add(context.Background(), "/media")
+	g.sc.set(p("/media"), file("a.mkv", 1))
+	st, err := g.svc.Add(context.Background(), p("/media"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,20 +281,20 @@ func TestWatch_UnwatchableFolderLeavesTheLibraryWorkingAndARescanRetries(t *test
 
 func TestWatch_EachLibraryHasItsOwnWatchAndItsOwnRescans(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
-	films := g.add(t, "/films")
-	music := g.add(t, "/music")
-	filmsBefore, musicBefore := g.sc.scansOf("/films"), g.sc.scansOf("/music")
+	films := g.add(t, p("/films"))
+	music := g.add(t, p("/music"))
+	filmsBefore, musicBefore := g.sc.scansOf(p("/films")), g.sc.scansOf(p("/music"))
 
-	g.sc.set("/films", file("a.mkv", 1), file("b.mkv", 1))
-	g.w.signal(g.w.indexOf("/films", 0))
+	g.sc.set(p("/films"), file("a.mkv", 1), file("b.mkv", 1))
+	g.w.signal(g.w.indexOf(p("/films"), 0))
 
-	eventually(t, "films to be rescanned", func() bool { return g.sc.scansOf("/films") > filmsBefore })
+	eventually(t, "films to be rescanned", func() bool { return g.sc.scansOf(p("/films")) > filmsBefore })
 	eventually(t, "films to show the new file", func() bool {
 		st, _ := g.stateOf(films.ID)
 		return st.Stats.Total == 2
 	})
 	time.Sleep(100 * time.Millisecond)
-	if g.sc.scansOf("/music") != musicBefore {
+	if g.sc.scansOf(p("/music")) != musicBefore {
 		t.Error("a change in films made music rescan")
 	}
 	if !g.watching(music.ID) || !g.watching(films.ID) {
@@ -304,14 +304,14 @@ func TestWatch_EachLibraryHasItsOwnWatchAndItsOwnRescans(t *testing.T) {
 
 func TestWatch_RemovingALibraryStopsItsWatchOnly(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
-	films := g.add(t, "/films")
-	music := g.add(t, "/music")
+	films := g.add(t, p("/films"))
+	music := g.add(t, p("/music"))
 
 	if err := g.svc.Remove(films.ID); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "films' watch to be stopped", func() bool { return g.w.ctx(g.w.indexOf("/films", 0)).Err() != nil })
-	if g.w.ctx(g.w.indexOf("/music", 0)).Err() != nil {
+	eventually(t, "films' watch to be stopped", func() bool { return g.w.ctx(g.w.indexOf(p("/films"), 0)).Err() != nil })
+	if g.w.ctx(g.w.indexOf(p("/music"), 0)).Err() != nil {
 		t.Error("removing films stopped music's watch")
 	}
 	if !g.watching(music.ID) {
@@ -321,7 +321,7 @@ func TestWatch_RemovingALibraryStopsItsWatchOnly(t *testing.T) {
 
 func TestWatch_SameFolderIsNotWatchedTwice(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
-	lib := g.add(t, "/media")
+	lib := g.add(t, p("/media"))
 	for range 3 {
 		if err := g.svc.Rescan(context.Background(), lib.ID); err != nil {
 			t.Fatal(err)
@@ -335,7 +335,7 @@ func TestWatch_SameFolderIsNotWatchedTwice(t *testing.T) {
 
 func TestWatch_AWatcherThatEndsTurnsWatchingOff(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
-	lib := g.add(t, "/media")
+	lib := g.add(t, p("/media"))
 
 	g.w.closeChan(0)
 	eventually(t, "Watching to turn off", func() bool { return !g.watching(lib.ID) })
@@ -352,8 +352,8 @@ func TestWatch_EndsWithItsContext(t *testing.T) {
 		r.svc.Watch(ctx)
 	}()
 
-	r.sc.set("/media", file("a.mkv", 1))
-	st, err := r.svc.Add(ctx, "/media")
+	r.sc.set(p("/media"), file("a.mkv", 1))
+	st, err := r.svc.Add(ctx, p("/media"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,8 +386,8 @@ func TestWatch_WithoutAWatcherReturnsAtOnce(t *testing.T) {
 		t.Fatal("Watch blocked although nothing was configured")
 	}
 	// And scanning never waits on a watcher that is not there.
-	r.sc.set("/media", file("a.mkv", 1))
-	if _, err := r.svc.Add(context.Background(), "/media"); err != nil {
+	r.sc.set(p("/media"), file("a.mkv", 1))
+	if _, err := r.svc.Add(context.Background(), p("/media")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -399,7 +399,7 @@ func TestScan_NeverWaitsForTheWatcher(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for _, root := range []string{"/a", "/b", "/c", "/d", "/e"} {
+		for _, root := range []string{p("/a"), p("/b"), p("/c"), p("/d"), p("/e")} {
 			_, _ = r.svc.Add(context.Background(), root)
 		}
 	}()
@@ -412,12 +412,12 @@ func TestScan_NeverWaitsForTheWatcher(t *testing.T) {
 
 func TestWatch_AddingOnlyASubtitleCountsAsAChange(t *testing.T) {
 	g := newWatchRig(t, fastTiming)
-	lib := g.add(t, "/media")
+	lib := g.add(t, p("/media"))
 	ev := len(g.ev.scanned())
 
 	withSub := file("a.mkv", 1)
 	withSub.Subtitles = []media.Subtitle{{Lang: "en", Label: "English", RelPath: "a.en.srt"}}
-	g.sc.set("/media", withSub) // same file, same size and time; one new track
+	g.sc.set(p("/media"), withSub) // same file, same size and time; one new track
 	g.w.signal(0)
 
 	eventually(t, "the rescan to publish", func() bool { return len(g.ev.scanned()) > ev })

@@ -29,7 +29,9 @@ func TestLoad_MissingDirectoryIsNotAFailure(t *testing.T) {
 
 func TestSaveThenLoad(t *testing.T) {
 	s := New(filepath.Join(t.TempDir(), "EinCast")) // the directory does not exist yet
-	want := app.Settings{Port: 9100, Name: "Living Room", RequireToken: true, Libraries: []media.Library{media.NewLibrary("/media/films"), {ID: media.NewLibraryID("/media/music"), Name: "Tunes", Root: "/media/music"}}}
+	tunes := media.NewLibrary("/media/music")
+	tunes.Name = "Tunes"
+	want := app.Settings{Port: 9100, Name: "Living Room", RequireToken: true, Libraries: []media.Library{media.NewLibrary("/media/films"), tunes}}
 	other := app.Settings{Port: 9100, Name: "Living Room", DLNA: true}
 
 	if err := s.Save(want); err != nil {
@@ -184,7 +186,7 @@ func TestLoad_AnOlderSingleFolderBecomesOneLibrary(t *testing.T) {
 	if err != nil || len(first.Libraries) != 1 {
 		t.Fatalf("Load() = %+v, %v", first, err)
 	}
-	if l := first.Libraries[0]; l.Root != "/media/films" || l.Name != "films" || l.ID != media.NewLibraryID("/media/films") {
+	if l := first.Libraries[0]; l.Root != media.NewLibrary("/media/films").Root || l.Name != "films" || l.ID != media.NewLibraryID("/media/films") {
 		t.Errorf("library = %+v", l)
 	}
 
@@ -210,7 +212,7 @@ func TestLoad_ALibraryListWinsOverTheOldFolder(t *testing.T) {
 	both := `{"port":9000,"name":"Den","libraryRoot":"/old","libraries":[{"name":"New","root":"/new"}]}`
 	_ = os.WriteFile(filepath.Join(dir, "settings.json"), []byte(both), 0o600)
 	got, err := New(dir).Load()
-	if err != nil || len(got.Libraries) != 1 || got.Libraries[0].Root != "/new" || got.Libraries[0].Name != "New" {
+	if err != nil || len(got.Libraries) != 1 || got.Libraries[0].Root != media.NewLibrary("/new").Root || got.Libraries[0].Name != "New" {
 		t.Fatalf("Load() = %+v, %v", got, err)
 	}
 }

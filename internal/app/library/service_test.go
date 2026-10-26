@@ -15,21 +15,21 @@ import (
 
 func TestAdd_ScansAndRemembersTheFolder(t *testing.T) {
 	r := newRig()
-	r.sc.set("/media/films", file("a.mkv", 10), file("b.mp4", 5))
+	r.sc.set(p("/media/films"), file("a.mkv", 10), file("b.mp4", 5))
 
-	st, err := r.svc.Add(context.Background(), "/media/films")
+	st, err := r.svc.Add(context.Background(), p("/media/films"))
 	if err != nil {
 		t.Fatalf("Add() error = %v", err)
 	}
 
-	lib := media.NewLibrary("/media/films")
+	lib := media.NewLibrary(p("/media/films"))
 	if st.Library != lib || st.Stats.Total != 2 || st.Stats.TotalSize != 15 || st.Scanning || st.Error != "" {
 		t.Errorf("Add() = %+v", st)
 	}
 	if lib.Name != "films" {
 		t.Errorf("a library is named after its folder, got %q", lib.Name)
 	}
-	if got := r.repo.Items(lib.ID); len(got) != 2 || got[0].LibraryID != lib.ID || got[0].Root != "/media/films" {
+	if got := r.repo.Items(lib.ID); len(got) != 2 || got[0].LibraryID != lib.ID || got[0].Root != p("/media/films") {
 		t.Errorf("repo items = %+v, want the two items stamped with their library", got)
 	}
 	if got := r.mem.lastSave(); len(got) != 1 || got[0] != lib {
@@ -39,8 +39,8 @@ func TestAdd_ScansAndRemembersTheFolder(t *testing.T) {
 
 func TestAdd_EventsComeInTheRightOrder(t *testing.T) {
 	r := newRig()
-	r.sc.set("/media", file("a.mkv", 1))
-	if _, err := r.svc.Add(context.Background(), "/media"); err != nil {
+	r.sc.set(p("/media"), file("a.mkv", 1))
+	if _, err := r.svc.Add(context.Background(), p("/media")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -61,7 +61,7 @@ func TestAdd_EventsComeInTheRightOrder(t *testing.T) {
 
 func TestAdd_Refusals(t *testing.T) {
 	r := newRig()
-	if _, err := r.svc.Add(context.Background(), "/media/films"); err != nil {
+	if _, err := r.svc.Add(context.Background(), p("/media/films")); err != nil {
 		t.Fatal(err)
 	}
 	before := r.sc.scans()
@@ -71,11 +71,11 @@ func TestAdd_Refusals(t *testing.T) {
 		path string
 		want error
 	}{
-		{"the same folder", "/media/films", ErrLibraryExists},
-		{"the same folder written differently", "/media/films/", ErrLibraryExists},
-		{"a folder inside a library", "/media/films/2020", ErrLibraryOverlaps},
-		{"a folder holding a library", "/media", ErrLibraryOverlaps},
-		{"a folder that differs in case only", "/MEDIA/Films/Old", ErrLibraryOverlaps},
+		{"the same folder", p("/media/films"), ErrLibraryExists},
+		{"the same folder written differently", p("/media/films/"), ErrLibraryExists},
+		{"a folder inside a library", p("/media/films/2020"), ErrLibraryOverlaps},
+		{"a folder holding a library", p("/media"), ErrLibraryOverlaps},
+		{"a folder that differs in case only", p("/MEDIA/Films/Old"), ErrLibraryOverlaps},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,7 +87,7 @@ func TestAdd_Refusals(t *testing.T) {
 	if r.sc.scans() != before || len(r.svc.Libraries()) != 1 {
 		t.Errorf("a refused folder was scanned (%d scans) or listed (%d libraries)", r.sc.scans()-before, len(r.svc.Libraries()))
 	}
-	if _, err := r.svc.Add(context.Background(), "/media/films-old"); err != nil {
+	if _, err := r.svc.Add(context.Background(), p("/media/films-old")); err != nil {
 		t.Errorf("a sibling whose name merely starts the same is not an overlap: %v", err)
 	}
 	if _, err := r.svc.Add(context.Background(), "  "); err == nil {
@@ -97,27 +97,27 @@ func TestAdd_Refusals(t *testing.T) {
 
 func TestAdd_AFailedScanLeavesNothingBehind(t *testing.T) {
 	r := newRig()
-	r.sc.set("/good", file("a.mkv", 1))
-	_, _ = r.svc.Add(context.Background(), "/good")
+	r.sc.set(p("/good"), file("a.mkv", 1))
+	_, _ = r.svc.Add(context.Background(), p("/good"))
 	boom := fmt.Errorf("walk: %w", fs.ErrNotExist)
-	r.sc.fail("/bad", boom)
+	r.sc.fail(p("/bad"), boom)
 
-	_, err := r.svc.Add(context.Background(), "/bad")
+	_, err := r.svc.Add(context.Background(), p("/bad"))
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("error = %v, want it to wrap the cause", err)
 	}
-	if !strings.Contains(err.Error(), "no longer exists") || strings.Contains(err.Error(), "/bad") {
+	if !strings.Contains(err.Error(), "no longer exists") || strings.Contains(err.Error(), p("/bad")) {
 		t.Errorf("message = %q, want a sentence for the person without paths", err.Error())
 	}
 
 	libs := r.svc.Libraries()
-	if len(libs) != 1 || libs[0].Root != "/good" {
+	if len(libs) != 1 || libs[0].Root != p("/good") {
 		t.Errorf("libraries = %+v, want only the good one: a bad choice must not leave a broken entry", libs)
 	}
-	if got := r.mem.lastSave(); len(got) != 1 || got[0].Root != "/good" {
+	if got := r.mem.lastSave(); len(got) != 1 || got[0].Root != p("/good") {
 		t.Errorf("remembered %+v", got)
 	}
-	if r.repo.has(media.NewLibraryID("/bad")) {
+	if r.repo.has(media.NewLibraryID(p("/bad"))) {
 		t.Error("the repository holds the failed library")
 	}
 	if n := len(r.svc.List()); n != 1 {
@@ -128,9 +128,9 @@ func TestAdd_AFailedScanLeavesNothingBehind(t *testing.T) {
 func TestAdd_ASettingsProblemDoesNotLoseTheScan(t *testing.T) {
 	r := newRig()
 	r.mem.err = errors.New("read-only disk")
-	r.sc.set("/media", file("a.mkv", 1))
+	r.sc.set(p("/media"), file("a.mkv", 1))
 
-	if _, err := r.svc.Add(context.Background(), "/media"); err != nil {
+	if _, err := r.svc.Add(context.Background(), p("/media")); err != nil {
 		t.Fatalf("Add() error = %v; a settings problem must not fail the add", err)
 	}
 	if len(r.svc.List()) != 1 {
@@ -151,9 +151,9 @@ func TestScanFailureIsExplainedInTheState(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lib := media.NewLibrary("/media")
+			lib := media.NewLibrary(p("/media"))
 			r := newRig(lib)
-			r.sc.fail("/media", tt.err)
+			r.sc.fail(p("/media"), tt.err)
 
 			if err := r.svc.Rescan(context.Background(), lib.ID); !errors.Is(err, tt.err) {
 				t.Fatalf("error = %v, want it to wrap %v", err, tt.err)
@@ -174,14 +174,14 @@ func TestScanFailureIsExplainedInTheState(t *testing.T) {
 }
 
 func TestRescan_FindsChangesAndKeepsTheOldContentsOnFailure(t *testing.T) {
-	lib := media.NewLibrary("/media")
+	lib := media.NewLibrary(p("/media"))
 	r := newRig(lib)
-	r.sc.set("/media", file("a.mkv", 1))
+	r.sc.set(p("/media"), file("a.mkv", 1))
 	if err := r.svc.Rescan(context.Background(), lib.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	r.sc.set("/media", file("a.mkv", 1), file("b.mkv", 2))
+	r.sc.set(p("/media"), file("a.mkv", 1), file("b.mkv", 2))
 	if err := r.svc.Rescan(context.Background(), lib.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -189,13 +189,13 @@ func TestRescan_FindsChangesAndKeepsTheOldContentsOnFailure(t *testing.T) {
 		t.Errorf("after adding a file: %+v", st)
 	}
 
-	r.sc.fail("/media", fs.ErrNotExist)
+	r.sc.fail(p("/media"), fs.ErrNotExist)
 	_ = r.svc.Rescan(context.Background(), lib.ID)
 	if got := r.svc.List(); len(got) != 2 {
 		t.Errorf("a failed rescan changed the library: %d items", len(got))
 	}
 
-	r.sc.set("/media", file("a.mkv", 1)) // readable again: the error clears
+	r.sc.set(p("/media"), file("a.mkv", 1)) // readable again: the error clears
 	if err := r.svc.Rescan(context.Background(), lib.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -205,18 +205,18 @@ func TestRescan_FindsChangesAndKeepsTheOldContentsOnFailure(t *testing.T) {
 }
 
 func TestRescan_OnlyTouchesItsOwnLibrary(t *testing.T) {
-	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	films, music := media.NewLibrary(p("/films")), media.NewLibrary(p("/music"))
 	r := newRig(films, music)
-	r.sc.set("/films", file("a.mkv", 1))
-	r.sc.set("/music", file("s.mp3", 1))
+	r.sc.set(p("/films"), file("a.mkv", 1))
+	r.sc.set(p("/music"), file("s.mp3", 1))
 	_ = r.svc.Restore(context.Background())
-	before := r.sc.scansOf("/music")
+	before := r.sc.scansOf(p("/music"))
 
-	r.sc.set("/films", file("a.mkv", 1), file("b.mkv", 1))
+	r.sc.set(p("/films"), file("a.mkv", 1), file("b.mkv", 1))
 	if err := r.svc.Rescan(context.Background(), films.ID); err != nil {
 		t.Fatal(err)
 	}
-	if r.sc.scansOf("/music") != before {
+	if r.sc.scansOf(p("/music")) != before {
 		t.Error("rescanning films scanned music too")
 	}
 	if got := r.repo.Items(music.ID); len(got) != 1 {
@@ -228,17 +228,17 @@ func TestRescan_OnlyTouchesItsOwnLibrary(t *testing.T) {
 }
 
 func TestRescanAll_OneFailureDoesNotStopTheOthers(t *testing.T) {
-	a, b, c := media.NewLibrary("/a"), media.NewLibrary("/b"), media.NewLibrary("/c")
+	a, b, c := media.NewLibrary(p("/a")), media.NewLibrary(p("/b")), media.NewLibrary(p("/c"))
 	r := newRig(a, b, c)
-	r.sc.set("/a", file("1.mkv", 1))
-	r.sc.fail("/b", fs.ErrNotExist)
-	r.sc.set("/c", file("3.mkv", 1))
+	r.sc.set(p("/a"), file("1.mkv", 1))
+	r.sc.fail(p("/b"), fs.ErrNotExist)
+	r.sc.set(p("/c"), file("3.mkv", 1))
 
 	err := r.svc.RescanAll(context.Background())
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("error = %v, want the failure reported", err)
 	}
-	if got := r.sc.lastCalls(); !slices.Equal(got, []string{"/a", "/b", "/c"}) {
+	if got := r.sc.lastCalls(); !slices.Equal(got, []string{p("/a"), p("/b"), p("/c")}) {
 		t.Errorf("scanned %v, want all three in order", got)
 	}
 	if len(r.svc.List()) != 2 {
@@ -253,10 +253,10 @@ func TestRescanAll_OneFailureDoesNotStopTheOthers(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	films, music := media.NewLibrary(p("/films")), media.NewLibrary(p("/music"))
 	r := newRig(films, music)
-	r.sc.set("/films", file("a.mkv", 1))
-	r.sc.set("/music", file("s.mp3", 1))
+	r.sc.set(p("/films"), file("a.mkv", 1))
+	r.sc.set(p("/music"), file("s.mp3", 1))
 	_ = r.svc.Restore(context.Background())
 	before := len(r.ev.events())
 
@@ -287,11 +287,11 @@ func TestRemove(t *testing.T) {
 }
 
 func TestRemove_AScanInFlightIsDiscarded(t *testing.T) {
-	lib := media.NewLibrary("/media")
+	lib := media.NewLibrary(p("/media"))
 	r := newRig(lib)
-	r.sc.set("/media", file("a.mkv", 1))
+	r.sc.set(p("/media"), file("a.mkv", 1))
 	h := newHold()
-	r.sc.hold["/media"] = h
+	r.sc.hold[p("/media")] = h
 
 	done := make(chan error, 1)
 	go func() { done <- r.svc.Rescan(context.Background(), lib.ID) }()
@@ -310,14 +310,14 @@ func TestRemove_AScanInFlightIsDiscarded(t *testing.T) {
 }
 
 func TestRename(t *testing.T) {
-	lib := media.NewLibrary("/media/films")
+	lib := media.NewLibrary(p("/media/films"))
 	r := newRig(lib)
 
 	if err := r.svc.Rename(lib.ID, "  Movie night  "); err != nil {
 		t.Fatal(err)
 	}
 	st, _ := r.stateOf(lib.ID)
-	if st.Library.Name != "Movie night" || st.Library.Root != "/media/films" || st.Library.ID != lib.ID {
+	if st.Library.Name != "Movie night" || st.Library.Root != p("/media/films") || st.Library.ID != lib.ID {
 		t.Errorf("state = %+v: only the name changes", st.Library)
 	}
 	if got := r.mem.lastSave(); len(got) != 1 || got[0].Name != "Movie night" {
@@ -341,7 +341,7 @@ func TestRename(t *testing.T) {
 }
 
 func TestRename_LongNameInCharactersNotBytes(t *testing.T) {
-	lib := media.NewLibrary("/media")
+	lib := media.NewLibrary(p("/media"))
 	r := newRig(lib)
 	if err := r.svc.Rename(lib.ID, strings.Repeat("မ", 64)); err != nil {
 		t.Errorf("64 characters (192 bytes) refused: %v", err)
@@ -349,7 +349,7 @@ func TestRename_LongNameInCharactersNotBytes(t *testing.T) {
 }
 
 func TestNewService_ListsRememberedLibrariesAtOnce(t *testing.T) {
-	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	films, music := media.NewLibrary(p("/films")), media.NewLibrary(p("/music"))
 	r := newRig(films, music)
 
 	// Before Restore scans anything the UI can already show them, so a restart is
@@ -372,10 +372,10 @@ func TestRestore(t *testing.T) {
 	})
 
 	t.Run("scans every remembered library", func(t *testing.T) {
-		films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+		films, music := media.NewLibrary(p("/films")), media.NewLibrary(p("/music"))
 		r := newRig(films, music)
-		r.sc.set("/films", file("a.mkv", 1))
-		r.sc.set("/music", file("s.mp3", 1), file("t.mp3", 1))
+		r.sc.set(p("/films"), file("a.mkv", 1))
+		r.sc.set(p("/music"), file("s.mp3", 1), file("t.mp3", 1))
 		if err := r.svc.Restore(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -388,10 +388,10 @@ func TestRestore(t *testing.T) {
 	})
 
 	t.Run("a vanished folder is reported through its state and the others still open", func(t *testing.T) {
-		gone, ok := media.NewLibrary("/gone"), media.NewLibrary("/ok")
+		gone, ok := media.NewLibrary(p("/gone")), media.NewLibrary(p("/ok"))
 		r := newRig(gone, ok)
-		r.sc.fail("/gone", fs.ErrNotExist)
-		r.sc.set("/ok", file("a.mkv", 1))
+		r.sc.fail(p("/gone"), fs.ErrNotExist)
+		r.sc.set(p("/ok"), file("a.mkv", 1))
 
 		if err := r.svc.Restore(context.Background()); err == nil {
 			t.Fatal("Restore() error = nil")
@@ -409,12 +409,12 @@ func TestRestore(t *testing.T) {
 }
 
 func TestScan_OneLibraryAtATimeButLibrariesDoNotBlockEachOther(t *testing.T) {
-	a, b := media.NewLibrary("/a"), media.NewLibrary("/b")
+	a, b := media.NewLibrary(p("/a")), media.NewLibrary(p("/b"))
 	r := newRig(a, b)
-	r.sc.set("/a", file("1.mkv", 1))
-	r.sc.set("/b", file("2.mkv", 1))
+	r.sc.set(p("/a"), file("1.mkv", 1))
+	r.sc.set(p("/b"), file("2.mkv", 1))
 	h := newHold()
-	r.sc.hold["/a"] = h
+	r.sc.hold[p("/a")] = h
 
 	done := make(chan error, 1)
 	go func() { done <- r.svc.Rescan(context.Background(), a.ID) }()
@@ -440,17 +440,17 @@ func TestScan_OneLibraryAtATimeButLibrariesDoNotBlockEachOther(t *testing.T) {
 }
 
 func TestListAndGet_SpanEveryLibrary(t *testing.T) {
-	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	films, music := media.NewLibrary(p("/films")), media.NewLibrary(p("/music"))
 	r := newRig(films, music)
-	r.sc.set("/films", file("a.mkv", 1))
-	r.sc.set("/music", file("s.mp3", 1))
+	r.sc.set(p("/films"), file("a.mkv", 1))
+	r.sc.set(p("/music"), file("s.mp3", 1))
 	_ = r.svc.Restore(context.Background())
 
 	if got := r.svc.List(); len(got) != 2 || got[0].LibraryID != films.ID || got[1].LibraryID != music.ID {
 		t.Errorf("List() = %+v", got)
 	}
 	it, err := r.svc.Get("id:s.mp3")
-	if err != nil || it.LibraryID != music.ID || it.Root != "/music" {
+	if err != nil || it.LibraryID != music.ID || it.Root != p("/music") {
 		t.Errorf("Get() = %+v, %v; want the item with its own library's root", it, err)
 	}
 	if _, err := r.svc.Get("zzz"); !errors.Is(err, media.ErrNotFound) {
@@ -459,15 +459,15 @@ func TestListAndGet_SpanEveryLibrary(t *testing.T) {
 }
 
 func TestState_CountsPerLibrary(t *testing.T) {
-	films, music := media.NewLibrary("/films"), media.NewLibrary("/music")
+	films, music := media.NewLibrary(p("/films")), media.NewLibrary(p("/music"))
 	r := newRig(films, music)
-	r.sc.set("/films", file("a.mkv", 10))
+	r.sc.set(p("/films"), file("a.mkv", 10))
 	song := file("s.mp3", 4)
 	song.Kind = media.KindAudio
-	r.sc.set("/music", song, song)
+	r.sc.set(p("/music"), song, song)
 	song2 := song
 	song2.ID = "id:t.mp3"
-	r.sc.set("/music", song, song2)
+	r.sc.set(p("/music"), song, song2)
 	_ = r.svc.Restore(context.Background())
 
 	got := r.svc.State()
