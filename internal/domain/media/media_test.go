@@ -106,3 +106,31 @@ func TestSummarize(t *testing.T) {
 		})
 	}
 }
+
+func TestIgnored(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{".hidden", true},
+		{".DS_Store", true},
+		{"._clip.mp4", true},
+		{"Thumbs.db", true},
+		{"DESKTOP.INI", true},
+		{"$RECYCLE.BIN", true},
+		{"System Volume Information", true},
+		{"__MACOSX", true},
+		{"@eaDir", true},
+		{"movie.mkv", false},
+		{"Season 1", false},
+		{"my.hidden.movie.mkv", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Ignored(tt.name); got != tt.want {
+				t.Fatalf("Ignored(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}

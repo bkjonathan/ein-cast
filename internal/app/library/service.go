@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"eincast/internal/app"
@@ -33,18 +34,44 @@ type Service struct {
 
 	statusMu sync.RWMutex
 	status   app.LibraryStatus
+
+	// Watching the folder is optional (see WithWatcher and Watch).
+	watcher app.FolderWatcher
+	timing  WatchTiming
+	roots   chan string // the folder to watch, announced by each successful scan
 }
 
+// Option customises a Service.
+type Option func(*Service)
+
 // NewService builds a Service from its ports.
-func NewService(scanner app.Scanner, repo app.LibraryRepo, memory app.LibraryMemory, events app.EventPublisher, log *slog.Logger) *Service {
-	return &Service{
+func NewService(scanner app.Scanner, repo app.LibraryRepo, memory app.LibraryMemory, events app.EventPublisher, log *slog.Logger, opts ...Option) *Service {
+	s := &Service{
 		scanner: scanner,
 		repo:    repo,
 		memory:  memory,
 		events:  events,
 		log:     log.With(slog.String("source", "library")),
+		timing:  DefaultWatchTiming,
+		roots:   make(chan string, 1),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
+
+// scanTrigger says who asked for a scan, which decides how loud it is.
+type scanTrigger int
+
+const (
+	// byRequest is a person's scan or rescan: it shows progress and always
+	// reports its result.
+	byRequest scanTrigger = iota
+	// byWatch is a rescan because the disk changed. It is quiet: no progress, and
+	// no result at all when nothing changed.
+	byWatch
+)
 
 // ScanFolder scans path and, only if that succeeds, replaces the current
 // library, remembers the folder and publishes app.LibraryScanned. A failed scan
@@ -52,6 +79,10 @@ func NewService(scanner app.Scanner, repo app.LibraryRepo, memory app.LibraryMem
 // working setup; the reason is kept in Status for the UI. Only one scan runs at
 // a time: a second request gets ErrScanInProgress.
 func (s *Service) ScanFolder(ctx context.Context, path string) (app.LibrarySummary, error) {
+	return s.scan(ctx, path, byRequest)
+}
+
+func (s *Service) scan(ctx context.Context, path string, trigger scanTrigger) (app.LibrarySummary, error) {
 	if path == "" {
 		return app.LibrarySummary{}, errors.New("scan folder: path is empty")
 	}
@@ -60,13 +91,26 @@ func (s *Service) ScanFolder(ctx context.Context, path string) (app.LibrarySumma
 	}
 	defer s.scanMu.Unlock()
 
-	s.setStatus(app.LibraryStatus{Scanning: true, Root: path})
+	if trigger == byRequest {
+		s.setStatus(app.LibraryStatus{Scanning: true, Root: path})
+	}
 
 	items, err := s.scanner.Scan(ctx, path)
 	if err != nil {
 		s.log.Warn("scan failed", slog.String("root", path), slog.String("error", err.Error()))
 		s.setStatus(app.LibraryStatus{Root: path, Error: friendlyScanError(err)})
 		return app.LibrarySummary{}, fmt.Errorf("scan %q: %w", path, err)
+	}
+
+	if trigger == byWatch && s.repo.Root() == path && sameFiles(s.repo.List(), items) {
+		// The disk stirred but the library did not (a file touched, a download
+		// that finished with the same size). Say nothing; only clear an earlier
+		// error, since the folder is evidently readable again.
+		s.log.Debug("library unchanged after a change on disk", slog.String("root", path))
+		if s.Status().Error != "" {
+			s.setStatus(app.LibraryStatus{Root: path})
+		}
+		return app.LibrarySummary{Root: path, Stats: media.Summarize(items)}, nil
 	}
 
 	s.repo.Replace(path, items)
@@ -81,12 +125,23 @@ func (s *Service) ScanFolder(ctx context.Context, path string) (app.LibrarySumma
 		slog.String("root", path),
 		slog.Int("items", summary.Stats.Total),
 		slog.Int64("bytes", summary.Stats.TotalSize),
+		slog.Bool("watch_triggered", trigger == byWatch),
 	)
 	// The new library goes out before "scan finished": a UI that sees the
 	// status clear first would briefly show an empty state.
 	s.events.Publish(app.LibraryScanned{Summary: summary})
 	s.setStatus(app.LibraryStatus{Root: path})
+	s.announceRoot(path)
 	return summary, nil
+}
+
+// sameFiles reports whether two scans found the same files, unchanged. Paths
+// need no comparing: both scans walked the same root, and the ID is derived
+// from the path.
+func sameFiles(a, b []media.Item) bool {
+	return slices.EqualFunc(a, b, func(x, y media.Item) bool {
+		return x.ID == y.ID && x.Size == y.Size && x.ModTime.Equal(y.ModTime)
+	})
 }
 
 // Rescan scans the current library folder again, picking up added and removed
@@ -120,7 +175,21 @@ func (s *Service) Status() app.LibraryStatus {
 
 func (s *Service) setStatus(st app.LibraryStatus) {
 	s.statusMu.Lock()
+	// Whether the folder is watched is the watcher's to say, not the scan's.
+	st.Watching = s.status.Watching
 	s.status = st
+	s.statusMu.Unlock()
+	s.events.Publish(app.LibraryStatusChanged{Status: st})
+}
+
+func (s *Service) setWatching(on bool) {
+	s.statusMu.Lock()
+	if s.status.Watching == on {
+		s.statusMu.Unlock()
+		return
+	}
+	s.status.Watching = on
+	st := s.status
 	s.statusMu.Unlock()
 	s.events.Publish(app.LibraryStatusChanged{Status: st})
 }

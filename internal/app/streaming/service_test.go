@@ -35,8 +35,11 @@ func newFakeRun() *fakeRun {
 }
 
 func (f *fakeRun) Addrs() []netip.AddrPort { return f.addrs }
-func (f *fakeRun) Done() <-chan struct{}   { return f.done }
-func (f *fakeRun) Err() error              { return f.err }
+func (f *fakeRun) Bind(netip.Addr) (func(), error) {
+	return func() {}, nil
+}
+func (f *fakeRun) Done() <-chan struct{} { return f.done }
+func (f *fakeRun) Err() error            { return f.err }
 func (f *fakeRun) Stop(ctx context.Context) error {
 	f.mu.Lock()
 	f.stopped++
@@ -439,5 +442,155 @@ func TestStatus_LANURLsAreACopy(t *testing.T) {
 	svc.Status().LANURLs[0] = "tampered"
 	if got := svc.Status().LANURLs[0]; got != "http://192.168.1.20:8765" {
 		t.Errorf("a caller changed the service's state through Status(): %q", got)
+	}
+}
+
+// fakePublic is an app.PublicAccess that notes what the server had done by the
+// time it was asked to switch public access off.
+type fakePublic struct {
+	err error
+	web *fakeWeb
+
+	mu              sync.Mutex
+	calls           int
+	serverStopsSeen int
+	hadDeadline     bool
+}
+
+func (f *fakePublic) Disable(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.serverStopsSeen = f.web.last().stoppedCount()
+	_, f.hadDeadline = ctx.Deadline()
+	return f.err
+}
+
+func (f *fakePublic) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *fakeRun) stoppedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stopped
+}
+
+func newServiceWithPublic(web *fakeWeb, pub *fakePublic) *Service {
+	pub.web = web
+	return NewService(web, fakeNet{}, &fakeEvents{}, slog.New(slog.DiscardHandler), WithPublicAccess(pub))
+}
+
+func TestStop_TakesPublicAccessDownBeforeTheServer(t *testing.T) {
+	web := okWeb()
+	pub := &fakePublic{}
+	svc := newServiceWithPublic(web, pub)
+	if err := svc.Start(context.Background(), NewConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	if pub.callCount() != 1 {
+		t.Fatalf("public access disabled %d times, want 1", pub.callCount())
+	}
+	if pub.serverStopsSeen != 0 {
+		t.Error("the server was already stopped when public access was switched off: the tunnel went second")
+	}
+	if !pub.hadDeadline {
+		t.Error("switching off public access can wait forever; it must be bounded")
+	}
+	if web.last().stoppedCount() != 1 || svc.Status().State != server.Idle {
+		t.Errorf("server not stopped cleanly: %+v", svc.Status())
+	}
+}
+
+func TestStop_StopsTheServerEvenIfPublicAccessWillNotGoDown(t *testing.T) {
+	web := okWeb()
+	pub := &fakePublic{err: errors.New("tunnel process stuck")}
+	svc := newServiceWithPublic(web, pub)
+	if err := svc.Start(context.Background(), NewConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if web.last().stoppedCount() != 1 || svc.Status().State != server.Idle {
+		t.Errorf("a stuck tunnel kept the server running: %+v", svc.Status())
+	}
+}
+
+func TestCrash_TakesPublicAccessDown(t *testing.T) {
+	web := okWeb()
+	pub := &fakePublic{}
+	svc := newServiceWithPublic(web, pub)
+	if err := svc.Start(context.Background(), NewConfig()); err != nil {
+		t.Fatal(err)
+	}
+
+	web.last().end(errors.New("listener died"))
+
+	eventually(t, func() bool { return svc.Status().State == server.Failed })
+	if pub.callCount() != 1 {
+		t.Errorf("public access disabled %d times after a crash, want 1", pub.callCount())
+	}
+}
+
+func TestStop_WhenIdleLeavesPublicAccessAlone(t *testing.T) {
+	web := okWeb()
+	pub := &fakePublic{web: web}
+	svc := newServiceWithPublic(web, pub)
+
+	if err := svc.Stop(context.Background()); err == nil {
+		t.Fatal("stopping an idle server should be rejected")
+	}
+	if pub.callCount() != 0 {
+		t.Error("a rejected Stop still touched public access")
+	}
+}
+
+func TestLocal_OnlyWhileRunning(t *testing.T) {
+	web := okWeb()
+	svc, _ := newService(web)
+
+	if _, err := svc.Local(); !errors.Is(err, app.ErrServerNotRunning) {
+		t.Errorf("idle: error = %v, want ErrServerNotRunning", err)
+	}
+
+	if err := svc.Start(context.Background(), NewConfig()); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := svc.Local()
+	if err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if got := srv.Addrs(); len(got) != 1 || got[0] != web.last().addrs[0] {
+		t.Errorf("Local() addrs = %v: not the running server", got)
+	}
+
+	if err := svc.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Local(); !errors.Is(err, app.ErrServerNotRunning) {
+		t.Errorf("stopped: error = %v, want ErrServerNotRunning", err)
+	}
+}
+
+func TestLocal_NotAfterACrash(t *testing.T) {
+	web := okWeb()
+	svc, _ := newService(web)
+	if err := svc.Start(context.Background(), NewConfig()); err != nil {
+		t.Fatal(err)
+	}
+	web.last().end(errors.New("listener died"))
+	eventually(t, func() bool { return svc.Status().State == server.Failed })
+
+	if _, err := svc.Local(); !errors.Is(err, app.ErrServerNotRunning) {
+		t.Errorf("error = %v, want ErrServerNotRunning", err)
 	}
 }

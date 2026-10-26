@@ -10,7 +10,17 @@ const summary = (root: string): LibrarySummary => ({
 });
 const status = (over: Partial<LibraryStatus> = {}): LibraryStatus => ({ ...idleStatus, ...over });
 
-beforeEach(() => useLibraryStore.setState({ summary: null, status: null, hydrated: false }));
+beforeEach(() =>
+  useLibraryStore.setState({
+    summary: null,
+    status: null,
+    items: [],
+    hydrated: false,
+    kind: "all",
+    query: "",
+    sort: "name",
+  }),
+);
 
 describe("library store", () => {
   it("starts empty and not hydrated", () => {
@@ -53,5 +63,20 @@ describe("library store", () => {
     useLibraryStore.getState().applyStatus(status({ error: "boom" }));
     useLibraryStore.getState().applyStatus(status({ scanning: true }));
     expect(useLibraryStore.getState().status).toEqual(status({ scanning: true }));
+  });
+
+  it("keeps the file list and the browsing choices apart from Go's summary", () => {
+    const item = { id: "a", name: "a.mp4", relPath: "a.mp4", kind: "video" as const, size: 1, modTime: 1 };
+    useLibraryStore.getState().setItems([item]);
+    useLibraryStore.getState().setKind("audio");
+    useLibraryStore.getState().setQuery("x");
+    useLibraryStore.getState().setSort("newest");
+    useLibraryStore.getState().applyScanned(summary("/a"));
+    expect(useLibraryStore.getState()).toMatchObject({
+      items: [item],
+      kind: "audio",
+      query: "x",
+      sort: "newest",
+    });
   });
 });

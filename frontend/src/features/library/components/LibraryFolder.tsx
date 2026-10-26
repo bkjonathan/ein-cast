@@ -11,6 +11,7 @@ export function LibraryFolder({ root }: { root: string }) {
   const { choose, rescan, busy, error } = useLibraryActions();
   const scanning = useLibraryStore((s) => s.status?.scanning ?? false);
   const scanError = useLibraryStore((s) => s.status?.error ?? "");
+  const watching = useLibraryStore((s) => s.status?.watching ?? false);
   // Go's own explanation of a failed scan is written for people; the command's
   // rejection is the raw error (with paths and system text), so it is only a
   // fallback for failures that never became a scan status.
@@ -35,6 +36,11 @@ export function LibraryFolder({ root }: { root: string }) {
           </GlassButton>
         </div>
       </div>
+      <p className="text-xs text-muted-foreground">
+        {watching
+          ? "Watching this folder: added and removed files appear by themselves."
+          : "Changes on disk are not picked up automatically. Use Rescan after adding or removing files."}
+      </p>
       {problem && (
         <p role="alert" className="text-sm text-destructive">
           {problem} Showing the last successful scan.

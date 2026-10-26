@@ -15,9 +15,17 @@ const GROUPS = [
 
 let items = [];
 let current = null;
+// Set from /api/health: whether the server can make thumbnails. When it cannot,
+// the page does not ask for dozens of pictures that would all be refused.
+let thumbnails = false;
 
 async function getJSON(url) {
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  // ngrok's free plan puts a warning page in front of browser requests unless
+  // this header is present. It is harmless anywhere else, and sending it always
+  // means the page works behind any tunnel.
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json', 'ngrok-skip-browser-warning': '1' },
+  });
   if (!res.ok) throw new Error(url + ' returned ' + res.status);
   return res.json();
 }
@@ -35,6 +43,24 @@ function formatSize(bytes) {
 
 function streamURL(item) {
   return '/stream/' + encodeURIComponent(item.id);
+}
+
+function thumbURL(item) {
+  return '/thumb/' + encodeURIComponent(item.id);
+}
+
+// A small picture for a list entry, or nothing. A file with no picture (a song
+// without cover art) answers 404; the image then removes itself and the entry
+// is just text. Lazy loading keeps a long library from asking for everything.
+function thumbnail(item) {
+  const img = document.createElement('img');
+  img.className = 'thumb';
+  img.alt = '';
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  img.addEventListener('error', () => img.remove());
+  img.src = thumbURL(item);
+  return img;
 }
 
 function resetPlayers() {
@@ -122,6 +148,7 @@ function render() {
       size.className = 'size';
       size.textContent = formatSize(item.size);
 
+      if (thumbnails) btn.append(thumbnail(item));
       btn.append(name, size);
       btn.addEventListener('click', () => play(item));
       li.append(btn);
@@ -147,6 +174,7 @@ async function init() {
       $('server-name').textContent = health.name;
       document.title = health.name + ' · EinCast';
     }
+    thumbnails = health.thumbnails === true;
     items = library.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     render();
   } catch (err) {

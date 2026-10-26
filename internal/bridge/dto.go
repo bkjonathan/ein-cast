@@ -47,6 +47,32 @@ func toLibrarySummaryDTO(s app.LibrarySummary) LibrarySummaryDTO {
 	}
 }
 
+// LibraryItemDTO is one file in the library. It has no absolute path (see
+// ADR 0005); Kind is "video", "audio" or "image", ModTime is Unix milliseconds.
+type LibraryItemDTO struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	RelPath string `json:"relPath"`
+	Kind    string `json:"kind"`
+	Size    int64  `json:"size"`
+	ModTime int64  `json:"modTime"`
+}
+
+func toLibraryItemDTOs(items []media.Item) []LibraryItemDTO {
+	out := make([]LibraryItemDTO, len(items)) // non-nil: JSON [] rather than null
+	for i, it := range items {
+		out[i] = LibraryItemDTO{
+			ID:      string(it.ID),
+			Name:    it.Name,
+			RelPath: it.RelPath,
+			Kind:    string(it.Kind),
+			Size:    it.Size,
+			ModTime: it.ModTime.UnixMilli(),
+		}
+	}
+	return out
+}
+
 // ServerStateDTO is the HTTP server's lifecycle state. State is one of "idle",
 // "starting", "running", "stopping" or "failed".
 type ServerStateDTO struct {
@@ -77,15 +103,119 @@ func toServerStateDTO(s app.ServerStatus) ServerStateDTO {
 	}
 }
 
-// LibraryStatusDTO says whether a scan is running and why the last one failed.
+// RemoteStatusDTO is remote access (a tunnel) as the UI shows it. State is one
+// of "idle", "starting", "running", "stopping" or "failed", like the server's.
+type RemoteStatusDTO struct {
+	State string `json:"state"`
+	// Provider is the provider in use; empty when none is.
+	Provider string `json:"provider"`
+	// Public is true while anyone on the Internet might reach the library. It
+	// drives the "Public access ON" badge, so it stays true until a stop is
+	// confirmed.
+	Public bool `json:"public"`
+	// URL is the remote address while running.
+	URL   string `json:"url"`
+	Error string `json:"error"`
+	// Live is the provider's own state: "running" while connected, anything
+	// else while it reconnects.
+	Live string `json:"live"`
+	// PinSet says whether an access PIN exists.
+	PinSet bool `json:"pinSet"`
+	// Sessions counts remote browsers currently signed in.
+	Sessions int `json:"sessions"`
+	// NeedsSetup lists the providers that cannot be turned on until the person
+	// has supplied what they need.
+	NeedsSetup []string `json:"needsSetup"`
+}
+
+func toRemoteStatusDTO(s app.RemoteStatus) RemoteStatusDTO {
+	return RemoteStatusDTO{
+		State:    s.State.String(),
+		Provider: string(s.Provider),
+		Public:   s.Public,
+		URL:      string(s.URL),
+		Error:    s.Error,
+		Live:     s.Live.State.String(),
+		PinSet:   s.PINSet,
+		Sessions: s.Sessions,
+
+		NeedsSetup: providerIDs(s.NeedsSetup),
+	}
+}
+
+func providerIDs(in []app.ProviderID) []string {
+	out := make([]string, len(in)) // non-nil: JSON [] rather than null
+	for i, id := range in {
+		out[i] = string(id)
+	}
+	return out
+}
+
+// RemoteProviderDTO is one way of reaching the library from outside. Names and
+// explanations are the UI's to write; Go only says what each provider is.
+type RemoteProviderDTO struct {
+	ID     string `json:"id"`
+	Public bool   `json:"public"`
+	// Fields are what the provider needs from the person; empty if nothing.
+	Fields []RemoteFieldDTO `json:"fields"`
+}
+
+// RemoteFieldDTO describes one setting a provider needs. Kind is "text",
+// "secret" or "file".
+type RemoteFieldDTO struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Help        string `json:"help"`
+	Placeholder string `json:"placeholder"`
+	Kind        string `json:"kind"`
+	Required    bool   `json:"required"`
+}
+
+// RemoteFieldStateDTO says whether a setting is saved. Value is empty for
+// secrets, always: they are not sent back out.
+type RemoteFieldStateDTO struct {
+	Key   string `json:"key"`
+	Set   bool   `json:"set"`
+	Value string `json:"value"`
+}
+
+func toRemoteProviderDTOs(in []app.ProviderInfo) []RemoteProviderDTO {
+	out := make([]RemoteProviderDTO, len(in)) // non-nil: JSON [] rather than null
+	for i, p := range in {
+		fields := make([]RemoteFieldDTO, len(p.Fields))
+		for j, f := range p.Fields {
+			fields[j] = RemoteFieldDTO{
+				Key: f.Key, Label: f.Label, Help: f.Help, Placeholder: f.Placeholder,
+				Kind: string(f.Kind), Required: f.Required,
+			}
+		}
+		out[i] = RemoteProviderDTO{ID: string(p.ID), Public: p.Public, Fields: fields}
+	}
+	return out
+}
+
+func toRemoteFieldStateDTOs(in []app.FieldState) []RemoteFieldStateDTO {
+	out := make([]RemoteFieldStateDTO, len(in))
+	for i, st := range in {
+		out[i] = RemoteFieldStateDTO{Key: st.Field.Key, Set: st.Set, Value: st.Value}
+		if st.Field.Kind == app.FieldSecret {
+			out[i].Value = "" // belt and braces: a secret never crosses the bridge
+		}
+	}
+	return out
+}
+
+// LibraryStatusDTO says whether a scan is running, why the last one failed, and
+// whether the folder is being watched for changes.
 type LibraryStatusDTO struct {
 	Scanning bool   `json:"scanning"`
 	Root     string `json:"root"`
 	Error    string `json:"error"`
+	Watching bool   `json:"watching"`
 }
 
 func toLibraryStatusDTO(s app.LibraryStatus) LibraryStatusDTO {
-	return LibraryStatusDTO{Scanning: s.Scanning, Root: s.Root, Error: s.Error}
+	return LibraryStatusDTO{Scanning: s.Scanning, Root: s.Root, Error: s.Error, Watching: s.Watching}
 }
 
 // SettingsDTO is what the Settings screen shows. AccessToken is empty unless the

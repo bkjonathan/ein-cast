@@ -1,4 +1,5 @@
 import { Cast } from "lucide-react";
+import { PublicAccessBadge } from "@/features/remote";
 import { cn } from "@/shared/lib/cn";
 
 // The macOS traffic lights float over our content (hidden-inset title bar),
@@ -6,7 +7,7 @@ import { cn } from "@/shared/lib/cn";
 const isMac = navigator.userAgent.includes("Macintosh");
 
 /** Draggable window title bar; the right side is reserved for status badges. */
-export function TitleBar({ name }: { name: string }) {
+export function TitleBar({ name, onOpenRemote }: { name: string; onOpenRemote: () => void }) {
   return (
     <header
       className={cn(
@@ -16,6 +17,7 @@ export function TitleBar({ name }: { name: string }) {
     >
       <Cast className="size-4 text-primary" aria-hidden />
       <h1 className="text-sm font-semibold tracking-tight">{name}</h1>
+      <PublicAccessBadge onOpen={onOpenRemote} />
     </header>
   );
 }

@@ -2,14 +2,14 @@ package httpapi
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"mime"
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
+
+	"eincast/internal/adapters/safepath"
 )
 
 // handleStream serves a file's bytes. http.ServeContent gives us Range
@@ -23,7 +23,7 @@ func (a *api) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	realPath, err := resolveInside(a.lib.Root(), it.Path)
+	realPath, err := safepath.Inside(a.lib.Root(), it.Path)
 	if err != nil {
 		// Possible if a file was swapped for a symlink after the scan. Log the
 		// real reason; tell the client nothing beyond "not found".
@@ -58,33 +58,6 @@ func (a *api) fileError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	a.log.ErrorContext(r.Context(), "open media failed", errAttr(err))
 	writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
-}
-
-var errOutsideRoot = errors.New("path resolves outside the library root")
-
-// resolveInside returns the real (symlink-free) path of file, provided it is
-// still inside root. This is defense in depth on top of ID lookup: even if a
-// bad path ever reached the repository, it could not be served.
-func resolveInside(root, file string) (string, error) {
-	if root == "" {
-		return "", errors.New("no library loaded")
-	}
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", fmt.Errorf("resolve root: %w", err)
-	}
-	realFile, err := filepath.EvalSymlinks(file)
-	if err != nil {
-		return "", fmt.Errorf("resolve file: %w", err)
-	}
-	rel, err := filepath.Rel(realRoot, realFile)
-	if err != nil {
-		return "", errOutsideRoot
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", errOutsideRoot
-	}
-	return realFile, nil
 }
 
 // contentType picks a MIME type by extension. Types that operating systems

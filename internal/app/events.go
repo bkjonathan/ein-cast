@@ -57,9 +57,13 @@ type LibraryStatus struct {
 	// Error is a short, user-facing reason the last scan failed; empty if it
 	// did not.
 	Error string
+	// Watching is true while the folder is being watched for changes, so the
+	// library follows the disk without a manual rescan.
+	Watching bool
 }
 
-// LibraryStatusChanged is published when a scan starts, succeeds or fails.
+// LibraryStatusChanged is published when a scan starts, succeeds or fails, and
+// when watching the folder starts or stops.
 type LibraryStatusChanged struct {
 	Status LibraryStatus
 }
@@ -82,3 +86,11 @@ type SettingsChanged struct {
 }
 
 func (SettingsChanged) event() {}
+
+// RemoteStatusChanged is published when remote access turns on or off, fails,
+// or its PIN or sessions change.
+type RemoteStatusChanged struct {
+	Status RemoteStatus
+}
+
+func (RemoteStatusChanged) event() {}

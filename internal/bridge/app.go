@@ -5,16 +5,20 @@ package bridge
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
+	"strings"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"eincast/internal/app"
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
+	"eincast/internal/app/thumbnails"
+	"eincast/internal/domain/media"
 	"eincast/internal/domain/server"
 )
 
@@ -32,6 +36,9 @@ type Library interface {
 	Restore(ctx context.Context) error
 	Summary() (app.LibrarySummary, bool)
 	Status() app.LibraryStatus
+	List() []media.Item
+	// Watch keeps the library in step with its folder until ctx ends.
+	Watch(ctx context.Context)
 }
 
 // Settings is the part of the settings use cases the bridge drives.
@@ -46,6 +53,28 @@ type Streaming interface {
 	Start(ctx context.Context, cfg streaming.Config) error
 	Stop(ctx context.Context) error
 	Status() app.ServerStatus
+	// Local returns the running server for a tunnel to attach to, or
+	// app.ErrServerNotRunning.
+	Local() (app.LocalServer, error)
+}
+
+// Remote is the part of the remote-access use cases the bridge drives.
+type Remote interface {
+	Providers() []app.ProviderInfo
+	Status() app.RemoteStatus
+	Enable(ctx context.Context, id app.ProviderID, srv app.LocalServer) error
+	Disable(ctx context.Context) error
+	SetPIN(pin string) error
+	ClearPIN() error
+	ProviderConfig(id app.ProviderID) ([]app.FieldState, error)
+	SetProviderField(id app.ProviderID, key, value string) error
+	ClearProviderField(id app.ProviderID, key string) error
+}
+
+// Thumbnails is the part of the thumbnail use case the bridge needs.
+type Thumbnails interface {
+	Get(ctx context.Context, id media.ID) (thumbnails.Thumbnail, error)
+	Available() bool
 }
 
 // App is the Wails-bound facade. Every exported method is callable from JS, so
@@ -55,6 +84,8 @@ type App struct {
 	library   Library
 	settings  Settings
 	streaming Streaming
+	remote    Remote
+	thumbs    Thumbnails // nil: no thumbnails
 	logs      app.LogStream
 	emitter   *Emitter
 	log       *slog.Logger
@@ -62,9 +93,13 @@ type App struct {
 	// ctx lives for the whole app run and is cancelled on shutdown. Wails
 	// binding calls carry no context of their own, so long operations use this.
 	ctx context.Context
-	// pickFolder opens the native directory dialog. A field so tests can
+	// pickFolder and pickFile open the native dialogs. Fields so tests can
 	// replace the one thing that needs a real window.
 	pickFolder func(ctx context.Context) (string, error)
+	pickFile   func(ctx context.Context, title string) (string, error)
+	// windowThemes maps a theme name to the Wails call that applies it. A field
+	// so tests can observe the choice without a native window.
+	windowThemes map[string]func(ctx context.Context)
 }
 
 // Deps is everything the facade needs, passed in by main. Nothing is global.
@@ -73,9 +108,12 @@ type Deps struct {
 	Library   Library
 	Settings  Settings
 	Streaming Streaming
-	Logs      app.LogStream
-	Emitter   *Emitter
-	Log       *slog.Logger
+	Remote    Remote
+	// Thumbnails may be nil; the UI then shows icons only.
+	Thumbnails Thumbnails
+	Logs       app.LogStream
+	Emitter    *Emitter
+	Log        *slog.Logger
 }
 
 // New builds the facade from its dependencies.
@@ -85,10 +123,18 @@ func New(d Deps) *App {
 		library:    d.Library,
 		settings:   d.Settings,
 		streaming:  d.Streaming,
+		remote:     d.Remote,
+		thumbs:     d.Thumbnails,
 		logs:       d.Logs,
 		emitter:    d.Emitter,
 		log:        d.Log,
 		pickFolder: openFolderDialog,
+		pickFile:   openFileDialog,
+		windowThemes: map[string]func(context.Context){
+			"system": wruntime.WindowSetSystemDefaultTheme,
+			"light":  wruntime.WindowSetLightTheme,
+			"dark":   wruntime.WindowSetDarkTheme,
+		},
 	}
 }
 
@@ -107,7 +153,13 @@ func OnShutdown(a *App) func(ctx context.Context) {
 
 func (a *App) shutdown(ctx context.Context) {
 	// The app context may already be cancelled; shutdown must still run.
-	if err := a.streaming.Stop(context.WithoutCancel(ctx)); err != nil && !errors.Is(err, server.ErrInvalidTransition) {
+	ctx = context.WithoutCancel(ctx)
+	// Stopping the server also turns remote access off, but a tunnel must never
+	// outlive the app, so do not depend on the server being in a state to stop.
+	if err := a.remote.Disable(ctx); err != nil {
+		a.log.Warn("turn off remote access on shutdown", slog.String("error", err.Error()))
+	}
+	if err := a.streaming.Stop(ctx); err != nil && !errors.Is(err, server.ErrInvalidTransition) {
 		// Nothing more to do while quitting, but leave a trace.
 		a.log.Warn("stop server on shutdown", slog.String("error", err.Error()))
 	}
@@ -119,6 +171,8 @@ func (a *App) startup(ctx context.Context) {
 	// Owned by the app context: the goroutine ends, and unsubscribes, when the
 	// app shuts down.
 	go a.forwardLogs(ctx)
+	// Follows the library folder on disk; also ends with the app context.
+	go a.library.Watch(ctx)
 	// Reopen the last folder in the background so the window appears at once.
 	go a.restoreLibrary(ctx)
 }
@@ -190,6 +244,54 @@ func (a *App) GetLibrarySummary() *LibrarySummaryDTO {
 	return &dto
 }
 
+// ListLibrary returns every item in the library, in scan order. The UI calls it
+// on load and again after each "library:scanned" event. Disk paths stay in Go:
+// the DTO carries the ID and the path relative to the library folder.
+func (a *App) ListLibrary() []LibraryItemDTO {
+	return toLibraryItemDTOs(a.library.List())
+}
+
+// GetThumbnail returns a small picture of an item as a "data:image/jpeg;base64,…"
+// URL, ready for an <img>. It returns "" when the item has no picture (a song
+// without cover art), when ffmpeg is not installed, or when the ID is unknown:
+// the UI shows an icon in all those cases, so none of them is an error. The
+// first request for an item can take a moment while the picture is made.
+func (a *App) GetThumbnail(id string) (string, error) {
+	if a.thumbs == nil {
+		return "", nil
+	}
+	th, err := a.thumbs.Get(a.ctx, media.ID(id))
+	switch {
+	case err == nil:
+		return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(th.JPEG), nil
+	case errors.Is(err, media.ErrNotFound),
+		errors.Is(err, app.ErrNoThumbnail),
+		errors.Is(err, app.ErrThumbnailsUnavailable):
+		return "", nil
+	default:
+		return "", fmt.Errorf("thumbnail: %w", err)
+	}
+}
+
+// ThumbnailsAvailable says whether thumbnails can be made on this computer, so
+// the Library screen can suggest installing ffmpeg when they cannot.
+func (a *App) ThumbnailsAvailable() bool {
+	return a.thumbs != nil && a.thumbs.Available()
+}
+
+// SetWindowTheme asks the native window to use "system", "light" or "dark"
+// chrome. Today only Windows acts on it (Mica follows the choice); on macOS
+// Wails ignores the call, and the page copes with a tint instead. The theme of
+// the page itself is the frontend's business.
+func (a *App) SetWindowTheme(mode string) error {
+	apply, ok := a.windowThemes[mode]
+	if !ok {
+		return fmt.Errorf("set window theme: unknown theme %q", mode)
+	}
+	apply(a.ctx)
+	return nil
+}
+
 // StartServer starts the HTTP server with the saved port and name. The outcome
 // arrives as a "server:state" event; an error here means the request itself was
 // refused (for example, the server is already running) or the bind failed.
@@ -243,6 +345,110 @@ func (a *App) RotateAccessToken() error {
 	return err
 }
 
+// GetRemoteStatus returns remote access as it is now. The UI calls it on load.
+func (a *App) GetRemoteStatus() RemoteStatusDTO {
+	return toRemoteStatusDTO(a.remote.Status())
+}
+
+// ListRemoteProviders returns the ways of reaching the library from outside.
+func (a *App) ListRemoteProviders() []RemoteProviderDTO {
+	return toRemoteProviderDTOs(a.remote.Providers())
+}
+
+// EnableRemote turns on a remote access provider for the running server. The
+// outcome arrives as "remote:status" events; an error here means the request
+// was refused (no PIN for a public provider, server not running) or the
+// provider could not start. It can take a while, so the UI shows it as pending.
+func (a *App) EnableRemote(id string) error {
+	srv, err := a.streaming.Local()
+	if err != nil {
+		return remoteError(err)
+	}
+	return remoteError(a.remote.Enable(a.ctx, app.ProviderID(id), srv))
+}
+
+// DisableRemote turns remote access off and signs everyone out.
+func (a *App) DisableRemote() error {
+	return remoteError(a.remote.Disable(a.ctx))
+}
+
+// SetRemotePIN sets or changes the access PIN that public access requires.
+// Changing it signs out every remote browser.
+func (a *App) SetRemotePIN(pin string) error {
+	return remoteError(a.remote.SetPIN(pin))
+}
+
+// ClearRemotePIN removes the access PIN. It is refused while public access is on.
+func (a *App) ClearRemotePIN() error {
+	return remoteError(a.remote.ClearPIN())
+}
+
+// GetRemoteProviderConfig returns which of a provider's settings are saved.
+// Secrets are reported as set or not; their values never leave Go.
+func (a *App) GetRemoteProviderConfig(id string) ([]RemoteFieldStateDTO, error) {
+	states, err := a.remote.ProviderConfig(app.ProviderID(id))
+	if err != nil {
+		return nil, remoteError(err)
+	}
+	return toRemoteFieldStateDTOs(states), nil
+}
+
+// SetRemoteProviderField saves one setting of a provider (a token, a host name).
+// Refused while that provider is on. The new state arrives as a "remote:status"
+// event.
+func (a *App) SetRemoteProviderField(id, key, value string) error {
+	return remoteError(a.remote.SetProviderField(app.ProviderID(id), key, value))
+}
+
+// ClearRemoteProviderField removes one setting of a provider.
+func (a *App) ClearRemoteProviderField(id, key string) error {
+	return remoteError(a.remote.ClearProviderField(app.ProviderID(id), key))
+}
+
+// ChooseFile opens the native file picker and returns the chosen path, or "" if
+// the person cancelled. Used for settings that name a program on disk.
+func (a *App) ChooseFile(title string) (string, error) {
+	path, err := a.pickFile(a.ctx, title)
+	if err != nil {
+		return "", fmt.Errorf("choose file: %w", err)
+	}
+	return path, nil
+}
+
+// remoteError rewrites the refusals a person can act on as plain advice and
+// passes everything else through. These messages are shown in the UI.
+func remoteError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, app.ErrPINRequired):
+		return errors.New("Set an access PIN before turning on public access.")
+	case errors.Is(err, app.ErrPublicActive):
+		return errors.New("Turn off public access before removing the PIN.")
+	case errors.Is(err, app.ErrAlreadyEnabled):
+		return errors.New("Remote access is already on.")
+	case errors.Is(err, app.ErrServerNotRunning):
+		return errors.New("Start the server first.")
+	case errors.Is(err, app.ErrUnknownProvider):
+		return errors.New("That way of connecting is not available.")
+	case errors.Is(err, app.ErrUnknownField):
+		return errors.New("That setting does not exist.")
+	case errors.Is(err, app.ErrProviderInUse):
+		return errors.New("Turn this option off before changing its settings.")
+	case errors.Is(err, app.ErrNotConfigured):
+		var nc *app.NotConfiguredError
+		if errors.As(err, &nc) {
+			return errors.New("Finish setting this up first: " + strings.Join(nc.Missing, ", ") + ".")
+		}
+		return errors.New("Finish setting this up first.")
+	case errors.Is(err, app.ErrInvalidValue):
+		// "Hostname: invalid value: enter the hostname only…" reads better without the middle.
+		return errors.New(strings.Replace(err.Error(), "invalid value: ", "", 1))
+	default:
+		return err
+	}
+}
+
 // GetLogHistory returns the recent log lines, oldest first. The UI calls it on
 // load, then relies on "log:line" events; Seq lets it join the two without gaps
 // or duplicates.
@@ -262,4 +468,11 @@ func openFolderDialog(ctx context.Context) (string, error) {
 	return wruntime.OpenDirectoryDialog(ctx, wruntime.OpenDialogOptions{
 		Title: "Choose Media Folder",
 	})
+}
+
+func openFileDialog(ctx context.Context, title string) (string, error) {
+	if ctx == nil {
+		return "", errors.New("app not started")
+	}
+	return wruntime.OpenFileDialog(ctx, wruntime.OpenDialogOptions{Title: title})
 }

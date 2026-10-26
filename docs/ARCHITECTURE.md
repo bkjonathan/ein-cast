@@ -27,20 +27,32 @@ Arrows point in the direction of the import. `domain` imports nothing; `app`
 never imports Wails, `net/http` or `os`. `scripts/check-deps.sh` fails if that
 changes.
 
-## What exists today (through Phase 6)
+## What exists today (through Phase 8)
 
 | Layer | Contents |
 |---|---|
-| `domain/media` | `Item`, `ID` (hash of relative path), `Kind` + extension detection, `Stats`, sentinel errors |
+| `domain/media` | `Item`, `ID` (hash of relative path), `Kind` + extension detection, `Ignored` (names that are never library content), `Stats`, sentinel errors |
 | `domain/server` | `State`, the transition table, and `Machine` (atomic check-and-set) |
-| `app` | Ports (`Scanner`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `NetInfo`, `LogStream`, `SettingsStore`, `SecretStore`, `LibraryMemory`), `LogEntry`, sealed `Event` type |
-| `app/library` | `Service`: `ScanFolder` (one at a time), `Rescan`, `Restore`, `Status`, `Summary`, `Root`, `List`, `Get` |
+| `app` | Ports (`Scanner`, `FolderWatcher`, `FrameGrabber`, `ThumbnailCache`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `NetInfo`, `LogStream`, `SettingsStore`, `SecretStore`, `LibraryMemory`), remote-access ports and types (`Tunnel`, `LocalServer`, `TunnelRegistry`, `PublicAccess`, `RemoteStatus`), `Secret` (log-safe wrapper), `LogEntry`, sealed `Event` type |
+| `app/library` | `Service`: `ScanFolder` (one at a time), `Rescan`, `Restore`, `Status`, `Summary`, `Root`, `List`, `Get`; `Watch` rescans quietly after changes on disk settle (ADR 0014) |
+| `app/thumbnails` | `Service`: `Get` (cache → one shared ffmpeg attempt, two at a time, remembered failures), `Available` (ADR 0015) |
 | `app/settings` | `Service`: load/validate/save preferences, access token (`Required`, `Verify`, `RotateToken`); implements `LibraryMemory` |
-| `app/streaming` | `Config` + functional options, `Service`: `Start`, `Stop`, `Status`, crash watcher |
+| `app/streaming` | `Config` + functional options, `Service`: `Start`, `Stop`, `Status`, crash watcher, `Local()` (the running server, for tunnels); withdraws public access before the server stops |
+| `app/providerconfig` | `Store`: a provider's saved settings in the credential store; cleans and checks values; secrets are write-only |
+| `app/remote` | `Service`: `Enable` (refuses a public provider without a PIN), `Disable`, a per-run watcher, `Status`, `SetPIN`/`ClearPIN`, `Login`, session and signed-link checks, rate limiting |
 | `adapters/fsscan` | `filepath.WalkDir` scanner (skips hidden, system files, symlinks) |
+| `adapters/fswatch` | `fsnotify` watcher: one signal for any burst of relevant changes, follows new folders, all-or-nothing |
+| `adapters/ffmpeg` | `Grabber`: runs the installed ffmpeg for one JPEG (video frame, cover art, shrunken photo) |
+| `adapters/thumbcache` | Folder of `<key>.jpg` files in the user cache dir; atomic writes, age-based `Prune` |
+| `adapters/safepath` | `Inside(root, file)`: the symlink-safe "stays in the library" check used by streaming and thumbnails |
 | `adapters/memrepo` | `sync.RWMutex`-guarded snapshot repository |
-| `adapters/httpapi` | Server lifecycle (errgroup, one listener per address), route table, middleware chain, handlers, embedded player page |
+| `adapters/httpapi` | Server lifecycle (errgroup, one listener per address), route table, middleware chain, handlers, embedded player page; tunnel gate (PIN sign-in, signed links, trusted forwarding headers); `Bind` for extra listeners |
 | `adapters/settingsfile` | `settings.json` in the user config dir: atomic writes, `0600`, corrupt files set aside |
+| `adapters/tunnel` | Registry of tunnel providers by ID |
+| `adapters/tunnel/procsup` | `Supervisor`: runs one child process, line-splits its output, restarts with backoff, kills on cancel |
+| `adapters/tunnel/cloudflared` | `Quick` and `Named`: the Cloudflare tunnels, on one shared engine; `Quick` reads its address from the banner, `Named` is up on `Registered tunnel connection`; finds `cloudflared` (saved location first) |
+| `adapters/tunnel/ngrok` | `Provider`: ngrok through its Go SDK, behind a small interface; reconnecting is the SDK's, ending is noticed by a watcher |
+| `adapters/tunnel/tailscale` | Private provider: asks the local Tailscale for this device's address and has the server listen on it while on (ADR 0012) |
 | `adapters/secrets` | OS credential store (Keychain / Credential Manager) via go-keyring |
 | `adapters/netinfo` | LAN IPv4 detection: pure `Pick` over interfaces + the `System` reader |
 | `adapters/logbus` | `Handler` (slog decorator), `Bus` (non-blocking pub/sub), ring buffer |
@@ -52,9 +64,10 @@ changes.
 |---|---|
 | `GET /` | The device player page (embedded; list, search, `<video>`/`<audio>`/`<img>`), with a strict CSP |
 | `GET /static/{file}` | The page's script, stylesheet and icon (single path segment, never a directory listing) |
-| `GET /api/health` | `{"status":"ok","version":"…","name":"…"}` |
+| `GET /api/health` | `{"status":"ok","version":"…","name":"…","thumbnails":true}` |
 | `GET /api/library` | `[{id, name, kind, size, modTime}]` (never a path) |
 | `GET /api/library/{id}` | One item, or 404 |
+| `GET /thumb/{id}` | A 320 px JPEG of the item, or a plain `404` when it has none |
 | `GET /stream/{id}` | File bytes via `http.ServeContent`: `Range` → `206`, `HEAD`, correct `Content-Type` |
 | `GET /playlist.m3u` | Extended M3U of video + audio with absolute URLs built from the request `Host` |
 
@@ -224,7 +237,7 @@ sequenceDiagram
     MW->>H: route match "GET /stream/{id}"
     H->>Lib: Get(id)
     Lib-->>H: Item (absolute path stays server-side)
-    H->>H: resolveInside(root, path): symlinks resolved, must stay in root
+    H->>H: safepath.Inside(root, path): symlinks resolved, must stay in root
     H->>FS: open file
     H->>iPad: http.ServeContent → 206 Partial Content
     MW->>MW: access log: method, path, status, bytes, duration, client IP
@@ -234,9 +247,204 @@ An unknown ID, a path-like ID, a deleted file, or a file that now resolves
 outside the library root all end in the same JSON `404`, with the real reason
 only in the log.
 
+### Flow: files change on disk
+
+```mermaid
+sequenceDiagram
+    participant FS as filesystem
+    participant W as fswatch.Watcher
+    participant Lib as library.Service.Watch
+    participant Sc as fsscan.Scanner
+    participant UI as Library screen
+
+    Note over Lib: a scan finished → announces its root; Watch starts watching it
+    Lib->>W: Watch(ctx, root)
+    FS-->>W: events (create, write, write, write …)
+    W->>W: drop hidden / non-media / chmod; add watches for new folders
+    W-->>Lib: one signal (bursts coalesce)
+    Note over Lib: wait until quiet for 2 s, but at most 30 s
+    Lib->>Sc: Scan(root)  (quiet: no "Scanning…" status)
+    alt same files, sizes and times
+        Lib->>Lib: say nothing
+    else changed
+        Lib->>UI: "library:scanned" → UI asks ListLibrary()
+    end
+```
+
+If the folder cannot be watched (the system's limit), `Status().Watching` is false
+and the Library screen says changes need Rescan ([ADR 0014](adr/0014-watch-the-library-folder.md)).
+
+### Flow: a thumbnail is requested
+
+```mermaid
+sequenceDiagram
+    participant C as Player page / Library row
+    participant H as handleThumbnail / bridge.GetThumbnail
+    participant T as thumbnails.Service
+    participant K as thumbcache
+    participant F as ffmpeg.Grabber
+
+    C->>H: GET /thumb/ab12…  (or GetThumbnail("ab12…"))
+    H->>T: Get(ctx, id)
+    T->>T: library lookup → item, cache key (id, size, mtime, version)
+    T->>K: Get(key)
+    alt cached
+        K-->>T: JPEG
+    else not cached
+        T->>T: join the running attempt for this key, or start one (2 at a time, 30 s)
+        T->>F: Grab(ctx, root, path, width 320)
+        F->>F: safepath.Inside(root, path), then run ffmpeg
+        F-->>T: JPEG, or "no thumbnail"
+        T->>K: Put(key, JPEG)
+    end
+    T-->>H: JPEG
+    H-->>C: image/jpeg (HTTP) or a data: URL (bridge); 404 / "" when there is none
+```
+
+### Flow: the user turns on Tailscale
+
+```mermaid
+sequenceDiagram
+    participant UI as Remote screen
+    participant B as bridge.App
+    participant S as streaming.Service
+    participant R as remote.Service
+    participant T as tailscale.Provider
+    participant CLI as tailscale CLI
+    participant Srv as httpapi running server
+
+    UI->>B: EnableRemote("tailscale")
+    B->>S: Local()
+    S-->>B: running server (or ErrServerNotRunning → "Start the server first.")
+    B->>R: Enable(ctx, "tailscale", server)
+    R->>R: private provider: no PIN needed; state Starting; publish
+    R->>T: Start(lifetime ctx, server)
+    T->>CLI: tailscale status --json
+    CLI-->>T: BackendState Running, 100.x.y.z, den.tailnet.ts.net
+    T->>T: address must be inside 100.64.0.0/10 or fd7a:115c:a1e0::/48
+    T->>Srv: Bind(100.x.y.z)
+    Srv-->>T: unbind func (listener on the server's port)
+    T-->>R: http://den.tailnet.ts.net:8765
+    R->>R: register URL for the Host check; state Running; publish
+    R-->>UI: "remote:status" → Connect card gets a Tailscale tab
+```
+
+Turning it off (or stopping the server, or cancelling the lifetime context)
+calls the `unbind` function, which closes the listener and the connections that
+arrived through it. Requests from a tailnet device reach the same middleware
+chain as a LAN device: the peer is a `100.x` address, not loopback, so the access
+token (if enabled) applies and the log shows the device's real address.
+
+### Flow: the quick tunnel starts, restarts and stops
+
+```mermaid
+sequenceDiagram
+    participant R as remote.Service
+    participant Q as cloudflared.Quick
+    participant S as procsup.Supervisor
+    participant P as cloudflared process
+
+    R->>Q: Start(lifetime ctx, server)
+    Q->>S: Start(ctx)  [cloudflared tunnel --no-autoupdate --url http://127.0.0.1:port]
+    S->>P: spawn
+    P-->>S: stderr lines (banner)
+    S-->>Q: OnLine for each line
+    Q->>Q: first https://<words>.trycloudflare.com of this run (never api.…)
+    Q-->>R: URL (Start returns)
+    loop every second while the run lasts
+        R->>Q: Status()
+    end
+    P--xS: exits unexpectedly
+    S-->>Q: OnExit(err, restarting=true)  → Status: Starting (reconnecting)
+    S->>S: wait 1s, 2s, 4s … (max 5 in a row)
+    S->>P: spawn again
+    P-->>S: banner with a NEW address
+    S-->>Q: OnLine → Status: Running, new URL
+    R->>R: sees the new URL: Host check now accepts it, refuses the old; publishes
+    Note over R,P: if it keeps failing, the supervisor gives up → Status: Failed →<br/>the service stops the provider and takes remote access down
+    R->>S: Stop  (Disable, server stop or lifetime end)
+    S->>P: interrupt, then kill after 5s
+    S-->>R: Done closed once the process is gone
+```
+
+### Flow: setting up and starting the named tunnel
+
+```mermaid
+sequenceDiagram
+    participant UI as Remote screen
+    participant B as bridge.App
+    participant R as remote.Service
+    participant C as providerconfig.Store
+    participant K as OS keychain
+    participant N as cloudflared.Named
+    participant S as procsup + cloudflared
+
+    UI->>B: SetRemoteProviderField("cloudflare-named", "hostname", "https://Media.Example.com/")
+    B->>R: SetProviderField
+    R->>R: refuse if this provider is on
+    R->>C: Set (provider's Clean: → media.example.com)
+    C->>K: store provider/cloudflare-named/hostname
+    R-->>UI: "remote:status" (needsSetup updated)
+    UI->>B: SetRemoteProviderField(…, "token", "eyJ…")
+    Note over B,K: the same path; the token is stored, then only "set" is ever reported back
+    UI->>B: EnableRemote("cloudflare-named")
+    B->>R: Enable
+    R->>C: Missing? → none · PIN set? → yes
+    R->>N: Start(lifetime, server)
+    N->>C: Get token, hostname, binary
+    N->>S: run: tunnel --no-autoupdate run   env TUNNEL_TOKEN=…   (secrets scrubbed from output)
+    S-->>N: line: "Registered tunnel connection"
+    N-->>R: https://media.example.com
+    R-->>UI: "remote:status" → running
+```
+
+### Flow: a request arrives through a public tunnel
+
+The tunnel (a `cloudflared` process, say) runs on this machine and forwards
+internet traffic to `127.0.0.1`, so the server sees a loopback connection with
+forwarding headers. Everything below is in the middleware chain, before any
+handler runs. Decisions and rejected alternatives are in
+[ADR 0008](adr/0008-public-access-requires-authentication.md).
+
+```mermaid
+sequenceDiagram
+    participant Web as Browser / VLC on the Internet
+    participant T as Tunnel process (loopback)
+    participant MW as Middleware chain
+    participant R as remote.Service
+    participant H as Handler
+
+    Web->>T: GET https://abc.trycloudflare.com/ (no cookie)
+    T->>MW: GET / from 127.0.0.1, Host: abc…, X-Forwarded-For: client
+    MW->>R: HostAllowed("abc…")?
+    R-->>MW: yes, the online tunnel
+    MW->>MW: viaTunnel? peer is loopback and (public active or forwarding headers): yes
+    MW->>R: ValidSession(cookie)? / VerifyStream(id, exp, sig)?
+    R-->>MW: no
+    MW-->>Web: 401 + PIN sign-in page (no script allowed)
+
+    Web->>T: POST /login (pin)
+    T->>MW: same path; clientIP = last X-Forwarded-For entry (trusted: peer is loopback)
+    MW->>R: Login(client ip, pin)
+    R->>R: per-address and global token buckets; scrypt compare
+    R-->>MW: session token (or wrong PIN / locked out)
+    MW-->>Web: 303 → /, Set-Cookie: eincast_session (HttpOnly, SameSite=Lax)
+
+    Web->>T: GET /playlist.m3u (cookie)
+    MW->>H: valid session → handler
+    H->>R: SignStream(id) for each item
+    H-->>Web: M3U with /stream/{id}?exp=…&sig=… (https, from X-Forwarded-Proto)
+    Note over Web,H: VLC then plays each link with no cookie: the signature covers the item and the expiry
+```
+
+Disabling remote access (or stopping the server, which disables it first)
+rotates the keys: every session and link stops working at once.
+
 ## Frontend
 
 Feature-sliced: `app/` (shell), `features/` (one folder per feature),
 `shared/` (bridge, glass UI, motion). Only `shared/bridge` imports the
 generated `wailsjs/` code (see [ADR 0006](adr/0006-bridge-only-wails-dependency.md)).
-Theming is CSS-only via `prefers-color-scheme`.
+Theming is CSS plus one attribute: tokens follow `prefers-color-scheme` unless
+the Appearance setting puts `data-theme` on `<html>`
+([ADR 0016](adr/0016-manual-theme-over-a-native-backdrop.md)).

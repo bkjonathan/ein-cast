@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -167,15 +166,53 @@ func accessLog(log *slog.Logger) middleware {
 	}
 }
 
-// clientIP is the TCP peer address. Forwarding headers (X-Forwarded-For,
-// CF-Connecting-IP) are deliberately ignored: they are trivially forged, and
-// will only be trusted for tunnel connections in the remote-access phase.
+// clientIP is the address of whoever is really asking. Normally that is the TCP
+// peer. A tunnel makes every request arrive from loopback, so for those (and
+// only those) the forwarding headers name the real client; see forwardedIP.
+// Anyone else's X-Forwarded-For is ignored: it is trivially forged.
 func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
+	peer, ok := peerAddr(r)
+	if !ok {
 		return r.RemoteAddr
 	}
-	return host
+	if peer.IsLoopback() {
+		if fwd, ok := forwardedIP(r); ok {
+			return fwd.String()
+		}
+	}
+	return peer.String()
+}
+
+// peerAddr is the address at the other end of the TCP connection.
+func peerAddr(r *http.Request) (netip.Addr, bool) {
+	ap, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return ap.Addr().Unmap(), true
+}
+
+// forwardedIP reads the client address a tunnel reports: CF-Connecting-IP when
+// present, else the last X-Forwarded-For entry. The last, not the first: the
+// tunnel's edge appends the address it saw to whatever the client sent, so the
+// first entry is the client's own claim and the last is the edge's observation.
+// That holds for exactly one trusted hop, which is what every tunnel here is.
+func forwardedIP(r *http.Request) (netip.Addr, bool) {
+	if v := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); v != "" {
+		if a, err := netip.ParseAddr(v); err == nil {
+			return a.Unmap(), true
+		}
+	}
+	xff := r.Header.Values("X-Forwarded-For")
+	for i := len(xff) - 1; i >= 0; i-- {
+		parts := strings.Split(xff[i], ",")
+		for j := len(parts) - 1; j >= 0; j-- {
+			if a, err := netip.ParseAddr(strings.TrimSpace(parts[j])); err == nil {
+				return a.Unmap(), true
+			}
+		}
+	}
+	return netip.Addr{}, false
 }
 
 // recoverer turns a handler panic into a logged 500 so one bad request cannot
@@ -233,21 +270,24 @@ func corsLAN(next http.Handler) http.Handler {
 	})
 }
 
-// isLANOrigin accepts localhost, *.local (mDNS), and loopback, private or
-// link-local IP literals. Tailscale's 100.64/10 range is not "private" to
-// net/netip and will be added with the Tailscale provider.
+// isLANOrigin accepts localhost, *.local (mDNS), *.ts.net (Tailscale MagicDNS),
+// and loopback, private, link-local or tailnet (100.64.0.0/10) IP literals.
 func isLANOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	if host == "localhost" || strings.HasSuffix(host, ".local") {
+	if host == "localhost" || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".ts.net") {
 		return true
 	}
 	addr, err := netip.ParseAddr(host)
 	if err != nil {
 		return false
 	}
-	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast()
+	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || tailnetV4.Contains(addr.Unmap())
 }
+
+// tailnetV4 is the carrier-grade NAT range Tailscale assigns addresses from.
+// net/netip does not call it "private".
+var tailnetV4 = netip.MustParsePrefix("100.64.0.0/10")

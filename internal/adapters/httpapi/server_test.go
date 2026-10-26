@@ -1,15 +1,20 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -25,7 +30,7 @@ func baseURL(run app.RunningServer) string {
 
 func startServer(t *testing.T, ctx context.Context, lib Library, port int, hosts ...netip.Addr) app.RunningServer {
 	t.Helper()
-	srv := New(lib, &fakeAccess{}, "test", slog.New(slog.DiscardHandler))
+	srv := New(lib, &fakeAccess{}, &fakeRemote{}, "test", slog.New(slog.DiscardHandler))
 	run, err := srv.Start(ctx, app.ServeConfig{Port: port, Name: "Den", Hosts: hosts})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -78,7 +83,7 @@ func TestServer_PortInUseFailsAtStart(t *testing.T) {
 	first := startServer(t, context.Background(), &fakeLibrary{}, 0)
 	port := int(first.Addrs()[0].Port())
 
-	_, err := New(&fakeLibrary{}, &fakeAccess{}, "test", slog.New(slog.DiscardHandler)).
+	_, err := New(&fakeLibrary{}, &fakeAccess{}, &fakeRemote{}, "test", slog.New(slog.DiscardHandler)).
 		Start(context.Background(), app.ServeConfig{Port: port, Name: "x"})
 	if err == nil {
 		t.Fatal("second Start() on the same port succeeded")
@@ -159,7 +164,7 @@ func freePort(t *testing.T) int {
 func TestServer_RefusesUnspecifiedAddresses(t *testing.T) {
 	for _, host := range []string{"0.0.0.0", "::"} {
 		t.Run(host, func(t *testing.T) {
-			_, err := New(&fakeLibrary{}, &fakeAccess{}, "test", slog.New(slog.DiscardHandler)).
+			_, err := New(&fakeLibrary{}, &fakeAccess{}, &fakeRemote{}, "test", slog.New(slog.DiscardHandler)).
 				Start(context.Background(), app.ServeConfig{Port: 0, Hosts: []netip.Addr{netip.MustParseAddr(host)}})
 			if err == nil || !strings.Contains(err.Error(), "refusing") {
 				t.Fatalf("Start() error = %v, want a refusal to listen on every interface", err)
@@ -183,7 +188,7 @@ func TestServer_PartialBindRollsBack(t *testing.T) {
 	port := freePort(t)
 	unassignable := netip.MustParseAddr("203.0.113.77") // TEST-NET-3: not on any interface here
 
-	_, err := New(&fakeLibrary{}, &fakeAccess{}, "test", slog.New(slog.DiscardHandler)).
+	_, err := New(&fakeLibrary{}, &fakeAccess{}, &fakeRemote{}, "test", slog.New(slog.DiscardHandler)).
 		Start(context.Background(), app.ServeConfig{Port: port, Hosts: []netip.Addr{unassignable}})
 	if err == nil {
 		t.Fatal("Start() succeeded with an address this machine does not have")
@@ -220,5 +225,138 @@ func TestServer_ListensOnLANAddressesOnOnePort(t *testing.T) {
 		if resp.StatusCode != 200 {
 			t.Errorf("GET via %v: status %d", a, resp.StatusCode)
 		}
+	}
+}
+
+func TestBind_RefusesAddressesItShouldNeverListenOn(t *testing.T) {
+	run := startServer(t, context.Background(), &fakeLibrary{}, 0)
+
+	cases := map[string]netip.Addr{
+		"every IPv4 interface": netip.MustParseAddr("0.0.0.0"),
+		"every IPv6 interface": netip.MustParseAddr("::"),
+		"loopback (bound)":     netip.MustParseAddr("127.0.0.1"),
+		"another loopback":     netip.MustParseAddr("127.0.0.2"),
+		"IPv6 loopback":        netip.MustParseAddr("::1"),
+		"no address":           {},
+	}
+	for name, addr := range cases {
+		t.Run(name, func(t *testing.T) {
+			if unbind, err := run.Bind(addr); err == nil {
+				unbind()
+				t.Errorf("Bind(%v) succeeded", addr)
+			}
+		})
+	}
+}
+
+func TestBind_AddsAndRemovesAListenerOnTheServersPort(t *testing.T) {
+	lan, err := netinfo.New().LANAddrs()
+	if err != nil || len(lan) == 0 {
+		t.Skip("no LAN address on this machine to stand in for a tailnet address")
+	}
+	run := startServer(t, context.Background(), &fakeLibrary{}, 0) // not given the LAN address
+	extra := netip.AddrPortFrom(lan[0], run.Addrs()[0].Port())
+	health := "http://" + extra.String() + "/api/health"
+
+	if _, err := http.Get(health); err == nil {
+		t.Fatal("the server answered on an address it was never asked to listen on")
+	}
+
+	unbind, err := run.Bind(lan[0])
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	resp, err := http.Get(health)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("after Bind: %v %v", resp, err)
+	}
+	resp.Body.Close()
+
+	if _, err := run.Bind(lan[0]); err == nil {
+		t.Error("binding the same address twice succeeded")
+	}
+	if got := run.Addrs(); len(got) != 1 {
+		t.Errorf("Addrs() = %v: extra listeners are not part of the server's own addresses", got)
+	}
+
+	unbind()
+	unbind() // safe to repeat
+	client := http.Client{Transport: &http.Transport{DisableKeepAlives: true}, Timeout: 2 * time.Second}
+	if resp, err := client.Get(health); err == nil {
+		resp.Body.Close()
+		t.Fatal("still answering after unbind")
+	}
+	// Loopback is untouched.
+	if resp, err := http.Get(baseURL(run) + "/api/health"); err != nil || resp.StatusCode != 200 {
+		t.Errorf("loopback after unbind: %v %v", resp, err)
+	} else {
+		resp.Body.Close()
+	}
+}
+
+func TestBind_UnbindDropsConnectionsThatCameInThroughIt(t *testing.T) {
+	lan, err := netinfo.New().LANAddrs()
+	if err != nil || len(lan) == 0 {
+		t.Skip("no LAN address on this machine to stand in for a tailnet address")
+	}
+	run := startServer(t, context.Background(), &fakeLibrary{}, 0)
+	unbind, err := run.Bind(lan[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A keep-alive connection through the extra listener, and one through loopback.
+	extraConn, err := net.Dial("tcp", netip.AddrPortFrom(lan[0], run.Addrs()[0].Port()).String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer extraConn.Close()
+	loopConn, err := net.Dial("tcp", run.Addrs()[0].String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loopConn.Close()
+	for _, c := range []net.Conn{extraConn, loopConn} {
+		fmt.Fprintf(c, "GET /api/health HTTP/1.1\r\nHost: x\r\n\r\n")
+		if _, err := bufio.NewReader(c).ReadString('\n'); err != nil {
+			t.Fatalf("no response on %v: %v", c.RemoteAddr(), err)
+		}
+	}
+
+	unbind()
+
+	_ = extraConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := extraConn.Read(make([]byte, 1)); !errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET) {
+		t.Errorf("the tailnet connection survived unbind: read error = %v", err)
+	}
+	// The loopback connection is not ours to drop.
+	_ = loopConn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+	if _, err := loopConn.Read(make([]byte, 1)); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("unbind disturbed an unrelated connection: read error = %v", err)
+	}
+}
+
+func TestBind_ListenersEndWithTheServer(t *testing.T) {
+	lan, err := netinfo.New().LANAddrs()
+	if err != nil || len(lan) == 0 {
+		t.Skip("no LAN address on this machine to stand in for a tailnet address")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	run := startServer(t, ctx, &fakeLibrary{}, 0)
+	if _, err := run.Bind(lan[0]); err != nil {
+		t.Fatal(err)
+	}
+	port := run.Addrs()[0].Port()
+
+	cancel()
+	waitDone(t, run)
+
+	ln, err := net.Listen("tcp", netip.AddrPortFrom(lan[0], port).String())
+	if err != nil {
+		t.Fatalf("the extra listener outlived the server: %v", err)
+	}
+	ln.Close()
+	if _, err := run.Bind(lan[0]); err == nil {
+		t.Error("Bind succeeded on a server that has stopped")
 	}
 }

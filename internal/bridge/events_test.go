@@ -114,3 +114,22 @@ func TestEmitter_LibraryStatusAndSettings(t *testing.T) {
 		t.Errorf("settings payload = %+v, want %+v (and no library path)", dto, want)
 	}
 }
+
+func TestEmitter_RemoteStatusChanged(t *testing.T) {
+	var got []emitted
+	e := newTestEmitter(&got)
+	e.bind(context.Background())
+
+	e.Publish(app.RemoteStatusChanged{Status: app.RemoteStatus{
+		State: server.Running, Provider: "tailscale", URL: "http://den.ts.net:8765", PINSet: true,
+		Live: app.TunnelStatus{State: server.Running},
+	}})
+
+	if len(got) != 1 || got[0].name != "remote:status" {
+		t.Fatalf("emitted = %+v", got)
+	}
+	want := RemoteStatusDTO{State: "running", Provider: "tailscale", URL: "http://den.ts.net:8765", Live: "running", PinSet: true, NeedsSetup: []string{}}
+	if dto, ok := got[0].data[0].(RemoteStatusDTO); !ok || !reflect.DeepEqual(dto, want) {
+		t.Fatalf("payload = %#v, want %#v", got[0].data[0], want)
+	}
+}

@@ -32,10 +32,33 @@ export namespace bridge {
 	        this.image = source["image"];
 	    }
 	}
+	export class LibraryItemDTO {
+	    id: string;
+	    name: string;
+	    relPath: string;
+	    kind: string;
+	    size: number;
+	    modTime: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new LibraryItemDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.relPath = source["relPath"];
+	        this.kind = source["kind"];
+	        this.size = source["size"];
+	        this.modTime = source["modTime"];
+	    }
+	}
 	export class LibraryStatusDTO {
 	    scanning: boolean;
 	    root: string;
 	    error: string;
+	    watching: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new LibraryStatusDTO(source);
@@ -46,6 +69,7 @@ export namespace bridge {
 	        this.scanning = source["scanning"];
 	        this.root = source["root"];
 	        this.error = source["error"];
+	        this.watching = source["watching"];
 	    }
 	}
 	export class LibrarySummaryDTO {
@@ -137,6 +161,106 @@ export namespace bridge {
 		    }
 		    return a;
 		}
+	}
+	export class RemoteFieldDTO {
+	    key: string;
+	    label: string;
+	    help: string;
+	    placeholder: string;
+	    kind: string;
+	    required: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new RemoteFieldDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.label = source["label"];
+	        this.help = source["help"];
+	        this.placeholder = source["placeholder"];
+	        this.kind = source["kind"];
+	        this.required = source["required"];
+	    }
+	}
+	export class RemoteFieldStateDTO {
+	    key: string;
+	    set: boolean;
+	    value: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RemoteFieldStateDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.set = source["set"];
+	        this.value = source["value"];
+	    }
+	}
+	export class RemoteProviderDTO {
+	    id: string;
+	    public: boolean;
+	    fields: RemoteFieldDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RemoteProviderDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.public = source["public"];
+	        this.fields = this.convertValues(source["fields"], RemoteFieldDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RemoteStatusDTO {
+	    state: string;
+	    provider: string;
+	    public: boolean;
+	    url: string;
+	    error: string;
+	    live: string;
+	    pinSet: boolean;
+	    sessions: number;
+	    needsSetup: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RemoteStatusDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.provider = source["provider"];
+	        this.public = source["public"];
+	        this.url = source["url"];
+	        this.error = source["error"];
+	        this.live = source["live"];
+	        this.pinSet = source["pinSet"];
+	        this.sessions = source["sessions"];
+	        this.needsSetup = source["needsSetup"];
+	    }
 	}
 	export class ServerStateDTO {
 	    state: string;

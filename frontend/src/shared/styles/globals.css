@@ -2,11 +2,31 @@
 @import "tw-animate-css";
 
 /*
- * Design tokens. Light is the default; dark follows the OS through
- * prefers-color-scheme, so there is no JS theme state to keep in sync
- * (a manual toggle arrives in v0.2).
+ * Design tokens. Light is the default. With no choice made (data-theme absent)
+ * dark follows the OS through prefers-color-scheme; the Appearance setting puts
+ * data-theme="light" or "dark" on <html> to override it.
+ *
+ * The dark values appear twice below, once behind the media query and once
+ * behind data-theme="dark": CSS cannot share one block between the two. Change
+ * them together.
  */
+
+/* Tailwind's dark: variant follows the same two rules as the tokens. */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    :where(:root:not([data-theme="light"])) & {
+      @slot;
+    }
+  }
+  :where(:root[data-theme="dark"]) & {
+    @slot;
+  }
+}
+
 :root {
+  /* Native controls (menus, scrollbars) follow the OS unless a theme overrides. */
+  color-scheme: light dark;
+
   --foreground: oklch(0.2 0.01 260);
   --muted-foreground: oklch(0.2 0.01 260 / 0.62);
   --primary: oklch(0.58 0.2 258);
@@ -25,7 +45,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --foreground: oklch(0.97 0 0);
     --muted-foreground: oklch(0.97 0 0 / 0.6);
     --primary: oklch(0.66 0.19 258);
@@ -38,6 +58,45 @@
     --glass-ring: rgb(0 0 0 / 0.35);
     --glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.12);
     --glass-shadow: 0 8px 32px rgb(0 0 0 / 0.35);
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --foreground: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.97 0 0 / 0.6);
+  --primary: oklch(0.66 0.19 258);
+  /* Lighter than the light-mode red: the same value is too dim on dark glass. */
+  --destructive: oklch(0.74 0.18 25);
+  --warning: oklch(0.78 0.16 80);
+
+  --glass-surface: rgb(255 255 255 / 0.08);
+  --glass-surface-hover: rgb(255 255 255 / 0.14);
+  --glass-ring: rgb(0 0 0 / 0.35);
+  --glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.12);
+  --glass-shadow: 0 8px 32px rgb(0 0 0 / 0.35);
+}
+
+/*
+ * The native backdrop (macOS vibrancy, Windows Mica) follows the OS and the
+ * page cannot change it, so a theme that disagrees with the OS gets a tint
+ * over the whole window. Without it, near-white glass would sit on a light
+ * backdrop, or dark text on a dark one.
+ */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="dark"] body {
+    background: rgb(22 22 26 / 0.8);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="light"] body {
+    background: rgb(246 246 249 / 0.8);
   }
 }
 

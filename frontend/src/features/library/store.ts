@@ -1,13 +1,25 @@
 import { create } from "zustand";
-import type { LibraryStatus, LibrarySummary } from "@/shared/bridge";
+import type { LibraryItem, LibraryStatus, LibrarySummary } from "@/shared/bridge";
+import type { KindFilter, SortKey } from "./filter";
 
 interface LibraryState {
   /** Null until Go reports a scanned library. */
   summary: LibrarySummary | null;
   /** Null until Go reports. Afterwards: is a scan running, and why did the last one fail. */
   status: LibraryStatus | null;
+  /** Every file in the library, as of the last "library:scanned". */
+  items: LibraryItem[];
   /** False until the first answer from Go, so the UI doesn't flash onboarding. */
   hydrated: boolean;
+
+  /** How the Library screen shows `items`: view state, not Go's. */
+  kind: KindFilter;
+  query: string;
+  sort: SortKey;
+  setKind: (kind: KindFilter) => void;
+  setQuery: (query: string) => void;
+  setSort: (sort: SortKey) => void;
+  setItems: (items: LibraryItem[]) => void;
   /** A "library:scanned" event arrived: always the newest truth. */
   applyScanned: (summary: LibrarySummary) => void;
   /** A "library:status" event arrived: always the newest truth. */
@@ -20,7 +32,15 @@ interface LibraryState {
 export const useLibraryStore = create<LibraryState>()((set) => ({
   summary: null,
   status: null,
+  items: [],
   hydrated: false,
+  kind: "all",
+  query: "",
+  sort: "name",
+  setKind: (kind) => set({ kind }),
+  setQuery: (query) => set({ query }),
+  setSort: (sort) => set({ sort }),
+  setItems: (items) => set({ items }),
   applyScanned: (summary) => set({ summary }),
   applyStatus: (status) => set({ status }),
   hydrate: (summary, status) =>
@@ -32,4 +52,4 @@ export const useLibraryStore = create<LibraryState>()((set) => ({
 }));
 
 /** The status to show while Go has not reported one. */
-export const idleStatus: LibraryStatus = { scanning: false, root: "", error: "" };
+export const idleStatus: LibraryStatus = { scanning: false, root: "", error: "", watching: false };

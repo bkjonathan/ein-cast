@@ -9,10 +9,16 @@ type healthJSON struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`
 	Name    string `json:"name"`
+	// Thumbnails tells the player page whether /thumb/{id} can make pictures, so
+	// it does not ask for dozens that would all be refused.
+	Thumbnails bool `json:"thumbnails"`
 }
 
 func (a *api) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, healthJSON{Status: "ok", Version: a.version, Name: a.name})
+	writeJSON(w, http.StatusOK, healthJSON{
+		Status: "ok", Version: a.version, Name: a.name,
+		Thumbnails: a.thumbs != nil && a.thumbs.Available(),
+	})
 }
 
 // handleNotFound keeps even unknown routes in the API's JSON error shape.

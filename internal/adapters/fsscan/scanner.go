@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"eincast/internal/domain/media"
 )
@@ -27,9 +26,7 @@ func New(log *slog.Logger) *Scanner {
 // within each directory).
 //
 // It deliberately skips:
-//   - hidden entries (name starts with "."), which also covers macOS "._*"
-//     AppleDouble files and ".DS_Store";
-//   - well-known OS/NAS metadata folders (see isSystemName);
+//   - hidden entries and well-known OS/NAS metadata (see media.Ignored);
 //   - symlinks, so a link inside the library cannot expose files outside it;
 //   - files with an unsupported extension.
 //
@@ -67,7 +64,7 @@ func (s *Scanner) Scan(ctx context.Context, root string) ([]media.Item, error) {
 		if path == absRoot {
 			return nil
 		}
-		if skipName(d.Name()) {
+		if media.Ignored(d.Name()) {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
@@ -119,20 +116,4 @@ func (s *Scanner) itemFor(root, path string, d fs.DirEntry) (media.Item, bool) {
 		Size:    info.Size(),
 		ModTime: info.ModTime(),
 	}, true
-}
-
-func skipName(name string) bool {
-	return strings.HasPrefix(name, ".") || isSystemName(name)
-}
-
-// isSystemName matches metadata that is not dot-prefixed: Windows, macOS
-// archive and Synology NAS leftovers. Case-insensitive because Windows is.
-func isSystemName(name string) bool {
-	switch strings.ToLower(name) {
-	case "thumbs.db", "desktop.ini", "$recycle.bin", "system volume information",
-		"__macosx", "@eadir":
-		return true
-	default:
-		return false
-	}
 }

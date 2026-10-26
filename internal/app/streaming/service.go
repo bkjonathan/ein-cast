@@ -26,6 +26,7 @@ type Service struct {
 	net    app.NetInfo
 	events app.EventPublisher
 	log    *slog.Logger
+	public app.PublicAccess // nil when remote access is not wired in
 
 	machine *server.Machine
 
@@ -45,9 +46,22 @@ type endpoints struct {
 	lanURLs  []string
 }
 
+// ServiceOption customizes a Service.
+type ServiceOption func(*Service)
+
+// WithPublicAccess makes the server withdraw public access before it stops or
+// after it dies, so a tunnel never outlives the server it points at.
+func WithPublicAccess(p app.PublicAccess) ServiceOption {
+	return func(s *Service) { s.public = p }
+}
+
 // NewService builds a Service from its ports.
-func NewService(web app.WebServer, net app.NetInfo, events app.EventPublisher, log *slog.Logger) *Service {
-	return &Service{web: web, net: net, events: events, log: log.With(slog.String("source", "server")), machine: server.NewMachine()}
+func NewService(web app.WebServer, net app.NetInfo, events app.EventPublisher, log *slog.Logger, opts ...ServiceOption) *Service {
+	s := &Service{web: web, net: net, events: events, log: log.With(slog.String("source", "server")), machine: server.NewMachine()}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Start launches the server. ctx bounds the server's whole lifetime: cancelling
@@ -107,6 +121,7 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	stopCtx, cancel := context.WithTimeout(ctx, stopTimeout)
 	defer cancel()
+	s.withdrawPublicAccess(stopCtx) // the tunnel goes first, then the server behind it
 	if run != nil {
 		if err := run.Stop(stopCtx); err != nil {
 			s.clearEndpoints()
@@ -117,6 +132,17 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	s.log.Info("server stopped")
 	return s.transitionIdle()
+}
+
+// Local hands out the running server so a tunnel can attach to it. It fails
+// with app.ErrServerNotRunning in every state but Running.
+func (s *Service) Local() (app.LocalServer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.machine.Snapshot().State != server.Running || s.current == nil {
+		return nil, app.ErrServerNotRunning
+	}
+	return s.current, nil
 }
 
 // Status returns the current lifecycle state. It never blocks on a running
@@ -158,8 +184,23 @@ func (s *Service) watch(run app.RunningServer, gen uint64) {
 		cause = errors.New("server stopped unexpectedly")
 	}
 	s.log.Error("server died", slog.String("error", cause.Error()))
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	s.withdrawPublicAccess(ctx)
 	s.clearEndpoints()
 	s.fail(cause)
+}
+
+// withdrawPublicAccess takes any tunnel down. A failure is logged, not returned:
+// the server must still stop, and a stopped server leaves a tunnel pointing at
+// nothing.
+func (s *Service) withdrawPublicAccess(ctx context.Context) {
+	if s.public == nil {
+		return
+	}
+	if err := s.public.Disable(ctx); err != nil {
+		s.log.Error("could not turn off remote access", slog.String("error", err.Error()))
+	}
 }
 
 func (s *Service) transition(to server.State) error {

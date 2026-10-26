@@ -21,6 +21,8 @@ type Library interface {
 type api struct {
 	lib     Library
 	access  Access
+	remote  Remote
+	thumbs  Thumbnails
 	version string
 	name    string
 	log     *slog.Logger
@@ -36,16 +38,19 @@ func (a *api) routes() http.Handler {
 	mux.HandleFunc("GET /api/library", a.handleLibrary)
 	mux.HandleFunc("GET /api/library/{id}", a.handleLibraryItem)
 	mux.HandleFunc("GET /stream/{id}", a.handleStream)
+	mux.HandleFunc("GET /thumb/{id}", a.handleThumbnail)
 	mux.HandleFunc("GET /playlist.m3u", a.handlePlaylist)
+	mux.HandleFunc("POST /login", a.handleLogin)
 	mux.HandleFunc("/", a.handleNotFound)
 	return mux
 }
 
 // handler is the routes wrapped in the middleware chain, outermost first:
 // request ID, Server header, security headers, access log, panic recovery,
-// Host check, CORS, access token. The Host check precedes everything that
-// reads data; CORS precedes the token so a browser's preflight (which cannot
-// carry credentials) is answered before authentication is demanded.
+// Host check, CORS, access control (LAN token or tunnel sign-in). The Host check
+// precedes everything that reads data; CORS precedes access control so a
+// browser's preflight (which cannot carry credentials) is answered before
+// authentication is demanded.
 func (a *api) handler() http.Handler {
 	return chain(a.routes(),
 		requestID,
@@ -53,7 +58,7 @@ func (a *api) handler() http.Handler {
 		securityHeaders,
 		accessLog(a.log),
 		recoverer(a.log),
-		hostGuard,
+		a.hostGuard,
 		corsLAN,
 		a.requireAccess,
 	)

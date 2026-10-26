@@ -1,3 +1,4 @@
+import { AppearanceSettings } from "@/features/appearance";
 import { LibraryFolder, useLibraryStore } from "@/features/library";
 import { GlassPanel } from "@/shared/ui/glass";
 import { AccessSettings } from "./AccessSettings";
@@ -11,6 +12,7 @@ export function SettingsView() {
     <div className="flex h-full flex-col gap-3 overflow-y-auto">
       <ServerSettings />
       <AccessSettings />
+      <AppearanceSettings />
       {root && (
         <GlassPanel className="flex flex-col gap-3 p-6">
           <h2 className="text-lg font-semibold">Library folder</h2>

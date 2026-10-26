@@ -18,6 +18,7 @@ const (
 	EventLogLine        = "log:line"
 	EventLibraryStatus  = "library:status"
 	EventSettings       = "settings:changed"
+	EventRemote         = "remote:status"
 )
 
 // Emitter implements app.EventPublisher by forwarding events to the frontend.
@@ -72,6 +73,8 @@ func (e *Emitter) Publish(ev app.Event) {
 		e.emit(ctx, EventLibraryStatus, toLibraryStatusDTO(ev.Status))
 	case app.SettingsChanged:
 		e.emit(ctx, EventSettings, toSettingsDTO(ev.View))
+	case app.RemoteStatusChanged:
+		e.emit(ctx, EventRemote, toRemoteStatusDTO(ev.Status))
 	case app.ServerStateChanged:
 		e.emit(ctx, EventServerState, toServerStateDTO(ev.Status))
 	default:

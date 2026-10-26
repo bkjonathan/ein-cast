@@ -118,6 +118,14 @@ func TestCORSLAN(t *testing.T) {
 		{"http://169.254.1.1", true},
 		{"http://eincast.local", true},
 		{"https://MacBook.LOCAL", true},
+		{"http://100.101.102.103:8765", true}, // tailnet address
+		{"http://100.64.0.1", true},           // bottom of the tailnet range
+		{"http://100.127.255.254", true},      // top of it
+		{"http://den.tail1234.ts.net:8765", true},
+		{"http://100.63.255.255", false}, // just below the range
+		{"http://100.128.0.0", false},    // just above it
+		{"http://evil.ts.net.example.com", false},
+		{"https://ts.net.evil.com", false},
 		{"https://evil.example.com", false},
 		{"http://8.8.8.8", false},
 		{"http://192.168.1.20.evil.com", false},
@@ -186,7 +194,7 @@ func TestClientIP(t *testing.T) {
 	tests := []struct{ remote, xff, want string }{
 		{"192.168.1.9:51234", "", "192.168.1.9"},
 		{"[fe80::1]:80", "", "fe80::1"},
-		{"192.168.1.9:51234", "1.2.3.4", "192.168.1.9"}, // forwarding headers are not trusted
+		{"192.168.1.9:51234", "1.2.3.4", "192.168.1.9"}, // not trusted from a LAN peer (loopback cases: remote_test.go)
 		{"garbage", "", "garbage"},
 	}
 	for _, tt := range tests {

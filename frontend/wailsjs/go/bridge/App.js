@@ -6,8 +6,28 @@ export function AppInfo() {
   return window['go']['bridge']['App']['AppInfo']();
 }
 
+export function ChooseFile(arg1) {
+  return window['go']['bridge']['App']['ChooseFile'](arg1);
+}
+
 export function ChooseFolder() {
   return window['go']['bridge']['App']['ChooseFolder']();
+}
+
+export function ClearRemotePIN() {
+  return window['go']['bridge']['App']['ClearRemotePIN']();
+}
+
+export function ClearRemoteProviderField(arg1, arg2) {
+  return window['go']['bridge']['App']['ClearRemoteProviderField'](arg1, arg2);
+}
+
+export function DisableRemote() {
+  return window['go']['bridge']['App']['DisableRemote']();
+}
+
+export function EnableRemote(arg1) {
+  return window['go']['bridge']['App']['EnableRemote'](arg1);
 }
 
 export function GetLibraryStatus() {
@@ -22,12 +42,32 @@ export function GetLogHistory() {
   return window['go']['bridge']['App']['GetLogHistory']();
 }
 
+export function GetRemoteProviderConfig(arg1) {
+  return window['go']['bridge']['App']['GetRemoteProviderConfig'](arg1);
+}
+
+export function GetRemoteStatus() {
+  return window['go']['bridge']['App']['GetRemoteStatus']();
+}
+
 export function GetServerState() {
   return window['go']['bridge']['App']['GetServerState']();
 }
 
 export function GetSettings() {
   return window['go']['bridge']['App']['GetSettings']();
+}
+
+export function GetThumbnail(arg1) {
+  return window['go']['bridge']['App']['GetThumbnail'](arg1);
+}
+
+export function ListLibrary() {
+  return window['go']['bridge']['App']['ListLibrary']();
+}
+
+export function ListRemoteProviders() {
+  return window['go']['bridge']['App']['ListRemoteProviders']();
 }
 
 export function RescanLibrary() {
@@ -38,12 +78,28 @@ export function RotateAccessToken() {
   return window['go']['bridge']['App']['RotateAccessToken']();
 }
 
+export function SetRemotePIN(arg1) {
+  return window['go']['bridge']['App']['SetRemotePIN'](arg1);
+}
+
+export function SetRemoteProviderField(arg1, arg2, arg3) {
+  return window['go']['bridge']['App']['SetRemoteProviderField'](arg1, arg2, arg3);
+}
+
+export function SetWindowTheme(arg1) {
+  return window['go']['bridge']['App']['SetWindowTheme'](arg1);
+}
+
 export function StartServer() {
   return window['go']['bridge']['App']['StartServer']();
 }
 
 export function StopServer() {
   return window['go']['bridge']['App']['StopServer']();
+}
+
+export function ThumbnailsAvailable() {
+  return window['go']['bridge']['App']['ThumbnailsAvailable']();
 }
 
 export function UpdateSettings(arg1) {

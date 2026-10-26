@@ -122,6 +122,11 @@ func newFixture(t *testing.T) *fixture {
 
 func newFixtureWith(t *testing.T, access Access) *fixture {
 	t.Helper()
+	return newFixtureFull(t, access, &fakeRemote{})
+}
+
+func newFixtureFull(t *testing.T, access Access, remote Remote) *fixture {
+	t.Helper()
 	root := t.TempDir()
 
 	movieBytes := make([]byte, 10_000)
@@ -143,7 +148,7 @@ func newFixtureWith(t *testing.T, access Access) *fixture {
 	log := slog.New(slog.NewJSONHandler(f.logs, nil))
 	// Build through the real constructor so the test sees what production logs,
 	// including the source=http tag.
-	a := New(f.lib, access, "1.2.3", log).newAPI(app.ServeConfig{Name: "Den"})
+	a := New(f.lib, access, remote, "1.2.3", log).newAPI(app.ServeConfig{Name: "Den"})
 	f.srv = httptest.NewServer(a.handler())
 	t.Cleanup(f.srv.Close)
 	return f
@@ -578,5 +583,13 @@ func TestPlayerJSNeverInjectsHTML(t *testing.T) {
 		if bytes.Contains(src, []byte(banned)) {
 			t.Errorf("app.js uses %q, which can turn a file name into markup or script", banned)
 		}
+	}
+}
+
+func TestPlayerPage_SendsTheHeaderThatSkipsNgroksWarningPage(t *testing.T) {
+	f := newFixture(t)
+	body := string(readBody(t, f.get("/static/app.js")))
+	if !strings.Contains(body, "'ngrok-skip-browser-warning': '1'") {
+		t.Error("the player page's requests do not carry ngrok-skip-browser-warning: behind a free ngrok address the library would not load")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -18,11 +19,14 @@ import (
 // whichever interface (LAN IP, mDNS name, tunnel) they came through. Go's
 // server already rejects Host values with control characters.
 func (a *api) handlePlaylist(w http.ResponseWriter, r *http.Request) {
-	base := "http://" + r.Host
-	// When access is protected, entries carry the token they were requested
-	// with: VLC and TV players do not keep cookies.
+	base := requestScheme(r) + "://" + r.Host
+	// VLC and TV players do not keep cookies, so entries carry their own
+	// credential. On the home network that is the token the playlist was
+	// requested with. Through a tunnel it is a signed link per item that expires,
+	// never the PIN session or the LAN token.
+	tunnel := a.viaTunnel(r)
 	suffix := ""
-	if token := tokenFrom(r.Context()); token != "" {
+	if token := tokenFrom(r.Context()); token != "" && !tunnel {
 		suffix = "?" + queryParam + "=" + url.QueryEscape(token)
 	}
 
@@ -35,7 +39,14 @@ func (a *api) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 		b.WriteString("#EXTINF:-1,")
 		b.WriteString(playlistTitle(it.Name))
 		b.WriteByte('\n')
-		b.WriteString(base + "/stream/" + string(it.ID) + suffix)
+		b.WriteString(base + "/stream/" + string(it.ID))
+		if tunnel {
+			link := a.remote.SignStream(it.ID)
+			b.WriteString("?" + expParam + "=" + strconv.FormatInt(link.Expires.Unix(), 10) +
+				"&" + sigParam + "=" + link.Sig)
+		} else {
+			b.WriteString(suffix)
+		}
 		b.WriteByte('\n')
 	}
 

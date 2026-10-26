@@ -79,7 +79,7 @@ describe("onEvent", () => {
   });
 
   it.each([
-    ["library:status", { scanning: true, root: "/m", error: "" }],
+    ["library:status", { scanning: true, root: "/m", error: "", watching: false }],
     ["settings:changed", { port: 9000, name: "Den", requireToken: true, accessToken: "t", tokenPersisted: true }],
   ] as const)("delivers %s payloads", (name, payload) => {
     let deliver: (payload: unknown) => void = () => undefined;
@@ -92,5 +92,27 @@ describe("onEvent", () => {
     deliver(payload);
     expect(runtime.EventsOn).toHaveBeenLastCalledWith(name, expect.any(Function));
     expect(handler).toHaveBeenCalledWith(payload);
+  });
+
+  it("decodes remote:status payloads and rejects unknown states", () => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_n: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+    const handler = vi.fn();
+    onEvent("remote:status", handler);
+
+    const payload = {
+      state: "starting", provider: "tailscale", public: false, url: "", error: "",
+      live: "idle", pinSet: false, sessions: 0, needsSetup: ["ngrok"],
+    };
+    deliver(payload);
+    expect(runtime.EventsOn).toHaveBeenLastCalledWith("remote:status", expect.any(Function));
+    expect(handler).toHaveBeenCalledWith(payload);
+
+    expect(() => deliver({ ...payload, state: "paused" })).toThrow();
+    expect(() => deliver({ ...payload, live: "paused" })).toThrow();
+    expect(handler).toHaveBeenCalledOnce();
   });
 });

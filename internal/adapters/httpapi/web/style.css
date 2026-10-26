@@ -37,6 +37,11 @@ ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
 button.item { display: flex; justify-content: space-between; gap: 1rem; width: 100%; text-align: left; }
 button.item:focus-visible, .button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 button.item[aria-current="true"] { border-color: var(--accent); }
-.item .name { overflow-wrap: anywhere; }
+.item .name { overflow-wrap: anywhere; flex: 1; text-align: left; }
 .item .size { color: var(--muted); white-space: nowrap; }
+/* Beats the page-wide "video, img" rule, which is meant for the big viewer. */
+button.item img.thumb {
+  flex: none; width: 3.5rem; height: 3.5rem; max-height: none; border-radius: 8px; object-fit: cover; background: var(--line);
+}
+button.item { align-items: center; }
 [hidden] { display: none !important; }

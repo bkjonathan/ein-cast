@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { LibraryStats, useLibraryStore, useLibrarySync } from "@/features/library";
+import { useWindowTheme } from "@/features/appearance";
+import { LibraryView, useLibraryStore, useLibrarySync } from "@/features/library";
 import { LogsView, useLogSync } from "@/features/logs";
 import { OnboardingScreen, ScanningScreen } from "@/features/onboarding";
+import { RemoteView, useRemoteSync } from "@/features/remote";
 import { useServerSync } from "@/features/server";
 import { SettingsView, useSettingsSync } from "@/features/settings";
 import { DashboardView } from "./DashboardView";
@@ -18,6 +20,8 @@ export function App() {
   useServerSync();
   useLogSync();
   useSettingsSync();
+  useRemoteSync();
+  useWindowTheme();
 
   const hydrated = useLibraryStore((s) => s.hydrated);
   const hasLibrary = useLibraryStore((s) => s.summary !== null);
@@ -25,7 +29,7 @@ export function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <TitleBar name={info?.name ?? "EinCast"} />
+      <TitleBar name={info?.name ?? "EinCast"} onOpenRemote={() => setActive("remote")} />
       <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3">
         {!hydrated ? null : !hasLibrary ? (
           // No library yet: either the first run, or the last folder is still
@@ -51,7 +55,9 @@ function ActiveView({ view }: { view: View }) {
     case "dashboard":
       return <DashboardView />;
     case "library":
-      return <LibraryStats />;
+      return <LibraryView />;
+    case "remote":
+      return <RemoteView />;
     case "logs":
       return <LogsView />;
     case "settings":

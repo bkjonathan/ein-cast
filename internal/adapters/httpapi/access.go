@@ -62,14 +62,28 @@ func credentials(r *http.Request) []credential {
 	return out
 }
 
-// requireAccess enforces the access token on everything except the player
+// requireAccess picks the rule a request must meet: the PIN sign-in for
+// requests that came through a tunnel, the LAN access token for the rest.
+func (a *api) requireAccess(next http.Handler) http.Handler {
+	lan := a.requireToken(next)
+	tunnel := a.requireSession(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.viaTunnel(r) {
+			tunnel.ServeHTTP(w, r)
+			return
+		}
+		lan.ServeHTTP(w, r)
+	})
+}
+
+// requireToken enforces the LAN access token on everything except the player
 // page's static files (which contain nothing private).
 //
 // Browsers arrive through the QR code (/?t=…). The first response sets a cookie
 // and redirects to "/", so the token does not stay in the address bar or the
 // history. Players like VLC cannot hold cookies, so playlist entries carry the
 // token in their own URL.
-func (a *api) requireAccess(next http.Handler) http.Handler {
+func (a *api) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !a.access.Required() || strings.HasPrefix(r.URL.Path, "/static/") {
 			next.ServeHTTP(w, r)
@@ -143,16 +157,17 @@ func (a *api) deny(w http.ResponseWriter, r *http.Request, offered bool) {
 
 // hostGuard rejects requests whose Host header is not a way of reaching this
 // machine on the local network: an IP address, a single-label name ("my-pc",
-// "localhost"), or an mDNS name ("*.local").
+// "localhost"), or an mDNS name ("*.local"). The one other name it accepts is
+// the address of the tunnel that is online right now.
 //
 // This blocks DNS rebinding. A malicious website can make its own domain
 // resolve to the LAN address of this server, and the visitor's browser would
 // then let that page read the library, because it is "the same site" to the
 // browser. Such requests arrive with Host: evil.example, which a public domain
 // name can never satisfy.
-func hostGuard(next http.Handler) http.Handler {
+func (a *api) hostGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isLocalHost(r.Host) {
+		if !isLocalHost(r.Host) && !a.remote.HostAllowed(r.Host) {
 			writeError(w, http.StatusForbidden, codeForbidden, "unexpected Host header")
 			return
 		}

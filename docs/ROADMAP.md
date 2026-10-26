@@ -6,8 +6,8 @@ instead of adding it early.
 | Version | Features | Status |
 |---|---|---|
 | **v0.1 MVP** | Pick folder, scan, LAN HTTP server, device player page, M3U playlist, QR connect, live logs, glass UI | In progress — Phases 1–6 done; Phase 7 is the remote-access phase (v0.3) |
-| v0.2 | ~~Settings persistence~~ and ~~manual rescan~~ (pulled forward into Phase 6), file watcher (`fsnotify`), library search/filter, thumbnails (ffmpeg), dark/light toggle | Partly done |
-| v0.3 Remote access | Tunnel providers (Tailscale, Cloudflare quick/named, ngrok), PIN auth, signed stream links, public-access badge, remote session list | |
+| v0.2 | Settings persistence and manual rescan (Phase 6), file watcher (`fsnotify`), library search/filter, thumbnails (ffmpeg), dark/light toggle | Done in Phase 8 (see below) |
+| v0.3 Remote access | Tunnel providers (Tailscale, Cloudflare quick/named, ngrok), PIN auth, signed stream links, public-access badge, remote session list | In progress — see phase 7 steps below |
 | v0.4 Playback | ffmpeg HLS transcoding, subtitles (.srt → WebVTT), resume position per device | |
 | v0.5 TV | DLNA/UPnP, mDNS `eincast.local` | |
 | v1.0 | Multiple libraries, user profiles, auto-update, signed + notarized builds | |
@@ -20,16 +20,39 @@ instead of adding it early.
 4. **Log pipeline** — done
 5. **Connect** — done
 6. **Hardening** — done
-7. Remote access (v0.3)
+7. Remote access (v0.3), in four steps, each ending with a review:
+   - **7a** — `Tunnel` port and registry, `remote.Service`, PIN, sessions, signed links, rate limiting, forwarding-header trust, Host check: **done** (no provider yet)
+   - **7b** — Tailscale provider (extra tailnet listener), bridge methods, Remote screen, Connect-card tab and "Public access ON" badge: **done**
+   - **7c** — `procsup` and the Cloudflare quick tunnel: **done**, with the open points listed under "Seams" below
+   - **7d** — Cloudflare named tunnel, ngrok, keychain-held provider settings, and the "locate cloudflared…" picker: **done**
+
+## v0.2 phase
+
+8. **Library polish** — one phase, three steps:
+   - **8a** — Library item list with kind chips, search and sort; System/Light/Dark appearance (ADR 0016): **done**
+   - **8b** — `fsnotify` folder watcher with quiet, debounced rescans (ADR 0014): **done**
+   - **8c** — On-demand ffmpeg thumbnails in the desktop list and on the player page, disk cache (ADR 0015): **done**
 
 ## Seams needed later
 
-- **Secret redaction (Phase 7):** nothing secret is logged today. When tunnel tokens and PINs exist, add a redacting `slog.Attr` helper and keep secrets out of log calls; `logbus.Handler` deliberately does not try to scrub text after the fact.
+- **Watcher on very large libraries (8b):** on macOS every watched file costs a file handle (kqueue). When the system refuses, nothing is watched and the Library screen says so; Rescan still works. If that is common, the seam is a polling `FolderWatcher` behind the same port (a stat-walk every few seconds) used as the fallback.
+- **Watcher on network shares (8b):** some SMB/NFS mounts deliver no change notifications, and nothing tells EinCast. The folder shows "Watching" and never signals. A "check every N minutes" setting is the seam.
+- **Watching can't be turned off (8b):** no setting yet; `library.WithWatcher` is the single place to make it optional.
+- **ffmpeg location (8c):** found on `PATH` and in the usual install folders only. A "Locate ffmpeg…" setting like cloudflared's is the seam if people report it missing.
+- **Thumbnail warm-up (8c):** pictures are made when first looked at; a background pass over a freshly scanned library (low priority, one at a time) would make the first scroll instant. The service's `Get` is the seam.
+- **Thumbnail queue (8c):** requests that wait behind slow files each hold their caller for up to the 30 s timeout. A bounded queue that answers "busy" would let a page give up sooner.
+- **ffmpeg and exotic formats (8c):** HEIC/AVIF and unusual containers depend on the installed ffmpeg's build. Nothing was tested beyond what the development machine's ffmpeg 8 decodes (H.264/MP4, PNG, WAV, MP3 with cover art).
+- **Thumbnails never seen in the running window (8c):** the row layout and the player page grid are covered by type-checks, logic tests and HTTP tests, not by looking at them. Give them a visual pass before v0.3 ships, with the Library list, the Appearance setting and the tinted forced themes.
+- **Forced theme on macOS (8a):** a theme that disagrees with the OS is a tint over the OS vibrancy, because Wails cannot change the macOS backdrop at runtime (ADR 0016). Windows follows the choice natively.
+- **Library list is flat (8a):** it shows each file with its folder as a caption. A folder tree or grouping by folder is the seam if libraries turn out to be deeply nested.
+- **Search is a substring match (8a):** over the path inside the library, every word must match. Fuzzy matching or searching metadata (titles, tags) would need a `Metadata` port.
+
+- **Secret redaction (7a, done):** `app.Secret` prints `[redacted]` through slog and fmt. Wrap tunnel tokens in it as providers arrive (7c, 7d); `logbus.Handler` still does not scrub text after the fact.
 - **Log gap marker (optional):** `Seq` already reveals dropped lines; the viewer does not yet render a "N lines dropped" row.
 - **Log level control (Phase 6):** the console handler is fixed at Info and the UI sees Debug and up. A setting can raise or lower the console level without touching `logbus`.
 
-- **Rate limiting (Phase 7):** the LAN token is 192 bits and needs none; the PIN for public tunnels does (token bucket per IP, lockout). The `requireAccess` middleware is where it goes.
-- **Short-lived signed stream links (Phase 7):** playlists currently embed the long-lived token so VLC can play. Signed, expiring `?sig=&exp=` links for tunnels replace that for public access.
+- **Rate limiting (7a, done):** per-address and global token buckets guard `POST /login` (ADR 0008). The LAN token is 192 bits and needs none.
+- **Short-lived signed stream links (7a, done):** playlists served through a tunnel carry per-item `?exp=&sig=` links that expire after 6 hours. On the home network they still carry the LAN token.
 - **Token expiry:** the cookie lasts 30 days and the token until replaced. A "sign out all devices" action is the existing token rotation.
 - **Windows file attributes:** the scanner still skips by name only (dot-files and known system names), not the Windows "hidden" attribute.
 - **Cross-platform tests:** `scripts/check-cross.sh` proves compilation for macOS and Windows from one machine; behaviour on Windows is checked only by `.github/workflows/ci.yml`, which has not run yet because nothing is pushed.
@@ -38,12 +61,28 @@ instead of adding it early.
 - **Player page on old TVs:** `app.js` uses `fetch`, `async/await`, template-free string concatenation and `replaceChildren`. A very old smart-TV browser may need a lighter fallback; test on real devices before v1.0.
 - **Settings (Phase 6):** `StartServer()` uses `streaming.NewConfig()` defaults (port 8765, name "EinCast"). Port and name come from persisted settings later; `Config` and its options are already the seam.
 - **Player page (Phase 5):** `GET /` serves a placeholder string; the real page goes in `adapters/httpapi/web` via `embed.FS`.
-- **Forwarded headers (Phase 7):** the access log uses the TCP peer address and ignores `X-Forwarded-For` / `CF-Connecting-IP` until requests are known to come from a tunnel's loopback connection.
-- **Tailscale CORS (Phase 7):** `isLANOrigin` does not yet accept the 100.64.0.0/10 range.
+- **Forwarded headers (7a, done):** `clientIP` honours `CF-Connecting-IP` / the last `X-Forwarded-For` entry only when the TCP peer is loopback. Assumes one proxy hop; revisit if a provider chains proxies.
+- **Tailscale CORS, listener, remote status in the UI (7b, done):** `isLANOrigin` accepts `100.64.0.0/10` and `*.ts.net`; `LocalServer.Bind` adds the tailnet listener while Tailscale is on (ADR 0012); the bridge exposes `GetRemoteStatus`, `ListRemoteProviders`, `EnableRemote`, `DisableRemote`, `SetRemotePIN`, `ClearRemotePIN` and the `remote:status` event.
+- **Tailscale not testable here (7b):** the provider was written against Tailscale's documented `ipnstate.Status` fields and tested with fixtures and a stub CLI, not a live node (none was installed on the development machine). Before relying on it: run EinCast on a machine with Tailscale, turn it on, and open the address from a second tailnet device. If the field names ever change, `status.go` is the only place to fix.
+- **ACL and firewall blind spot (7b):** a Tailscale ACL or the OS firewall can block the port while EinCast shows a working-looking address. If it proves common, add a hint on the Remote screen.
+- **UI never rendered in a window (7b):** the Remote screen and Connect tab are covered by type-checks, logic tests and server-render smoke tests, not by looking at them in the running app. Give them a visual pass (spacing, the radio cards, the title-bar badge) before v0.3.
+- **Playlist over a public address (7b):** a player cannot sign in with a PIN, so the Connect card shows no bare playlist link for public sources; the person signs in on the player page and downloads the playlist there (links valid six hours). A friendlier route (a one-time link generated in the app) can come later.
+- **Tunnel death (7c, done):** `remote.Service` polls `Tunnel.Status()` once a second per run, follows address changes, and takes remote access down when a provider gives up (ADR 0007). A `Done()` channel on the port would make it instant; not needed yet.
+- **Quick tunnel never run against the real cloudflared (7c):** none is installed on the development machine. The output parser is written to the documented command and tested against realistic banners, hostile lines and a stub script, and the whole path (supervisor, provider, service, HTTP) is tested end to end with a stub. Two things are therefore unverified: (1) the exact banner wording of the current cloudflared; (2) whether an existing `~/.cloudflared/config.yml` stops `cloudflared tunnel --url` from creating a quick tunnel (reports exist; the docs say nothing). If it does, the fix is in one place, the `Args` in `quick.go` (for example an explicit empty `--config`). Before v0.3: run it once for real.
+- **"Locate cloudflared…" picker (7d, done):** an optional setting shared by both Cloudflare tunnels, with a native file dialog (`ChooseFile`). A saved location that stops working is an error, never silently replaced by another program.
+- **Named tunnel and ngrok never run for real (7d):** like the quick tunnel, neither was run against its real service (no Cloudflare account, ngrok account or `cloudflared` available). What is verified: the named tunnel's "up" line, `Registered tunnel connection` (Info level, from Cloudflare's source), and that `cloudflared` reads `TUNNEL_TOKEN` from the environment (Cloudflare's own Docker examples); ngrok's API from its published v2.4.0 source. What is not: that a real token starts a real tunnel, that ngrok's `agent.Connect` returns only once signed in, and the exact wording of its authentication errors (the "did not accept the authtoken" hint matches on `authentication failed`, `ERR_NGROK_105` and the word authtoken). One real run of each before v0.3.
+- **Named tunnel needs the port to match (7d):** the origin address lives in the Cloudflare dashboard, not in EinCast. If the server's port changes, the dashboard must change with it, and nothing detects a mismatch (the tunnel comes up and serves errors). The setup form says so. A check that requests through the tunnel actually reach this server is the seam.
+- **Named tunnel is "up" on the first connection (7d):** `cloudflared` registers up to four connections; the first one flips the status to Running. If all drop but the process stays alive, the status stays Running.
+- **Measured throughput (7c, not built):** the brief asks for the remote panel to show measured upload throughput. The Remote screen shows a standing note about upload speed instead. Measuring needs per-request byte counts from tunnelled requests, which the access log already records; summing them over a window is the seam.
+- **Quick tunnel limits (7c):** Cloudflare documents 200 in-flight requests per quick tunnel (more get `429`), no Server-Sent Events, and no uptime guarantee. A player that opens many parallel ranges could meet the first. The terms-of-service notice is shown once per provider before it can be turned on.
+- **Notice memory is per browser profile (7c):** "I understand" is remembered in the webview's local storage, not in Go settings, since it is a courtesy and not a security control. Clearing the app's web data shows it again.
+- **Sign out one device / list sessions (later in v0.3):** the session registry already holds the client address and expiry per session; the service exposes only a count. A revoke-by-id method is the seam.
+- **ngrok's free plan (7d):** a very small data allowance and a browser warning page. The player page sends `ngrok-skip-browser-warning` on its requests; the first visit to the address in a browser can still show ngrok's page, and the notice says the plan is for testing. ngrok's SDK logging is switched off, so its own diagnostics are not in the log; errors and connection changes are.
+- **Dependencies (7d):** the ngrok SDK brought `muxado`, `protobuf` and a few others, and raised `x/net`, `x/sys`, `x/text` and `x/crypto`. All tests and the macOS and Windows builds pass with them.
+- **Local browser while a tunnel is up:** the owner's own browser at `http://localhost:…` must enter the PIN while a public tunnel runs (ADR 0008, point 3). Revisit if that annoys in practice.
 
 - `Transcoder` port (v0.4) — not added until transcoding starts.
 - Windows title bar: Phase 1 keeps the native frame on Windows (Mica backdrop only). A frameless window needs custom min/max/close controls; decide in Phase 6 when the cross-platform build is checked.
 - Multiple libraries (v1.0): `media.NewID` hashes only the relative path, so the same relative path in two roots collides. Add a library identifier to the hash input then (ADR 0005).
 - Windows "hidden" file attribute: the scanner skips dot-prefixed and well-known system names only. Honouring the Windows hidden attribute needs a build-tagged helper; decide in Phase 6.
 - Folder drag-and-drop onto the onboarding card (Wails `EnableFileDrop`): the button covers v0.1.
-- Manual dark/light toggle (v0.2) — theming is CSS-only until then.

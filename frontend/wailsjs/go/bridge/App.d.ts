@@ -4,7 +4,17 @@ import {bridge} from '../models';
 
 export function AppInfo():Promise<bridge.AppInfoDTO>;
 
+export function ChooseFile(arg1:string):Promise<string>;
+
 export function ChooseFolder():Promise<void>;
+
+export function ClearRemotePIN():Promise<void>;
+
+export function ClearRemoteProviderField(arg1:string,arg2:string):Promise<void>;
+
+export function DisableRemote():Promise<void>;
+
+export function EnableRemote(arg1:string):Promise<void>;
 
 export function GetLibraryStatus():Promise<bridge.LibraryStatusDTO>;
 
@@ -12,16 +22,34 @@ export function GetLibrarySummary():Promise<bridge.LibrarySummaryDTO>;
 
 export function GetLogHistory():Promise<Array<bridge.LogLineDTO>>;
 
+export function GetRemoteProviderConfig(arg1:string):Promise<Array<bridge.RemoteFieldStateDTO>>;
+
+export function GetRemoteStatus():Promise<bridge.RemoteStatusDTO>;
+
 export function GetServerState():Promise<bridge.ServerStateDTO>;
 
 export function GetSettings():Promise<bridge.SettingsDTO>;
+
+export function GetThumbnail(arg1:string):Promise<string>;
+
+export function ListLibrary():Promise<Array<bridge.LibraryItemDTO>>;
+
+export function ListRemoteProviders():Promise<Array<bridge.RemoteProviderDTO>>;
 
 export function RescanLibrary():Promise<void>;
 
 export function RotateAccessToken():Promise<void>;
 
+export function SetRemotePIN(arg1:string):Promise<void>;
+
+export function SetRemoteProviderField(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SetWindowTheme(arg1:string):Promise<void>;
+
 export function StartServer():Promise<void>;
 
 export function StopServer():Promise<void>;
+
+export function ThumbnailsAvailable():Promise<boolean>;
 
 export function UpdateSettings(arg1:bridge.SettingsInputDTO):Promise<void>;

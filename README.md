@@ -4,7 +4,7 @@
 
 A desktop app (macOS + Windows) that serves a folder of media over your LAN so TVs, iPads and phones can play it. Built with Go, Wails v2 and React.
 
-> Status: **Phase 6 — hardening.** Choose a media folder, start the server, and open it from a TV, iPad or phone by scanning the QR code or typing the address; the page streams video, music and photos, and an M3U playlist works in VLC and Infuse. The Logs view shows everything the app does. EinCast remembers your folder, port and name between launches, can rescan, and reports problems on screen instead of failing silently. The **access token is off by default**: until you turn it on in Settings, anyone on your Wi-Fi who knows the address can open the library while the server runs. Features land phase by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+> Status: **Phase 8 — library polish (v0.2).** Choose a media folder, start the server, and open it from a TV, iPad or phone by scanning the QR code or typing the address; the page streams video, music and photos, and an M3U playlist works in VLC and Infuse. The Library screen lists, searches and sorts your files, shows thumbnails when `ffmpeg` is installed, and follows the folder by itself as you add or remove files. Remote access (Tailscale, Cloudflare, ngrok) is available behind an access PIN, and the Logs view shows everything the app does. Appearance can follow the system or be set to light or dark. The **access token is off by default**: until you turn it on in Settings, anyone on your Wi-Fi who knows the address can open the library while the server runs. Features land phase by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ## Requirements
 
@@ -43,6 +43,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full route table.
 |---|---|
 | Port, display name, library folder, token on/off | `settings.json` in `~/Library/Application Support/EinCast` (macOS) or `%AppData%\EinCast` (Windows) |
 | The access token | The system Keychain / Credential Manager, service `com.bkthomas.eincast`. Never in `settings.json` or the logs |
+
+Thumbnails are made with `ffmpeg` if it is installed (for example `brew install ffmpeg`); without it EinCast shows icons instead. They are cached in `~/Library/Caches/EinCast/thumbs` (macOS) or `%LocalAppData%\EinCast\thumbs` (Windows) and are safe to delete. The Light/Dark/System choice is remembered by the app window itself.
 
 Deleting `settings.json` resets EinCast to its defaults. A damaged one is moved to `settings.json.bad` and EinCast starts with defaults.
 
