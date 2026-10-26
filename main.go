@@ -47,7 +47,7 @@ import (
 
 const appName = "EinCast"
 
-// version is stamped at build time: -ldflags "-X main.version=0.1.0".
+// version is stamped at build time: -ldflags "-X main.version=1.0.1".
 var version = "dev"
 
 // thumbnailMaxAge is how long an unrefreshed thumbnail is kept. A changed file

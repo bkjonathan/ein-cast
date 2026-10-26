@@ -18,7 +18,7 @@ A desktop app (macOS + Windows) that serves a folder of media over your LAN so T
 
 ```sh
 wails dev                       # live-reloading dev window
-wails build -ldflags "-X main.version=0.1.0"   # → build/bin/eincast.app
+wails build -ldflags "-X main.version=1.0.1"   # → build/bin/eincast.app
 
 go test ./...                   # Go tests
 scripts/check-deps.sh           # hexagonal dependency rules
