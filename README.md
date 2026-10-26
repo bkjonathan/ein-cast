@@ -29,14 +29,14 @@ cd frontend && npm run typecheck && npm test
 
 ## Release
 
-Versions are `1.0.x` for fixes, `1.1.x` for new features, `2.0.x` for major changes. To ship one, set the version in `wails.json`, `main.go`, `frontend/package.json` and its lock file, commit, wait for CI to pass, then push a tag:
+Versions are `1.0.x` for fixes, `1.1.1` for new features, `2.0.1` for major changes. The git tag is the version. Once CI is green on `main`, push a tag:
 
 ```sh
 git tag -a v1.0.2 -m "EinCast v1.0.2"
 git push origin v1.0.2
 ```
 
-The `release` workflow creates the GitHub release and attaches the macOS zip and the Windows installer and portable exe.
+The `release` workflow creates the GitHub release and attaches the macOS zip and the Windows installer and portable exe. The full checklist, troubleshooting and how to redo a release are in [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Try the API
 

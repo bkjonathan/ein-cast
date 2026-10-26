@@ -52,6 +52,8 @@ instead of adding it early.
 
 12. **Free a port** (done): Settings card that shows which program holds a port and ends it on confirmation; `portfree` service, `portproc` adapter (`lsof` / `netstat`), `CheckPort` / `FreePort` bridge methods (ADR 0022).
 
+The next release (v1.1.1, "make it adoptable") is planned phase by phase in [PLAN-v1.1.md](PLAN-v1.1.md): real-device checks, signing, token on by default, local metadata, profiles, playback gaps, Burmese, auto-update and a community launch kit. Profiles, auto-update and signing below are scheduled there.
+
 Still to do for v1.0, none of it started:
 - **User profiles (kids/adults):** needs a design decision first. What does a profile restrict (which libraries? which kinds?), how does a device become a profile (a PIN per profile? a link per profile?), and how does that coexist with the access token and the tunnel PIN. The multi-library work is the part it builds on.
 - **Auto-update:** needs somewhere to publish releases and a way to verify them (a signing key); both are outside the code.
