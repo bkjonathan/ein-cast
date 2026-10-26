@@ -1,5 +1,6 @@
-# Builds the desktop apps and attaches them to a GitHub release.
-# Publish a release (tag like v0.2.0) and this uploads:
+# Builds the desktop apps and publishes them as a GitHub release.
+# Push a tag like v1.0.2 and this creates the release (if it does not exist yet)
+# and uploads:
 #   eincast-<version>-macos-universal.zip      (eincast.app, Intel + Apple Silicon)
 #   eincast-<version>-windows-amd64-installer.exe
 #   eincast-<version>-windows-amd64.exe        (portable)
@@ -7,15 +8,38 @@
 name: release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 permissions:
-  contents: write # upload assets to the release
+  contents: write # create the release and upload assets to it
 
 jobs:
+  # Created once, before the builds, so the two platform jobs never race to
+  # create it. A release someone already published by hand is left as it is.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+            exit 0
+          fi
+          flags=()
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac # v1.2.0-rc1 is a pre-release
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "EinCast ${TAG#v}" \
+            --generate-notes \
+            --notes $'These builds are not code-signed yet.\n\n- **macOS:** unzip, then run `xattr -dr com.apple.quarantine eincast.app` (or right-click, Open, the first time).\n- **Windows:** SmartScreen will warn; choose **More info, Run anyway**.\n' \
+            "${flags[@]}"
+
   build:
     name: ${{ matrix.name }}
+    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -32,12 +56,12 @@ jobs:
         shell: bash # Git Bash on Windows, so the steps below run unchanged
 
     env:
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ github.ref_name }}
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref_name }}
 
       - uses: actions/setup-go@v5
         with:
