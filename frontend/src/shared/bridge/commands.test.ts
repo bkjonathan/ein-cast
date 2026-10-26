@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const go = vi.hoisted(() => ({
   AppInfo: vi.fn(),
+  CheckPort: vi.fn(),
+  FreePort: vi.fn(),
   ChooseFolder: vi.fn(),
   ListLibraries: vi.fn(),
   RemoveLibrary: vi.fn(),
@@ -33,6 +35,8 @@ const go = vi.hoisted(() => ({
 vi.mock("../../../wailsjs/go/bridge/App", () => go);
 
 import {
+  checkPort,
+  freePort,
   chooseFile,
   chooseFolder,
   clearRemotePin,
@@ -358,5 +362,29 @@ describe("thumbnails", () => {
   it("thumbnailsAvailable returns Go's answer", async () => {
     go.ThumbnailsAvailable.mockResolvedValueOnce(false);
     await expect(thumbnailsAvailable()).resolves.toBe(false);
+  });
+});
+
+describe("port commands", () => {
+  it("checkPort maps holders into plain objects", async () => {
+    go.CheckPort.mockResolvedValue([{ pid: 300, name: "node", self: false, extra: 1 }]);
+    await expect(checkPort(8765)).resolves.toStrictEqual([{ pid: 300, name: "node", self: false }]);
+    expect(go.CheckPort).toHaveBeenCalledWith(8765);
+  });
+
+  it("checkPort of a free port is an empty list", async () => {
+    go.CheckPort.mockResolvedValue([]);
+    await expect(checkPort(8765)).resolves.toEqual([]);
+  });
+
+  it("freePort passes the port and the process, and resolves with nothing", async () => {
+    go.FreePort.mockResolvedValue(undefined);
+    await expect(freePort(8765, 300)).resolves.toBeUndefined();
+    expect(go.FreePort).toHaveBeenCalledWith(8765, 300);
+  });
+
+  it("freePort propagates Go's reason", async () => {
+    go.FreePort.mockRejectedValue("Not allowed: that program belongs to another user");
+    await expect(freePort(8765, 300)).rejects.toMatch(/Not allowed/);
   });
 });

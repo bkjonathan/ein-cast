@@ -72,6 +72,14 @@ export interface Settings {
 /** The editable part of Settings. */
 export type SettingsInput = Pick<Settings, "port" | "name" | "requireToken" | "dlna">;
 
+/** A program using a TCP port. `self` is EinCast's own process, which cannot be ended from here. */
+export interface PortHolder {
+  pid: number;
+  /** The program's name; empty when the system would not say. */
+  name: string;
+  self: boolean;
+}
+
 export type ServerState = "idle" | "starting" | "running" | "stopping" | "failed";
 
 /** The HTTP server's lifecycle as Go reports it. */

@@ -4,14 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>EinCast</title>
-  <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  <link rel="apple-touch-icon" href="/static/icon.png">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <header class="top">
-    <div>
-      <h1 id="server-name">EinCast</h1>
-      <p class="tagline">Your home media, on every screen.</p>
+    <div class="brand">
+      <img class="logo" src="/static/icon.png" alt="" width="48" height="48">
+      <div>
+        <h1 id="server-name">EinCast</h1>
+        <p class="tagline">Your home media, on every screen.</p>
+      </div>
     </div>
     <a class="button" id="playlist-link" href="/playlist.m3u" download="eincast.m3u">Playlist for VLC / Infuse</a>
   </header>

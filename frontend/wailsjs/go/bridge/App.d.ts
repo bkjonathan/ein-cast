@@ -4,6 +4,8 @@ import {bridge} from '../models';
 
 export function AppInfo():Promise<bridge.AppInfoDTO>;
 
+export function CheckPort(arg1:number):Promise<Array<bridge.PortHolderDTO>>;
+
 export function ChooseFile(arg1:string):Promise<string>;
 
 export function ChooseFolder():Promise<void>;
@@ -15,6 +17,8 @@ export function ClearRemoteProviderField(arg1:string,arg2:string):Promise<void>;
 export function DisableRemote():Promise<void>;
 
 export function EnableRemote(arg1:string):Promise<void>;
+
+export function FreePort(arg1:number,arg2:number):Promise<void>;
 
 export function GetLogHistory():Promise<Array<bridge.LogLineDTO>>;
 

@@ -156,6 +156,22 @@ export namespace bridge {
 		    return a;
 		}
 	}
+	export class PortHolderDTO {
+	    pid: number;
+	    name: string;
+	    self: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PortHolderDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pid = source["pid"];
+	        this.name = source["name"];
+	        this.self = source["self"];
+	    }
+	}
 	export class RemoteFieldDTO {
 	    key: string;
 	    label: string;

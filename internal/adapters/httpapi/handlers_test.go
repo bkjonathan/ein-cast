@@ -552,7 +552,7 @@ func TestStaticFiles(t *testing.T) {
 	}{
 		{"/static/app.js", 200, "javascript"},
 		{"/static/style.css", 200, "text/css"},
-		{"/static/icon.svg", 200, "image/svg+xml"},
+		{"/static/icon.png", 200, "image/png"},
 		{"/static/missing.js", 404, "application/json"},
 		{"/static/index.html", 404, "application/json"}, // the page lives at /
 		{"/static/..%2Fserver.go", 404, ""},

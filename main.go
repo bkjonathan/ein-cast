@@ -26,6 +26,7 @@ import (
 	"eincast/internal/adapters/mdns"
 	"eincast/internal/adapters/memrepo"
 	"eincast/internal/adapters/netinfo"
+	"eincast/internal/adapters/portproc"
 	"eincast/internal/adapters/secrets"
 	"eincast/internal/adapters/settingsfile"
 	"eincast/internal/adapters/thumbcache"
@@ -34,6 +35,7 @@ import (
 	"eincast/internal/adapters/tunnel/ngrok"
 	"eincast/internal/adapters/tunnel/tailscale"
 	"eincast/internal/app/library"
+	"eincast/internal/app/portfree"
 	"eincast/internal/app/providerconfig"
 	"eincast/internal/app/remote"
 	"eincast/internal/app/settings"
@@ -57,6 +59,11 @@ const logHistory = 2000
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+// appIcon is shown in the macOS About panel; the same file builds the Dock icon.
+//
+//go:embed build/appicon.png
+var appIcon []byte
 
 func main() {
 	// Logs go to the console as before and, through the bus, to the UI.
@@ -120,12 +127,17 @@ func main() {
 		// Once the server runs, make it findable: by name for computers and phones,
 		// and, only when the person turned it on, by TVs.
 		streaming.WithDiscovery(mdns.New(log), dlna.NewAnnouncer(deviceID, version, log)))
+	// A port some other program is holding can be freed from Settings. The
+	// service needs our own process id to refuse ending ourselves.
+	portService := portfree.NewService(portproc.New(), os.Getpid(), portfree.DefaultTiming, log)
+
 	app := bridge.New(bridge.Deps{
 		Info:        bridge.Info{Name: appName, Version: version},
 		Library:     libraryService,
 		Settings:    settingsService,
 		Streaming:   streamingService,
 		Remote:      remoteService,
+		Ports:       portService,
 		Thumbnails:  thumbnailService,
 		Conversions: conversions,
 		Logs:        logs,
@@ -155,6 +167,7 @@ func main() {
 			About: &mac.AboutInfo{
 				Title:   appName + " " + version,
 				Message: "Your home media, on every screen.",
+				Icon:    appIcon,
 			},
 		},
 		Windows: &windows.Options{

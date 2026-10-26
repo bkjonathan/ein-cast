@@ -15,6 +15,7 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"eincast/internal/app"
+	"eincast/internal/app/portfree"
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/app/thumbnails"
@@ -73,6 +74,12 @@ type Remote interface {
 	ClearProviderField(id app.ProviderID, key string) error
 }
 
+// Ports is the part of the "free a port" use case the bridge drives.
+type Ports interface {
+	Check(ctx context.Context, port int) ([]portfree.Holder, error)
+	Free(ctx context.Context, port, pid int) error
+}
+
 // Thumbnails is the part of the thumbnail use case the bridge needs.
 type Thumbnails interface {
 	Get(ctx context.Context, id media.ID) (thumbnails.Thumbnail, error)
@@ -96,6 +103,7 @@ type App struct {
 	settings  Settings
 	streaming Streaming
 	remote    Remote
+	ports     Ports
 	thumbs    Thumbnails  // nil: no thumbnails
 	convert   Conversions // nil: no conversion
 	logs      app.LogStream
@@ -121,6 +129,7 @@ type Deps struct {
 	Settings  Settings
 	Streaming Streaming
 	Remote    Remote
+	Ports     Ports
 	// Thumbnails may be nil; the UI then shows icons only.
 	Thumbnails Thumbnails
 	// Conversions may be nil.
@@ -138,6 +147,7 @@ func New(d Deps) *App {
 		settings:   d.Settings,
 		streaming:  d.Streaming,
 		remote:     d.Remote,
+		ports:      d.Ports,
 		thumbs:     d.Thumbnails,
 		convert:    d.Conversions,
 		logs:       d.Logs,
@@ -376,6 +386,23 @@ func (a *App) RotateAccessToken() error {
 	return err
 }
 
+// CheckPort lists the programs using a port; none means it is free. It only
+// looks: nothing is ended until FreePort is called.
+func (a *App) CheckPort(port int) ([]PortHolderDTO, error) {
+	holders, err := a.ports.Check(a.ctx, port)
+	if err != nil {
+		return nil, portError(err)
+	}
+	return toPortHolderDTOs(holders), nil
+}
+
+// FreePort ends the program with process id pid, which must be one that
+// CheckPort reported for this port a moment ago. The program is asked to quit
+// first and ended by force only if it does not.
+func (a *App) FreePort(port, pid int) error {
+	return portError(a.ports.Free(a.ctx, port, pid))
+}
+
 // GetRemoteStatus returns remote access as it is now. The UI calls it on load.
 func (a *App) GetRemoteStatus() RemoteStatusDTO {
 	return toRemoteStatusDTO(a.remote.Status())
@@ -475,6 +502,27 @@ func remoteError(err error) error {
 	case errors.Is(err, app.ErrInvalidValue):
 		// "Hostname: invalid value: enter the hostname only…" reads better without the middle.
 		return errors.New(strings.Replace(err.Error(), "invalid value: ", "", 1))
+	default:
+		return err
+	}
+}
+
+// portError rewrites the refusals a person can act on as plain advice. These
+// messages are shown in the UI.
+func portError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, portfree.ErrInvalidPort):
+		return errors.New("Enter a port between 1024 and 65535.")
+	case errors.Is(err, portfree.ErrOwnProcess):
+		return errors.New("That is EinCast itself. Stop the server instead.")
+	case errors.Is(err, portfree.ErrNotHolding):
+		return errors.New("That program is no longer using this port. Check again.")
+	case errors.Is(err, portfree.ErrStillHeld):
+		return errors.New("The program would not let go of the port.")
+	case errors.Is(err, app.ErrNotPermitted):
+		return errors.New("Not allowed: that program belongs to another user or to the system. Close it yourself, or run EinCast as an administrator.")
 	default:
 		return err
 	}

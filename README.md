@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/logo.png" alt="EinCast logo" width="128"></p>
+
 # EinCast
 
 *Your home media, on every screen.* "Ein" (အိမ်) is Burmese for *home*.
@@ -21,6 +23,7 @@ wails build -ldflags "-X main.version=0.1.0"   # → build/bin/eincast.app
 go test ./...                   # Go tests
 scripts/check-deps.sh           # hexagonal dependency rules
 scripts/check-cross.sh          # compiles for macOS and Windows; add --full for a complete Windows Wails build
+scripts/make-icons.sh           # rebuilds every icon from build/logo.png (needs ImageMagick)
 cd frontend && npm run typecheck && npm test
 ```
 
@@ -52,6 +55,8 @@ Videos a device can't play as they are (MKV, AVI, HEVC…) are converted on the 
 
 Smart TVs (Settings → Smart TVs) is off by default. A TV can't send the access token, so while it is on the whole library is visible, without a password, to everyone on your network; it can't be on together with the access token.
 
+If the server won't start because another program already holds its port, Settings → Free a port shows which program that is (using `lsof` on macOS, `netstat` on Windows) and ends it when you confirm. It never ends EinCast itself, and only offers ports 1024–65535.
+
 Deleting `settings.json` resets EinCast to its defaults. A damaged one is moved to `settings.json.bad` and EinCast starts with defaults.
 
 ## Folder map
@@ -66,5 +71,6 @@ Deleting `settings.json` resets EinCast to its defaults. A damaged one is moved 
 | `frontend/src/app` | Layout shell: title bar, sidebar, view switching. |
 | `frontend/src/features` | One folder per feature slice. |
 | `frontend/src/shared` | Bridge to Go, glass UI kit, motion presets, helpers. |
-| `scripts/` | Repo tooling (`check-deps.sh`). |
+| `build/` | Wails build assets. `logo.png` is the master logo; `appicon.png` and `windows/icon.ico` are generated from it. |
+| `scripts/` | Repo tooling (`check-deps.sh`, `make-icons.sh`). |
 | `docs/` | Architecture, roadmap, and decision records (`docs/adr`). |

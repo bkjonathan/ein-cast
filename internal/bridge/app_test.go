@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"eincast/internal/app"
+	"eincast/internal/app/portfree"
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/app/thumbnails"
@@ -128,6 +129,24 @@ func (f *fakeStreaming) Stop(ctx context.Context) error {
 
 func (f *fakeStreaming) Status() app.ServerStatus { return f.status }
 
+type fakePorts struct {
+	holders  []portfree.Holder
+	checkErr error
+	freeErr  error
+	checked  []int
+	freed    [][2]int
+}
+
+func (f *fakePorts) Check(_ context.Context, port int) ([]portfree.Holder, error) {
+	f.checked = append(f.checked, port)
+	return f.holders, f.checkErr
+}
+
+func (f *fakePorts) Free(_ context.Context, port, pid int) error {
+	f.freed = append(f.freed, [2]int{port, pid})
+	return f.freeErr
+}
+
 type fakeLogs struct {
 	history []app.LogEntry
 	live    chan app.LogEntry
@@ -155,6 +174,7 @@ func newTestAppWithStreaming(lib *fakeLibrary) (*App, *fakeStreaming) {
 		Settings:  &fakeSettings{view: app.SettingsView{Settings: settings.Default()}},
 		Streaming: st,
 		Remote:    &fakeRemote{},
+		Ports:     &fakePorts{},
 		Logs:      newFakeLogs(),
 		Emitter:   NewEmitter(log),
 		Log:       log,
@@ -1052,5 +1072,72 @@ func TestChooseFile(t *testing.T) {
 	a.pickFile = func(context.Context, string) (string, error) { return "", boom }
 	if _, err := a.ChooseFile("x"); !errors.Is(err, boom) {
 		t.Errorf("error = %v", err)
+	}
+}
+
+func TestCheckPort(t *testing.T) {
+	t.Run("maps holders to DTOs", func(t *testing.T) {
+		a := newTestApp(&fakeLibrary{})
+		ports := &fakePorts{holders: []portfree.Holder{
+			{PortHolder: app.PortHolder{PID: 300, Name: "node"}},
+			{PortHolder: app.PortHolder{PID: 42, Name: "eincast"}, Self: true},
+		}}
+		a.ports = ports
+
+		got, err := a.CheckPort(8765)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []PortHolderDTO{{PID: 300, Name: "node"}, {PID: 42, Name: "eincast", Self: true}}
+		if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(ports.checked, []int{8765}) {
+			t.Fatalf("CheckPort = %+v (checked %v), want %+v", got, ports.checked, want)
+		}
+	})
+
+	t.Run("a free port is an empty list, not nil", func(t *testing.T) {
+		got, err := newTestApp(&fakeLibrary{}).CheckPort(8765)
+		if err != nil || got == nil || len(got) != 0 {
+			t.Fatalf("CheckPort = %#v, %v; want empty non-nil slice", got, err)
+		}
+	})
+
+	t.Run("explains a bad port in plain words", func(t *testing.T) {
+		a := newTestApp(&fakeLibrary{})
+		a.ports = &fakePorts{checkErr: portfree.ErrInvalidPort}
+		if _, err := a.CheckPort(80); err == nil || err.Error() != "Enter a port between 1024 and 65535." {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestFreePort(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantMsg string
+	}{
+		{"success", nil, ""},
+		{"own process", portfree.ErrOwnProcess, "That is EinCast itself. Stop the server instead."},
+		{"stale screen", portfree.ErrNotHolding, "That program is no longer using this port. Check again."},
+		{"survivor", portfree.ErrStillHeld, "The program would not let go of the port."},
+		{"permission", fmt.Errorf("end x: %w", app.ErrNotPermitted), "Not allowed: that program belongs to another user or to the system. Close it yourself, or run EinCast as an administrator."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newTestApp(&fakeLibrary{})
+			ports := &fakePorts{freeErr: tt.err}
+			a.ports = ports
+
+			err := a.FreePort(8765, 300)
+			switch {
+			case tt.wantMsg == "" && err != nil:
+				t.Fatalf("error = %v", err)
+			case tt.wantMsg != "" && (err == nil || err.Error() != tt.wantMsg):
+				t.Fatalf("error = %v, want %q", err, tt.wantMsg)
+			}
+			if !reflect.DeepEqual(ports.freed, [][2]int{{8765, 300}}) {
+				t.Fatalf("freed = %v", ports.freed)
+			}
+		})
 	}
 }

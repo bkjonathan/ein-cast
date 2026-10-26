@@ -1,0 +1,109 @@
+# Builds the desktop apps and attaches them to a GitHub release.
+# Publish a release (tag like v0.2.0) and this uploads:
+#   eincast-<version>-macos-universal.zip      (eincast.app, Intel + Apple Silicon)
+#   eincast-<version>-windows-amd64-installer.exe
+#   eincast-<version>-windows-amd64.exe        (portable)
+# The builds are unsigned for now; see docs/ROADMAP.md (v1.0) for signing.
+name: release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write # upload assets to the release
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-latest
+            platform: darwin/universal
+          - name: windows
+            os: windows-latest
+            platform: windows/amd64
+    defaults:
+      run:
+        shell: bash # Git Bash on Windows, so the steps below run unchanged
+
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      # The tag is the single source of truth for the version. The installer and
+      # Info.plist need a plain x.y.z, so a pre-release suffix (-rc1) is dropped there.
+      - name: Resolve version
+        run: |
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "PRODUCT_VERSION=${VERSION%%-*}" >> "$GITHUB_ENV"
+
+      - name: Stamp product version
+        run: |
+          node -e '
+            const fs = require("fs");
+            const cfg = JSON.parse(fs.readFileSync("wails.json", "utf8"));
+            cfg.info.productVersion = process.env.PRODUCT_VERSION;
+            fs.writeFileSync("wails.json", JSON.stringify(cfg, null, 2) + "\n");
+          '
+
+      - name: Frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install NSIS (Windows)
+        if: runner.os == 'Windows'
+        run: command -v makensis >/dev/null || choco install nsis -y --no-progress
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: wails build -clean -platform ${{ matrix.platform }} -ldflags "-X main.version=$VERSION"
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # makensis may have just been installed; make it visible to wails.
+          export PATH="$PATH:/c/Program Files (x86)/NSIS"
+          wails build -clean -platform ${{ matrix.platform }} -nsis -ldflags "-X main.version=$VERSION"
+
+      # ditto keeps the bundle's symlinks and permissions; plain zip would corrupt the .app.
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir dist
+          ditto -c -k --sequesterRsrc --keepParent build/bin/eincast.app \
+            "dist/eincast-$VERSION-macos-universal.zip"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir dist
+          cp build/bin/eincast.exe "dist/eincast-$VERSION-windows-amd64.exe"
+          cp build/bin/*-installer.exe "dist/eincast-$VERSION-windows-amd64-installer.exe"
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"

@@ -105,7 +105,7 @@ func TestAccess_RefusalMessageDoesNotRevealWhetherATokenWasClose(t *testing.T) {
 
 func TestAccess_StaticFilesStayPublic(t *testing.T) {
 	f, _ := newSecured(t)
-	for _, p := range []string{"/static/app.js", "/static/style.css", "/static/icon.svg"} {
+	for _, p := range []string{"/static/app.js", "/static/style.css", "/static/icon.png"} {
 		if resp := f.do("GET", p, nil); resp.StatusCode != 200 {
 			t.Errorf("%s: status = %d, want 200 (static files hold nothing private)", p, resp.StatusCode)
 		}

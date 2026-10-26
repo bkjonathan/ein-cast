@@ -1,6 +1,6 @@
-import { Cast } from "lucide-react";
 import { PublicAccessBadge } from "@/features/remote";
 import { cn } from "@/shared/lib/cn";
+import { Logo } from "@/shared/ui/Logo";
 
 // The macOS traffic lights float over our content (hidden-inset title bar),
 // so the bar must leave room for them. WKWebView always reports "Macintosh".
@@ -15,7 +15,7 @@ export function TitleBar({ name, onOpenRemote }: { name: string; onOpenRemote: (
         isMac ? "pl-20" : "pl-4",
       )}
     >
-      <Cast className="size-4 text-primary" aria-hidden />
+      <Logo className="size-5" />
       <h1 className="text-sm font-semibold tracking-tight">{name}</h1>
       <PublicAccessBadge onOpen={onOpenRemote} />
     </header>

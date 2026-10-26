@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"eincast/internal/app"
+	"eincast/internal/app/portfree"
 	"eincast/internal/domain/media"
 )
 
@@ -268,6 +269,22 @@ type SettingsInputDTO struct {
 	Name         string `json:"name"`
 	RequireToken bool   `json:"requireToken"`
 	DLNA         bool   `json:"dlna"`
+}
+
+// PortHolderDTO is a program using a port. Self marks EinCast's own process,
+// which the UI shows but offers no way to end.
+type PortHolderDTO struct {
+	PID  int    `json:"pid"`
+	Name string `json:"name"`
+	Self bool   `json:"self"`
+}
+
+func toPortHolderDTOs(in []portfree.Holder) []PortHolderDTO {
+	out := make([]PortHolderDTO, len(in)) // non-nil: JSON [] rather than null
+	for i, h := range in {
+		out[i] = PortHolderDTO{PID: h.PID, Name: h.Name, Self: h.Self}
+	}
+	return out
 }
 
 // LogAttrDTO is one key/value pair of a log line.

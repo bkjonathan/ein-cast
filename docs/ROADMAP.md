@@ -50,12 +50,17 @@ instead of adding it early.
 
 11. **Multiple libraries** (done): a list of folders with their own identity, scanning and watching; IDs include the library; per-item path guard; Libraries panel in Settings; library filter (ADR 0021).
 
+12. **Free a port** (done): Settings card that shows which program holds a port and ends it on confirmation; `portfree` service, `portproc` adapter (`lsof` / `netstat`), `CheckPort` / `FreePort` bridge methods (ADR 0022).
+
 Still to do for v1.0, none of it started:
 - **User profiles (kids/adults):** needs a design decision first. What does a profile restrict (which libraries? which kinds?), how does a device become a profile (a PIN per profile? a link per profile?), and how does that coexist with the access token and the tunnel PIN. The multi-library work is the part it builds on.
 - **Auto-update:** needs somewhere to publish releases and a way to verify them (a signing key); both are outside the code.
 - **Signed and notarized builds** (macOS notarization, a Windows code-signing certificate): need credentials, and a CI job to use them (`.github/workflows/ci.yml` only builds and tests today).
 
 ## Seams needed later
+
+- **Free a port (12):** parsers are tested on sample output; the real `lsof` path was run against a live listener on macOS. The Windows path (`netstat -ano`, `tasklist`, `TerminateProcess`) has been compiled and unit-tested on samples but never run on Windows; CI runs the unit tests there. Before relying on it, run it once against a real listener on Windows, including a localized one if possible.
+- **Offer it where the failure happens (12):** when `Start` fails with "address already in use", the Dashboard could link straight to this card with the port filled in. Today the person finds it in Settings.
 
 - **Upgrade renumbers item IDs (11):** a one-time loss of resume positions saved in browsers (ADR 0021). Nothing to do unless it matters to someone.
 - **Per-library views on DLNA and the device page (11):** both list all libraries merged (DLNA merges folders of the same name). A top-level folder per library when there are several is the seam.

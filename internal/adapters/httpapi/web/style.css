@@ -16,6 +16,9 @@ body {
   font: 16px/1.4 -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
 }
 .top { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.brand { display: flex; align-items: center; gap: .75rem; }
+/* Beats the generic `img` rule below, which is meant for photos. */
+img.logo { width: 3rem; height: 3rem; max-height: none; background: none; border-radius: 0; flex: none; }
 h1 { margin: 0; font-size: 1.6rem; }
 h2 { margin: 1.5rem 0 .5rem; font-size: 1.1rem; }
 .tagline, .status, .hint { color: var(--muted); margin: .25rem 0; }

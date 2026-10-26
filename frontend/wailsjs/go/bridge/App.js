@@ -6,6 +6,10 @@ export function AppInfo() {
   return window['go']['bridge']['App']['AppInfo']();
 }
 
+export function CheckPort(arg1) {
+  return window['go']['bridge']['App']['CheckPort'](arg1);
+}
+
 export function ChooseFile(arg1) {
   return window['go']['bridge']['App']['ChooseFile'](arg1);
 }
@@ -28,6 +32,10 @@ export function DisableRemote() {
 
 export function EnableRemote(arg1) {
   return window['go']['bridge']['App']['EnableRemote'](arg1);
+}
+
+export function FreePort(arg1, arg2) {
+  return window['go']['bridge']['App']['FreePort'](arg1, arg2);
 }
 
 export function GetLogHistory() {

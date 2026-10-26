@@ -1,12 +1,14 @@
 // A bridge module: allowed to import ../wailsjs/go.
 import {
   AppInfo as goAppInfo,
+  CheckPort as goCheckPort,
   ChooseFile as goChooseFile,
   ChooseFolder as goChooseFolder,
   ClearRemotePIN as goClearRemotePIN,
   ClearRemoteProviderField as goClearRemoteProviderField,
   DisableRemote as goDisableRemote,
   EnableRemote as goEnableRemote,
+  FreePort as goFreePort,
   GetLogHistory as goGetLogHistory,
   GetRemoteProviderConfig as goGetRemoteProviderConfig,
   GetRemoteStatus as goGetRemoteStatus,
@@ -35,6 +37,7 @@ import type {
   LibraryItem,
   LibraryState,
   LogLine,
+  PortHolder,
   RemoteFieldState,
   RemoteProvider,
   RemoteStatus,
@@ -221,4 +224,22 @@ export async function getThumbnail(id: string): Promise<string> {
 /** Whether thumbnails can be made on this computer (that is, ffmpeg was found). */
 export async function thumbnailsAvailable(): Promise<boolean> {
   return goThumbnailsAvailable();
+}
+
+/**
+ * The programs using a TCP port; an empty list means it is free. Only looks:
+ * nothing is ended. Rejects with Go's advice, e.g. for a port out of range.
+ */
+export async function checkPort(port: number): Promise<PortHolder[]> {
+  return (await goCheckPort(port)).map((h) => ({ pid: h.pid, name: h.name, self: h.self }));
+}
+
+/**
+ * Ends the program with process id `pid`, which must be one `checkPort` just
+ * reported for this port. Go asks it to quit and forces it only if it does not.
+ * Resolves once the port is free. Rejects with Go's reason, e.g. that the
+ * program belongs to another user.
+ */
+export async function freePort(port: number, pid: number): Promise<void> {
+  await goFreePort(port, pid);
 }

@@ -314,3 +314,29 @@ type LibraryMemory interface {
 	// SaveLibraries replaces the remembered list.
 	SaveLibraries([]media.Library) error
 }
+
+// PortHolder is a process that is listening on a TCP port.
+type PortHolder struct {
+	PID int
+	// Name is the program's name as the operating system reports it
+	// ("node", "Python"); empty when it could not be read.
+	Name string
+}
+
+// ErrNotPermitted means the operating system refused to end a process, usually
+// because it belongs to another user or to the system.
+var ErrNotPermitted = errors.New("not allowed to end that process")
+
+// PortInspector finds what is holding a TCP port and can end it. It is the one
+// place that talks to the operating system's process tools (lsof, netstat).
+type PortInspector interface {
+	// Holders returns the processes listening on port, none if it is free. A
+	// process that listens on both IPv4 and IPv6 appears once.
+	Holders(ctx context.Context, port int) ([]PortHolder, error)
+	// Terminate asks a process to quit, giving it the chance to clean up. On
+	// Windows, which has no such request for console programs, it ends it.
+	// It returns ErrNotPermitted (wrapped) when the system refuses.
+	Terminate(pid int) error
+	// Kill ends a process at once, without cleanup. Same errors as Terminate.
+	Kill(pid int) error
+}
