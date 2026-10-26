@@ -32,9 +32,22 @@ var ErrDLNAWithToken = errors.New("smart TV discovery can't be on while the acce
 // ErrTokenOff is returned when asked to rotate a token that is switched off.
 var ErrTokenOff = errors.New("access token is turned off")
 
-// Default returns the settings used before the user changes anything.
+// Default returns the settings used when a saved file cannot be used. It keeps
+// the choices that existed before they became settings: nothing starts by itself
+// and the token is off.
 func Default() app.Settings {
-	return app.Settings{Port: streaming.DefaultPort, Name: streaming.DefaultName}
+	return app.Settings{Port: streaming.DefaultPort, Name: streaming.DefaultName, KeepAwake: true}
+}
+
+// firstRun returns the settings of a new install: the same, with the protections
+// and conveniences on (ADR 0024). Existing installs never pass through here, so
+// an upgrade changes nothing they chose.
+func (s *Service) firstRun() app.Settings {
+	d := Default()
+	d.RequireToken = true
+	d.AutoStart = true
+	d.HideOnClose = s.hideOnClose
+	return d
 }
 
 // Input is the part of the settings the user edits. The library folder is not
@@ -44,6 +57,10 @@ type Input struct {
 	Name         string
 	RequireToken bool
 	DLNA         bool
+	AutoStart    bool
+	KeepAwake    bool
+	OpenAtLogin  bool
+	HideOnClose  bool
 }
 
 // Service owns the settings and the access token. It implements
@@ -57,6 +74,9 @@ type Service struct {
 	// newToken is replaceable so tests can use known tokens.
 	newToken func() (string, error)
 
+	loginItem   app.LoginItem // nil: the platform cannot start apps at login
+	hideOnClose bool          // the first-run value of HideOnClose
+
 	mu        sync.RWMutex
 	cur       app.Settings
 	token     string
@@ -65,9 +85,24 @@ type Service struct {
 
 var _ app.LibraryMemory = (*Service)(nil)
 
+// Option customizes a Service.
+type Option func(*Service)
+
+// WithLoginItem lets the "open at login" setting act on the computer.
+func WithLoginItem(li app.LoginItem) Option {
+	return func(s *Service) { s.loginItem = li }
+}
+
+// WithHideOnCloseByDefault sets whether a new install keeps sharing when its
+// window is closed. It is a choice of the platform (a Dock icon or a tray icon
+// has to exist to bring the window back), so main makes it.
+func WithHideOnCloseByDefault(on bool) Option {
+	return func(s *Service) { s.hideOnClose = on }
+}
+
 // NewService returns a Service holding the defaults; call Load at startup.
-func NewService(store app.SettingsStore, secrets app.SecretStore, events app.EventPublisher, log *slog.Logger) *Service {
-	return &Service{
+func NewService(store app.SettingsStore, secrets app.SecretStore, events app.EventPublisher, log *slog.Logger, opts ...Option) *Service {
+	s := &Service{
 		store:    store,
 		secrets:  secrets,
 		events:   events,
@@ -75,6 +110,10 @@ func NewService(store app.SettingsStore, secrets app.SecretStore, events app.Eve
 		newToken: generateToken,
 		cur:      Default(),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Load reads the saved settings. It never fails: a missing file means first
@@ -86,7 +125,7 @@ func (s *Service) Load() {
 	switch {
 	case err == nil:
 	case errors.Is(err, app.ErrNoSettings):
-		loaded = Default()
+		loaded = s.firstRun()
 	default:
 		s.log.Warn("could not use saved settings; starting with defaults", slog.String("error", err.Error()))
 		loaded = Default()
@@ -97,6 +136,12 @@ func (s *Service) Load() {
 	s.cur = s.sanitize(loaded)
 	if s.cur.RequireToken {
 		s.loadTokenLocked()
+	}
+	if s.cur.OpenAtLogin && s.loginItem != nil {
+		// Written again so the entry follows the app if it was moved or updated.
+		if err := s.loginItem.Set(true); err != nil {
+			s.log.Warn("could not refresh the open-at-login entry", slog.String("error", err.Error()))
+		}
 	}
 }
 
@@ -142,7 +187,13 @@ func (s *Service) Update(in Input) (app.SettingsView, error) {
 	s.mu.Lock()
 	next := s.cur
 	next.Port, next.Name, next.RequireToken, next.DLNA = in.Port, in.Name, in.RequireToken, in.DLNA
+	next.AutoStart, next.KeepAwake, next.OpenAtLogin, next.HideOnClose = in.AutoStart, in.KeepAwake, in.OpenAtLogin, in.HideOnClose
+	if err := s.applyLoginItemLocked(next.OpenAtLogin); err != nil {
+		s.mu.Unlock()
+		return app.SettingsView{}, err
+	}
 	if err := s.store.Save(next); err != nil {
+		s.undoLoginItemLocked(next.OpenAtLogin)
 		s.mu.Unlock()
 		return app.SettingsView{}, fmt.Errorf("save settings: %w", err)
 	}
@@ -161,6 +212,48 @@ func (s *Service) Update(in Input) (app.SettingsView, error) {
 
 	s.events.Publish(app.SettingsChanged{View: view})
 	return view, nil
+}
+
+// applyLoginItemLocked makes the computer's login entry match want. Nothing is
+// asked of the system when it already matches what was saved.
+func (s *Service) applyLoginItemLocked(want bool) error {
+	if s.loginItem == nil || want == s.cur.OpenAtLogin {
+		return nil
+	}
+	if err := s.loginItem.Set(want); err != nil {
+		return fmt.Errorf("open at login: %w", err)
+	}
+	return nil
+}
+
+// undoLoginItemLocked puts the login entry back after a save that failed, so the
+// computer and the file do not disagree.
+func (s *Service) undoLoginItemLocked(changedTo bool) {
+	if s.loginItem == nil || changedTo == s.cur.OpenAtLogin {
+		return
+	}
+	if err := s.loginItem.Set(s.cur.OpenAtLogin); err != nil {
+		s.log.Warn("could not restore the open-at-login entry", slog.String("error", err.Error()))
+	}
+}
+
+// SetFFmpegPath remembers where the person said ffmpeg is. An empty path goes
+// back to looking for it. Whether the file is usable is the caller's check: this
+// layer cannot look at the disk.
+func (s *Service) SetFFmpegPath(path string) error {
+	s.mu.Lock()
+	next := s.cur
+	next.FFmpegPath = path
+	if err := s.store.Save(next); err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("save settings: %w", err)
+	}
+	s.cur = next
+	view := s.viewLocked()
+	s.mu.Unlock()
+
+	s.events.Publish(app.SettingsChanged{View: view})
+	return nil
 }
 
 // RotateToken replaces the access token. Devices holding the old one are

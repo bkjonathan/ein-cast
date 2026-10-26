@@ -5,10 +5,13 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"time"
 
 	"github.com/wailsapp/wails/v2"
@@ -23,17 +26,21 @@ import (
 	"eincast/internal/adapters/fswatch"
 	"eincast/internal/adapters/httpapi"
 	"eincast/internal/adapters/logbus"
+	"eincast/internal/adapters/loginitem"
 	"eincast/internal/adapters/mdns"
 	"eincast/internal/adapters/memrepo"
 	"eincast/internal/adapters/netinfo"
 	"eincast/internal/adapters/portproc"
+	"eincast/internal/adapters/powerguard"
 	"eincast/internal/adapters/secrets"
 	"eincast/internal/adapters/settingsfile"
 	"eincast/internal/adapters/thumbcache"
+	"eincast/internal/adapters/tray"
 	"eincast/internal/adapters/tunnel"
 	"eincast/internal/adapters/tunnel/cloudflared"
 	"eincast/internal/adapters/tunnel/ngrok"
 	"eincast/internal/adapters/tunnel/tailscale"
+	"eincast/internal/app"
 	"eincast/internal/app/library"
 	"eincast/internal/app/portfree"
 	"eincast/internal/app/providerconfig"
@@ -65,6 +72,16 @@ var assets embed.FS
 //go:embed build/appicon.png
 var appIcon []byte
 
+// trayIcon is the Windows notification-area icon; it must be an .ico.
+//
+//go:embed build/windows/icon.ico
+var trayIcon []byte
+
+// singleInstanceID names the lock that keeps a second EinCast from starting: it
+// would fight the first over the port. Launching again brings the first window
+// back instead.
+const singleInstanceID = "com.bkthomas.eincast"
+
 func main() {
 	// Logs go to the console as before and, through the bus, to the UI.
 	logs := logbus.NewBus(logHistory)
@@ -75,8 +92,16 @@ func main() {
 	// Settings live in the per-user config directory; the access token and the
 	// remote-access PIN live in the OS credential store, never in that file.
 	credentialStore := secrets.New()
-	settingsService := settings.NewService(settingsfile.New(settingsDir(log)), credentialStore, emitter, log)
+	//
+	// Closing the window only hides the app when something can bring it back:
+	// the Dock on macOS. Windows has the tray icon too, but it has not been run
+	// on a real Windows machine yet, so a new install there still quits on close
+	// (ADR 0030). Whoever turns it on in Settings gets it.
+	settingsService := settings.NewService(settingsfile.New(settingsDir(log)), credentialStore, emitter, log,
+		settings.WithHideOnCloseByDefault(runtime.GOOS == "darwin"),
+		settings.WithLoginItem(loginItem(log)))
 	settingsService.Load()
+	startup := settingsService.Get()
 
 	// Remote access. Providers arrive one per step of the remote-access phase
 	// (docs/ROADMAP.md). The recommended one is listed first, then the ones that
@@ -101,13 +126,17 @@ func main() {
 	// kept in the per-user cache folder, so they are made once.
 	thumbCache := thumbcache.New(cacheDir(log, "thumbs"), log)
 	thumbCache.Prune(thumbnailMaxAge)
-	thumbnailService := thumbnails.NewService(libraryService, ffmpeg.New(log), thumbCache, log, thumbnails.DefaultOptions)
+	// Where ffmpeg is can be chosen in Settings; both users of it read the choice
+	// each time, so a change applies without a restart.
+	chosenFFmpeg := ffmpeg.WithChosenPath(func() string { return settingsService.Get().FFmpegPath })
+	thumbnailer := ffmpeg.New(log, chosenFFmpeg)
+	thumbnailService := thumbnails.NewService(libraryService, thumbnailer, thumbCache, log, thumbnails.DefaultOptions)
 
 	// Videos a device cannot play as they are are converted to HLS by the same
 	// ffmpeg, into temporary folders that are emptied at every start and stopped
 	// with the app.
 	conversions := transcode.NewService(libraryService,
-		ffmpeg.NewTranscoder(cacheDir(log, "hls"), log), log, transcode.DefaultOptions)
+		ffmpeg.NewTranscoder(cacheDir(log, "hls"), log, chosenFFmpeg), log, transcode.DefaultOptions)
 
 	// Smart TVs identify a server by a UUID; deriving it from the computer's name
 	// keeps it the same on every run without storing anything.
@@ -124,6 +153,8 @@ func main() {
 	// outlives the server it points at.
 	streamingService := streaming.NewService(webServer, netinfo.New(), emitter, log,
 		streaming.WithPublicAccess(remoteService),
+		// A sleeping laptop is a server nobody can reach; held only while it runs.
+		streaming.WithPowerGuard(powerguard.New(log)),
 		// Once the server runs, make it findable: by name for computers and phones,
 		// and, only when the person turned it on, by TVs.
 		streaming.WithDiscovery(mdns.New(log), dlna.NewAnnouncer(deviceID, version, log)))
@@ -140,26 +171,45 @@ func main() {
 		Ports:       portService,
 		Thumbnails:  thumbnailService,
 		Conversions: conversions,
+		FFmpeg:      thumbnailer,
 		Logs:        logs,
 		Emitter:     emitter,
 		Log:         log,
 	})
 
+	// Signing in launches EinCast with this flag; it then comes up without a
+	// window in the way, but only where the window can be brought back.
+	startHidden := slices.Contains(os.Args[1:], loginitem.BackgroundFlag) && startup.HideOnClose
+
 	err = wails.Run(&options.App{
-		Title:     appName,
-		Width:     1100,
-		Height:    720,
-		MinWidth:  880,
-		MinHeight: 560,
+		Title:             appName,
+		Width:             1100,
+		Height:            720,
+		MinWidth:          880,
+		MinHeight:         560,
+		HideWindowOnClose: startup.HideOnClose,
+		StartHidden:       startHidden,
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId:               singleInstanceID,
+			OnSecondInstanceLaunch: func(options.SecondInstanceData) { bridge.ShowWindow(app) },
+		},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
 		// Fully transparent so the native vibrancy / Mica backdrop shows through
 		// the glass panels.
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
-		OnStartup:        bridge.OnStartup(app),
-		OnShutdown:       bridge.OnShutdown(app),
-		Bind:             []any{app},
+		OnStartup: func(ctx context.Context) {
+			bridge.OnStartup(app)(ctx)
+			if startup.HideOnClose {
+				// Nothing on macOS (the Dock does this job); on Windows the icon
+				// that brings the window back.
+				tray.Run(ctx, log, trayIcon, appName,
+					func() { bridge.ShowWindow(app) }, func() { bridge.Quit(app) })
+			}
+		},
+		OnShutdown: bridge.OnShutdown(app),
+		Bind:       []any{app},
 		Mac: &mac.Options{
 			TitleBar:             mac.TitleBarHiddenInset(),
 			WebviewIsTransparent: true,
@@ -180,6 +230,17 @@ func main() {
 		log.Error("wails run", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+}
+
+// loginItem is the way to open EinCast at login on this system, or nil when
+// there is none, in which case the setting is accepted and does nothing.
+func loginItem(log *slog.Logger) app.LoginItem {
+	item, err := loginitem.New(log)
+	if err != nil {
+		log.Info("cannot open at login on this system", slog.String("reason", err.Error()))
+		return nil
+	}
+	return item
 }
 
 // settingsDir is where settings.json lives: <user config dir>/EinCast. If the

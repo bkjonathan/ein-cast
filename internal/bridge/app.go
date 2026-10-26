@@ -49,6 +49,16 @@ type Settings interface {
 	Get() app.SettingsView
 	Update(in settings.Input) (app.SettingsView, error)
 	RotateToken() (app.SettingsView, error)
+	SetFFmpegPath(path string) error
+}
+
+// FFmpeg is the part of the ffmpeg adapter the bridge needs: where it is, and
+// whether a file the person picked can be run.
+type FFmpeg interface {
+	// Path returns where ffmpeg is, or "" if it cannot be found.
+	Path() string
+	// Check reports why path cannot be used as ffmpeg, in words for the person.
+	Check(path string) error
 }
 
 // Streaming is the part of the server lifecycle the bridge drives.
@@ -106,6 +116,7 @@ type App struct {
 	ports     Ports
 	thumbs    Thumbnails  // nil: no thumbnails
 	convert   Conversions // nil: no conversion
+	ffmpeg    FFmpeg      // nil: ffmpeg is not managed from Settings
 	logs      app.LogStream
 	emitter   *Emitter
 	log       *slog.Logger
@@ -134,9 +145,11 @@ type Deps struct {
 	Thumbnails Thumbnails
 	// Conversions may be nil.
 	Conversions Conversions
-	Logs        app.LogStream
-	Emitter     *Emitter
-	Log         *slog.Logger
+	// FFmpeg may be nil.
+	FFmpeg  FFmpeg
+	Logs    app.LogStream
+	Emitter *Emitter
+	Log     *slog.Logger
 }
 
 // New builds the facade from its dependencies.
@@ -150,6 +163,7 @@ func New(d Deps) *App {
 		ports:      d.Ports,
 		thumbs:     d.Thumbnails,
 		convert:    d.Conversions,
+		ffmpeg:     d.FFmpeg,
 		logs:       d.Logs,
 		emitter:    d.Emitter,
 		log:        d.Log,
@@ -174,6 +188,20 @@ func OnStartup(a *App) func(ctx context.Context) {
 // server gracefully so in-flight streams finish and the port is released.
 func OnShutdown(a *App) func(ctx context.Context) {
 	return a.shutdown
+}
+
+// ShowWindow brings the window back after it was hidden or minimised. It is a
+// function, not a method, so it is not bound to JS. The tray and a second launch
+// of the app use it.
+func ShowWindow(a *App) {
+	wruntime.WindowShow(a.ctx)
+	wruntime.WindowUnminimise(a.ctx)
+}
+
+// Quit really ends the app: the window closing may only hide it, and this is the
+// way out. The shutdown hook then stops the server.
+func Quit(a *App) {
+	wruntime.Quit(a.ctx)
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -215,6 +243,23 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) restoreLibrary(ctx context.Context) {
 	if err := a.library.Restore(ctx); err != nil {
 		a.log.Warn("could not reopen the previous library folder", slog.String("error", err.Error()))
+	}
+	a.autoStart()
+}
+
+// autoStart starts the server when the person asked for that and there is
+// something to share. It does nothing when the server is already up or on its
+// way, so the first folder, a restore and a click can all call it freely.
+func (a *App) autoStart() {
+	if !a.settings.Get().AutoStart || len(a.library.State()) == 0 {
+		return
+	}
+	if a.streaming.Status().State != server.Idle {
+		return
+	}
+	if err := a.StartServer(); err != nil && !errors.Is(err, server.ErrInvalidTransition) {
+		// The failure also reaches the UI as a server:state event; this is the trace.
+		a.log.Warn("could not start the server automatically", slog.String("error", err.Error()))
 	}
 }
 
@@ -262,8 +307,11 @@ func (a *App) ChooseFolder() error {
 	if path == "" {
 		return nil
 	}
-	_, err = a.library.Add(a.ctx, path)
-	return err
+	if _, err = a.library.Add(a.ctx, path); err != nil {
+		return err
+	}
+	a.autoStart()
+	return nil
 }
 
 // ListLibraries returns every library with what is in it and what is happening
@@ -345,14 +393,35 @@ func (a *App) SetWindowTheme(mode string) error {
 // arrives as a "server:state" event; an error here means the request itself was
 // refused (for example, the server is already running) or the bind failed.
 func (a *App) StartServer() error {
+	return a.streaming.Start(a.ctx, a.serverConfig())
+}
+
+// serverConfig is the saved settings in the form the server starts with.
+func (a *App) serverConfig() streaming.Config {
 	s := a.settings.Get()
-	return a.streaming.Start(a.ctx, streaming.NewConfig(
+	return streaming.NewConfig(
 		streaming.WithPort(s.Port),
 		streaming.WithName(s.Name),
 		// Never together with the token (settings refuses that too): a TV cannot
 		// present it, so this is a second lock on the same door.
 		streaming.WithDLNA(s.DLNA && !s.RequireToken),
-	))
+		streaming.WithKeepAwake(s.KeepAwake),
+	)
+}
+
+// RefreshAddresses restarts the running server so it picks up the addresses the
+// computer has now, after the Wi-Fi or cable changed. The listeners are fixed
+// when the server starts, so this is the whole job. Remote access goes down with
+// the server (a tunnel never outlives it) and has to be turned on again. Nothing
+// happens when the server is not running.
+func (a *App) RefreshAddresses() error {
+	if a.streaming.Status().State != server.Running {
+		return nil
+	}
+	if err := a.streaming.Stop(a.ctx); err != nil {
+		return fmt.Errorf("refresh addresses: %w", err)
+	}
+	return a.StartServer()
 }
 
 // StopServer stops the HTTP server gracefully.
@@ -375,8 +444,60 @@ func (a *App) GetSettings() SettingsDTO {
 // port, name or Smart TV setting applies the next time the server starts; the
 // token applies at once.
 func (a *App) UpdateSettings(in SettingsInputDTO) error {
-	_, err := a.settings.Update(settings.Input{Port: in.Port, Name: in.Name, RequireToken: in.RequireToken, DLNA: in.DLNA})
+	_, err := a.settings.Update(settings.Input{
+		Port: in.Port, Name: in.Name, RequireToken: in.RequireToken, DLNA: in.DLNA,
+		AutoStart: in.AutoStart, KeepAwake: in.KeepAwake, OpenAtLogin: in.OpenAtLogin, HideOnClose: in.HideOnClose,
+	})
 	return err
+}
+
+// GetFFmpegStatus says whether ffmpeg was found, where, and what to run to
+// install it. It is the answer to "why are there no pictures?".
+func (a *App) GetFFmpegStatus() FFmpegStatusDTO {
+	st := FFmpegStatusDTO{InstallCommand: ffmpegInstallCommand(runtime.GOOS), Chosen: a.settings.Get().FFmpegPath}
+	if a.ffmpeg != nil {
+		st.Path = a.ffmpeg.Path()
+	}
+	st.Available = st.Path != ""
+	return st
+}
+
+// ffmpegInstallCommand is the one line that installs ffmpeg with the package
+// manager people on that system usually have. Empty means there is no such line.
+func ffmpegInstallCommand(goos string) string {
+	switch goos {
+	case "darwin":
+		return "brew install ffmpeg"
+	case "windows":
+		return "winget install ffmpeg"
+	default:
+		return ""
+	}
+}
+
+// ChooseFFmpeg opens the native file picker for the person to point at ffmpeg,
+// checks that it can be run, and remembers it. Cancelling is not an error. The
+// new state arrives as a "settings:changed" event.
+func (a *App) ChooseFFmpeg() error {
+	if a.ffmpeg == nil {
+		return errors.New("ffmpeg cannot be set on this build")
+	}
+	path, err := a.pickFile(a.ctx, "Locate ffmpeg")
+	if err != nil {
+		return fmt.Errorf("choose ffmpeg: %w", err)
+	}
+	if path == "" {
+		return nil
+	}
+	if err := a.ffmpeg.Check(path); err != nil {
+		return err
+	}
+	return a.settings.SetFFmpegPath(path)
+}
+
+// ClearFFmpegPath goes back to looking for ffmpeg without help.
+func (a *App) ClearFFmpegPath() error {
+	return a.settings.SetFFmpegPath("")
 }
 
 // RotateAccessToken replaces the access token. Devices using the old link are

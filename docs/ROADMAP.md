@@ -61,13 +61,20 @@ Still to do for v1.0, none of it started:
 
 ## Seams needed later
 
+- **Phase 14 (v1.1.1), built but never run on the target hardware:** the Windows tray icon and hide-on-close (ADR 0030), the Windows `Run` key, the macOS LaunchAgent after a real sign-in, and `SetThreadExecutionState` (ADR 0025) have been compiled for macOS and Windows and unit-tested where the platform allowed (the `caffeinate` adapter and the plist run for real on macOS). Each has a row in [TESTING-DEVICES.md](TESTING-DEVICES.md). Until the tray has run on Windows, hide-on-close is off by default there.
+- **Phase 14 not done (needs the outside world):** 14.1 macOS signing + notarization, 14.2 Windows code signing (accounts, certificates, CI secrets; ADR 0023 is reserved for the decision).
+- **First device in the wizard (14.4):** read from the access log (a non-loopback client with an answered request). A device behind a tunnel appears with the tunnel's loopback address and is not counted; the wizard is about the home network.
+- **Keep-awake (14.6):** prevents idle sleep only. Closing a laptop lid on battery still sleeps it, and nothing portable overrides that. A running server does not pick up a changed setting until it restarts.
+- **Hide-on-close is read at startup (14.7):** Wails takes it as a window option, so the Settings switch applies the next time EinCast opens.
+
 - **Free a port (12):** parsers are tested on sample output; the real `lsof` path was run against a live listener on macOS. The Windows path (`netstat -ano`, `tasklist`, `TerminateProcess`) has been compiled and unit-tested on samples but never run on Windows; CI runs the unit tests there. Before relying on it, run it once against a real listener on Windows, including a localized one if possible.
-- **Offer it where the failure happens (12):** when `Start` fails with "address already in use", the Dashboard could link straight to this card with the port filled in. Today the person finds it in Settings.
+- **Offer it where the failure happens (12), done in Phase 14.8:** when `Start` fails with "address already in use" (or Windows' "Only one usage of each socket address"), the Dashboard offers "Find what is using port N", which opens Settings → Free a port and looks straight away.
 
 - **Upgrade renumbers item IDs (11):** a one-time loss of resume positions saved in browsers (ADR 0021). Nothing to do unless it matters to someone.
 - **Per-library views on DLNA and the device page (11):** both list all libraries merged (DLNA merges folders of the same name). A top-level folder per library when there are several is the seam.
 - **Library order (11):** libraries appear in the order they were added; there is no reordering.
 - **Libraries on removable drives (11):** a missing folder stays listed with its error and is picked up again by a rescan (or a change event once it is back, if it was being watched). There is no "check again when a drive is mounted".
+- **Measured at 50,000 files (Phase 13.7, macOS arm64, Apple silicon, local SSD):** 45,000 media items plus 5,000 subtitles in 100 folders. Scan 0.26 s; replacing the repo's contents 7 ms; one `State()` library pass (copy + `Summarize`) 1.8 ms; watching them all set up in 2.0 s and a new file noticed in 1 ms. Nothing needs fixing at this size. Not covered: a network share, a spinning disk, a cold file cache, or an app launched from Finder (its file-handle limit may differ from the terminal's 1,048,576). Re-run with `EINCAST_SCALE_FILES=50000 go test ./internal/adapters/fsscan ./internal/adapters/fswatch -run TestScale -v`.
 - **Statistics cost (11):** `State()` sums every library's items on each event; caching them per library is the seam if a library grows to hundreds of thousands of files.
 
 - **No real TV yet (10b/10c):** discovery was checked with a second process over real multicast on this Mac, and the browse path with a test that plays a TV's part. TV firmwares differ (Samsung, LG, Sony, Android TV, Kodi, VLC). Before v0.5 is called finished: try at least one TV and one app (VLC's UPnP list is the easiest), and expect small changes in `didl.go` (`protocolInfo`, `DLNA.ORG_PN`, `dc:date`) or `handler.go`.
@@ -80,7 +87,7 @@ Still to do for v1.0, none of it started:
 - **mDNS name conflicts (10a):** two EinCasts on one network both claim `eincast.local`. Probing and renaming (`eincast-2.local`) is the seam.
 - **Network changes (10a/10c):** the announced addresses are fixed at start, like the listeners (see "Network changes" above).
 - **SSDP on IPv6 (10c):** IPv4 only; the server listens on IPv4 only.
-- **Client isolation and firewalls (10a/10c):** a Wi-Fi with client isolation, or a firewall dropping UDP 1900 / 5353, hides the server. The address and QR code still work; the log says what was announced. A Settings hint could point this out.
+- **Client isolation and firewalls (10a/10c), hint done in Phase 14.10:** Settings → Network lists the usual causes (same network, client isolation, UDP 1900/5353, the first-run firewall prompt) and the wizard repeats the firewall prompt per system. The app cannot detect any of them; they are advice.
 
 - **HLS on Chrome/Firefox (9b):** only devices that play HLS natively get converted streams. `hls.js` (a vendored script, a CSP line) would cover computers; the page's `canPlayHLS()` is the one decision to change.
 - **HLS never run on a real Apple device or TV (9b):** the output is verified against the real ffmpeg and a handwritten player. Before relying on it: open an MKV from an iPhone and an iPad on the LAN, then through a tunnel (segments authenticate by cookie only), and from a smart TV browser if there is one. Check seeking, pausing for a minute, and subtitles on a converted stream.
@@ -98,7 +105,7 @@ Still to do for v1.0, none of it started:
 - **Watcher on very large libraries (8b):** on macOS every watched file costs a file handle (kqueue). When the system refuses, nothing is watched and the Library screen says so; Rescan still works. If that is common, the seam is a polling `FolderWatcher` behind the same port (a stat-walk every few seconds) used as the fallback.
 - **Watcher on network shares (8b):** some SMB/NFS mounts deliver no change notifications, and nothing tells EinCast. The folder shows "Watching" and never signals. A "check every N minutes" setting is the seam.
 - **Watching can't be turned off (8b):** no setting yet; `library.WithWatcher` is the single place to make it optional.
-- **ffmpeg location (8c):** found on `PATH` and in the usual install folders only. A "Locate ffmpeg…" setting like cloudflared's is the seam if people report it missing.
+- **ffmpeg location (8c), done in Phase 14.9:** Settings → ffmpeg says whether it was found and where, shows an install command (`brew install ffmpeg`, `winget install ffmpeg`), and has "Locate ffmpeg…". A chosen location that stops working is an error, never a silent switch to another ffmpeg. The `winget` package name is unchecked on a real Windows machine. ffmpeg is still not bundled (licence and size); revisit after a licence review.
 - **Thumbnail warm-up (8c):** pictures are made when first looked at; a background pass over a freshly scanned library (low priority, one at a time) would make the first scroll instant. The service's `Get` is the seam.
 - **Thumbnail queue (8c):** requests that wait behind slow files each hold their caller for up to the 30 s timeout. A bounded queue that answers "busy" would let a page give up sooner.
 - **ffmpeg and exotic formats (8c):** HEIC/AVIF and unusual containers depend on the installed ffmpeg's build. Nothing was tested beyond what the development machine's ffmpeg 8 decodes (H.264/MP4, PNG, WAV, MP3 with cover art).
@@ -116,7 +123,7 @@ Still to do for v1.0, none of it started:
 - **Token expiry:** the cookie lasts 30 days and the token until replaced. A "sign out all devices" action is the existing token rotation.
 - **Windows file attributes:** the scanner still skips by name only (dot-files and known system names), not the Windows "hidden" attribute.
 - **Cross-platform tests:** `scripts/check-cross.sh` proves compilation for macOS and Windows from one machine; behaviour on Windows is checked only by `.github/workflows/ci.yml`, which has not run yet because nothing is pushed.
-- **Network changes:** the bound addresses are fixed at start; a new Wi-Fi/Ethernet address needs a restart. A watcher (or a "refresh addresses" action) can come with Settings.
+- **Network changes (Phase 14.10):** the bound addresses are fixed at start. Settings → Network has "Refresh addresses", which restarts the server (and so turns remote access off). A watcher that notices the change and offers it is the seam.
 - **Tailscale and mDNS addresses (Phase 7 / v0.5):** `netinfo` deliberately skips the Tailscale interface (CGNAT range); the tailscale provider reports its own URL. `eincast.local` arrives with mDNS.
 - **Player page on old TVs:** `app.js` uses `fetch`, `async/await`, template-free string concatenation and `replaceChildren`. A very old smart-TV browser may need a lighter fallback; test on real devices before v1.0.
 - **Settings (Phase 6):** `StartServer()` uses `streaming.NewConfig()` defaults (port 8765, name "EinCast"). Port and name come from persisted settings later; `Config` and its options are already the seam.

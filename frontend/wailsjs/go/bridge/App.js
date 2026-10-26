@@ -10,12 +10,20 @@ export function CheckPort(arg1) {
   return window['go']['bridge']['App']['CheckPort'](arg1);
 }
 
+export function ChooseFFmpeg() {
+  return window['go']['bridge']['App']['ChooseFFmpeg']();
+}
+
 export function ChooseFile(arg1) {
   return window['go']['bridge']['App']['ChooseFile'](arg1);
 }
 
 export function ChooseFolder() {
   return window['go']['bridge']['App']['ChooseFolder']();
+}
+
+export function ClearFFmpegPath() {
+  return window['go']['bridge']['App']['ClearFFmpegPath']();
 }
 
 export function ClearRemotePIN() {
@@ -36,6 +44,10 @@ export function EnableRemote(arg1) {
 
 export function FreePort(arg1, arg2) {
   return window['go']['bridge']['App']['FreePort'](arg1, arg2);
+}
+
+export function GetFFmpegStatus() {
+  return window['go']['bridge']['App']['GetFFmpegStatus']();
 }
 
 export function GetLogHistory() {
@@ -72,6 +84,10 @@ export function ListLibrary() {
 
 export function ListRemoteProviders() {
   return window['go']['bridge']['App']['ListRemoteProviders']();
+}
+
+export function RefreshAddresses() {
+  return window['go']['bridge']['App']['RefreshAddresses']();
 }
 
 export function RemoveLibrary(arg1) {

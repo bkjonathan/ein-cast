@@ -1,0 +1,83 @@
+# Device test matrix
+
+Every claim in the README should be true on a real device. This page records
+what was actually tried. It is Phase 13 of [PLAN-v1.1.md](PLAN-v1.1.md).
+
+## How to read it
+
+Each cell holds one of:
+
+| Mark | Meaning |
+|---|---|
+| ✅ | Worked. |
+| ⚠️ | Worked with a problem. Put the issue number in the log below. |
+| ❌ | Did not work. Put the issue number in the log below. |
+| — | Does not apply to this device (for example, a phone has no UPnP list). |
+| *(empty)* | Not tried yet. |
+
+Rows marked **must** have to be filled in before v1.1.1 is tagged
+(release gate 2). Failures go to GitHub issues, one per failure, and are either
+fixed or listed under "Known limits" in the README.
+
+## The matrix
+
+Columns: **QR** connect by scanning the QR code · **MP4** play an MP4 ·
+**MKV** play an MKV through the converted (HLS) stream · **Subs** a sidecar
+`.srt` shows · **Seek** jumping forward and back · **Resume** reopening
+continues where it stopped · **M3U** `/playlist.m3u` opens in the device's player ·
+**DLNA** the device lists EinCast and browses the library.
+
+| Device | Must | QR | MP4 | MKV | Subs | Seek | Resume | M3U | DLNA |
+|---|---|---|---|---|---|---|---|---|---|
+| iPhone, Safari | **must** | | | | | | | — | — |
+| iPad, Safari | **must** | | | | | | | — | — |
+| Android phone, Chrome | | | | | | | | — | — |
+| Windows, Chrome | **must** | | | | | | | — | — |
+| Windows, Edge | | | | | | | | — | — |
+| macOS, Safari | **must** | | | | | | | — | — |
+| macOS, Chrome | | | | | | | | — | — |
+| Samsung or LG TV, built-in browser | | | | | | | | — | — |
+| Samsung or LG TV, DLNA / media player app | | — | | — | | | — | — | |
+| Android TV or Chromecast with Google TV | | | | | | | | | — |
+| VLC desktop (UPnP list and opening the M3U) | **must** | — | | — | | | — | | |
+| VLC mobile | | — | | — | | | — | | |
+| Infuse | | — | | — | | | — | | |
+
+"MKV" on a device that plays Matroska natively is still worth recording, but the
+interesting case is a file the device cannot decode (HEVC in MKV is the usual
+one).
+
+## Test material
+
+Keep the same small set of files for every run so results compare:
+
+- `sample-h264.mp4`: H.264 + AAC, about 2 minutes.
+- `sample-hevc.mkv`: HEVC + AAC in Matroska, about 2 minutes.
+- `sample-h264.srt` next to the MP4, named `sample-h264.en.srt`.
+- One folder two levels deep, so the DLNA browse has a tree.
+
+## Run log
+
+One line per run. Add a line, do not edit old ones.
+
+| Date | EinCast version | Device and OS version | Network (Wi-Fi / tunnel) | Result summary | Issues |
+|---|---|---|---|---|---|
+| | | | | | |
+
+## Other Phase 13 checks
+
+These are not device rows but belong to the same reality check.
+
+| Check | Where | Status |
+|---|---|---|
+| 13.4 Windows 11: install, start, firewall prompt, Free a port, Mica look, uninstall | real Windows machine | not run |
+| 14.6 Keep awake: `pmset -g assertions` shows `caffeinate` while sharing (macOS); `powercfg /requests` shows EinCast (Windows); gone after Stop | real machines | macOS: not run on a Mac laptop; Windows: not run |
+| 14.7 Windows tray icon: Open / Quit, close-to-tray, relaunch shows the window | real Windows machine | not run |
+| 14.7 Open at login: LaunchAgent after a real macOS sign-in; `Run` key after a real Windows sign-in; starts hidden only with hide-on-close | real machines | not run |
+| 14.4 First-run wizard: stopwatch from install to first video, three people, both systems | real people | not run |
+| 13.5 Tailscale, second tailnet device | real tailnet | not run |
+| 13.5 Cloudflare quick tunnel (banner parser, `~/.cloudflared/config.yml`) | real `cloudflared` | not run |
+| 13.5 Cloudflare named tunnel | real token | not run |
+| 13.5 ngrok | real authtoken | not run |
+| 13.6 Visual pass of every screen, light and dark | running window | not run |
+| 13.7 Large-library check, 50,000 files | `EINCAST_SCALE_FILES=50000 go test ./internal/adapters/fsscan ./internal/adapters/fswatch -run TestScale -v` | **done**, numbers in [ROADMAP.md](ROADMAP.md) |

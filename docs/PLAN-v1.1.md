@@ -5,6 +5,8 @@ The goal of this release is not more features. It is that a stranger can downloa
 **Positioning (one sentence, used in every task below):**
 > The simplest way to play your laptop's videos on any TV. No server, no account.
 
+**Progress note (Phase 14):** built 14.3–14.11. 14.1 and 14.2 (signing) stay open: they need accounts and certificates. ADR 0023 stays reserved for the signing decision; 0024 (token default) and 0025 (keep awake) took their planned numbers, and 14.7 is ADR 0030 because 0026–0029 belong to Phases 15, 16, 18 and 19. Windows tray, Run key and hide-on-close are compiled and unit-tested but never run on Windows (see [TESTING-DEVICES.md](TESTING-DEVICES.md)).
+
 **How this plan follows the project rules** ([CLAUDE.md](../CLAUDE.md)): phases continue from 13, each phase ends with a build + tests + three understanding questions, every real decision gets an ADR (numbering continues at 0023), and anything not built goes into [ROADMAP.md](ROADMAP.md) "Seams", not into code.
 
 Sizes: **S** = under a day, **M** = 1–3 days, **L** = a week or more. Items marked 🔒 need something outside the code (money, an account, a physical device).
@@ -52,13 +54,13 @@ Phase 13 comes first because the roadmap lists about ten things that were writte
 
 Goal: every claim in the README is true on a real device.
 
-- [ ] **13.1 Device test matrix (S).** Create `docs/TESTING-DEVICES.md`: a table of device × feature × result × date × EinCast version. Rows: iPhone Safari, iPad Safari, Android Chrome, Windows Chrome/Edge, macOS Safari/Chrome, one Samsung or LG TV (browser + DLNA), Android TV / Chromecast with Google TV, VLC desktop (UPnP list), VLC mobile, Infuse. Columns: connect by QR, play MP4, play MKV (HLS), subtitles, seek, resume, playlist.m3u, DLNA browse.
+- [x] **13.1 Device test matrix (S).** Create `docs/TESTING-DEVICES.md`: a table of device × feature × result × date × EinCast version. Rows: iPhone Safari, iPad Safari, Android Chrome, Windows Chrome/Edge, macOS Safari/Chrome, one Samsung or LG TV (browser + DLNA), Android TV / Chromecast with Google TV, VLC desktop (UPnP list), VLC mobile, Infuse. Columns: connect by QR, play MP4, play MKV (HLS), subtitles, seek, resume, playlist.m3u, DLNA browse.
 - [ ] **13.2 Run the matrix 🔒 (M).** Needs the physical devices. Record failures as GitHub issues, not in your head.
 - [ ] **13.3 Fix what fails (M–L).** Expect small changes in `didl.go` (`protocolInfo`, `DLNA.ORG_PN`), subtitle `<res>` for TVs, and the player page on old TV browsers.
 - [ ] **13.4 Windows pass 🔒 (M).** Run on a real Windows 11 machine: install, start server, firewall prompt, Free a port (`netstat`/`taskkill` path has never run on Windows), Mica look, installer, uninstall.
 - [ ] **13.5 Tunnel pass 🔒 (S each).** One real run each: Tailscale (second device), Cloudflare quick tunnel (check the banner parser and the `~/.cloudflared/config.yml` concern), Cloudflare named tunnel, ngrok.
 - [ ] **13.6 Visual pass (S).** Open every screen in the running window: Library list, Remote screen, title-bar badge, Appearance light/dark/forced theme, thumbnails grid. Fix spacing and contrast.
-- [ ] **13.7 Large-library check (S).** Generate a folder with ~50,000 small files; measure scan time, `State()` cost, watcher behaviour on macOS (kqueue file handles). Fix only if it is bad; otherwise note numbers in ROADMAP.
+- [x] **13.7 Large-library check (S).** Generate a folder with ~50,000 small files; measure scan time, `State()` cost, watcher behaviour on macOS (kqueue file handles). Fix only if it is bad; otherwise note numbers in ROADMAP.
 
 **Done when:** `TESTING-DEVICES.md` has no empty cells for the "must work" rows (iPhone, iPad, Windows Chrome, macOS Safari, VLC), and every failure is either fixed or listed in the README under "Known limits".
 
@@ -70,15 +72,15 @@ Goal: download → first video playing on a TV in under two minutes, with no sca
 
 - [ ] **14.1 macOS signing + notarization 🔒 (M).** Apple Developer Program membership (paid, yearly). Add the certificate and notarization credentials as GitHub Actions secrets; extend `release.yml` to sign, notarize and staple. Remove the `xattr` instruction from release notes. ADR 0023.
 - [ ] **14.2 Windows code signing 🔒 (M).** Options: a paid certificate, Azure Trusted Signing, or a free program for open-source projects (check current eligibility, e.g. SignPath Foundation). Sign the installer and portable exe in CI. SmartScreen reputation still builds slowly; say so in the README.
-- [ ] **14.3 Access token on by default (M).** New installs generate a token on first run and the QR code already contains it. Existing installs keep their setting. The Smart TV option stays exclusive with the token (ADR 0011/0020): when the person turns on Smart TVs, show a plain warning and let them choose. Update the README line that says the token is off by default. ADR 0024.
-- [ ] **14.4 First-run wizard (M).** Replace the single "Choose Media Folder" screen with 3 steps: (1) pick folder, (2) start server and show QR, (3) "Open this on your TV or phone" with a live indicator that turns green when the first device connects (the access log already knows). Skippable.
-- [ ] **14.5 Start server automatically after choosing a folder (S).** A setting "Start the server when EinCast opens" (default on after first run).
-- [ ] **14.6 Keep the computer awake while serving (M).** macOS: IOKit power assertion (`IOPMAssertionCreateWithName`) or spawn `caffeinate -i`. Windows: `SetThreadExecutionState`. Put it behind a `PowerGuard` port so the app layer stays pure; build-tagged adapters. Setting "Keep my computer awake while sharing" (default on), released when the server stops. ADR 0025.
-- [ ] **14.7 Launch at login + menu-bar/tray mode (M).** Closing the window keeps sharing from the tray/menu bar; "Quit" really stops. This fixes "server only runs while the app is open" for most people. Wails v2 has no built-in tray, so check the options (a small tray library behind a `Tray` port, or hide-window-on-close only) and record the choice in an ADR. Setting "Open EinCast at login".
-- [ ] **14.8 Port-in-use link (S).** From ROADMAP seam: when Start fails with "address already in use", the Dashboard offers a button into Settings → Free a port with the port filled in.
-- [ ] **14.9 ffmpeg guidance (M).** First-run and Settings detect ffmpeg. If missing, show what it unlocks (thumbnails, MKV/HEVC on iPhone) with a copyable install command (`brew install ffmpeg`, `winget install ffmpeg`) and a **Locate ffmpeg…** picker (ROADMAP seam, same as cloudflared's). Do **not** bundle ffmpeg in 1.1 (licensing and size); note it in ROADMAP.
-- [ ] **14.10 Network-change and firewall hints (S).** "Refresh addresses" action when the Wi-Fi changes (seam from ROADMAP). A Settings hint for Wi-Fi client isolation and blocked UDP 1900/5353 when a TV can't see the server. First-run macOS/Windows firewall prompt explained in the wizard.
-- [ ] **14.11 Honest warnings stay (S).** Keep the Cloudflare terms notice and ngrok warning. Recommend Tailscale first in the Remote screen order.
+- [x] **14.3 Access token on by default (M).** New installs generate a token on first run and the QR code already contains it. Existing installs keep their setting. The Smart TV option stays exclusive with the token (ADR 0011/0020): when the person turns on Smart TVs, show a plain warning and let them choose. Update the README line that says the token is off by default. ADR 0024.
+- [x] **14.4 First-run wizard (M).** Replace the single "Choose Media Folder" screen with 3 steps: (1) pick folder, (2) start server and show QR, (3) "Open this on your TV or phone" with a live indicator that turns green when the first device connects (the access log already knows). Skippable.
+- [x] **14.5 Start server automatically after choosing a folder (S).** A setting "Start the server when EinCast opens" (default on after first run).
+- [x] **14.6 Keep the computer awake while serving (M).** macOS: IOKit power assertion (`IOPMAssertionCreateWithName`) or spawn `caffeinate -i`. Windows: `SetThreadExecutionState`. Put it behind a `PowerGuard` port so the app layer stays pure; build-tagged adapters. Setting "Keep my computer awake while sharing" (default on), released when the server stops. ADR 0025.
+- [x] **14.7 Launch at login + menu-bar/tray mode (M).** Closing the window keeps sharing from the tray/menu bar; "Quit" really stops. This fixes "server only runs while the app is open" for most people. Wails v2 has no built-in tray, so check the options (a small tray library behind a `Tray` port, or hide-window-on-close only) and record the choice in an ADR. Setting "Open EinCast at login".
+- [x] **14.8 Port-in-use link (S).** From ROADMAP seam: when Start fails with "address already in use", the Dashboard offers a button into Settings → Free a port with the port filled in.
+- [x] **14.9 ffmpeg guidance (M).** First-run and Settings detect ffmpeg. If missing, show what it unlocks (thumbnails, MKV/HEVC on iPhone) with a copyable install command (`brew install ffmpeg`, `winget install ffmpeg`) and a **Locate ffmpeg…** picker (ROADMAP seam, same as cloudflared's). Do **not** bundle ffmpeg in 1.1 (licensing and size); note it in ROADMAP.
+- [x] **14.10 Network-change and firewall hints (S).** "Refresh addresses" action when the Wi-Fi changes (seam from ROADMAP). A Settings hint for Wi-Fi client isolation and blocked UDP 1900/5353 when a TV can't see the server. First-run macOS/Windows firewall prompt explained in the wizard.
+- [x] **14.11 Honest warnings stay (S).** Keep the Cloudflare terms notice and ngrok warning. Recommend Tailscale first in the Remote screen order.
 
 **Done when:** a person who has never seen EinCast, on a clean Mac and a clean Windows PC, gets a video playing on their phone in under two minutes with no manual terminal commands. Time it with a stopwatch on three people.
 

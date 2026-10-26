@@ -32,11 +32,9 @@ var _ app.Transcoder = (*Transcoder)(nil)
 // NewTranscoder returns a Transcoder that works in folders under baseDir. Whatever
 // an earlier run left there (a crash, a killed process) is deleted now: nothing
 // in it can be served again.
-func NewTranscoder(baseDir string, log *slog.Logger) *Transcoder {
-	t := &Transcoder{
-		finder:  finder{log: log.With(slog.String("source", "transcode")), find: locate},
-		baseDir: baseDir,
-	}
+func NewTranscoder(baseDir string, log *slog.Logger, opts ...Option) *Transcoder {
+	t := &Transcoder{baseDir: baseDir}
+	t.init(log.With(slog.String("source", "transcode")), opts)
 	t.clearStale()
 	return t
 }

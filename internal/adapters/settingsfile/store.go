@@ -51,6 +51,15 @@ type file struct {
 	RequireToken bool          `json:"requireToken"`
 	// DLNA is absent from files written before v0.5, which reads as false: off.
 	DLNA bool `json:"dlna"`
+	// The next four are absent from files written before v1.1, which keeps what
+	// those installs always did: nothing starts by itself, the window closes the
+	// app. KeepAwake is a pointer because absent means "on" there: an old install
+	// gets the benign default, not a silent off.
+	AutoStart   bool   `json:"autoStart"`
+	KeepAwake   *bool  `json:"keepAwake,omitempty"`
+	OpenAtLogin bool   `json:"openAtLogin"`
+	HideOnClose bool   `json:"hideOnClose"`
+	FFmpegPath  string `json:"ffmpegPath,omitempty"`
 }
 
 // libraryFile is one remembered library. The ID is not stored: it is derived from
@@ -91,6 +100,11 @@ func (s *Store) Load() (app.Settings, error) {
 		Libraries:    librariesFrom(f),
 		RequireToken: f.RequireToken,
 		DLNA:         f.DLNA,
+		AutoStart:    f.AutoStart,
+		KeepAwake:    f.KeepAwake == nil || *f.KeepAwake,
+		OpenAtLogin:  f.OpenAtLogin,
+		HideOnClose:  f.HideOnClose,
+		FFmpegPath:   f.FFmpegPath,
 	}, nil
 }
 
@@ -99,6 +113,7 @@ func (s *Store) Load() (app.Settings, error) {
 // leaves either the old file or the new one, never half of one. The file is
 // readable by the owner only.
 func (s *Store) Save(in app.Settings) error {
+	keepAwake := in.KeepAwake
 	data, err := json.MarshalIndent(file{
 		Version:      schemaVersion,
 		Port:         in.Port,
@@ -106,6 +121,11 @@ func (s *Store) Save(in app.Settings) error {
 		Libraries:    librariesTo(in.Libraries),
 		RequireToken: in.RequireToken,
 		DLNA:         in.DLNA,
+		AutoStart:    in.AutoStart,
+		KeepAwake:    &keepAwake,
+		OpenAtLogin:  in.OpenAtLogin,
+		HideOnClose:  in.HideOnClose,
+		FFmpegPath:   in.FFmpegPath,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode settings: %w", err)

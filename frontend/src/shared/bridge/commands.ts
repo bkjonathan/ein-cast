@@ -2,13 +2,16 @@
 import {
   AppInfo as goAppInfo,
   CheckPort as goCheckPort,
+  ChooseFFmpeg as goChooseFFmpeg,
   ChooseFile as goChooseFile,
   ChooseFolder as goChooseFolder,
+  ClearFFmpegPath as goClearFFmpegPath,
   ClearRemotePIN as goClearRemotePIN,
   ClearRemoteProviderField as goClearRemoteProviderField,
   DisableRemote as goDisableRemote,
   EnableRemote as goEnableRemote,
   FreePort as goFreePort,
+  GetFFmpegStatus as goGetFFmpegStatus,
   GetLogHistory as goGetLogHistory,
   GetRemoteProviderConfig as goGetRemoteProviderConfig,
   GetRemoteStatus as goGetRemoteStatus,
@@ -17,6 +20,7 @@ import {
   GetThumbnail as goGetThumbnail,
   ListLibraries as goListLibraries,
   ListLibrary as goListLibrary,
+  RefreshAddresses as goRefreshAddresses,
   RemoveLibrary as goRemoveLibrary,
   RenameLibrary as goRenameLibrary,
   RescanAllLibraries as goRescanAllLibraries,
@@ -34,6 +38,7 @@ import {
 import { toLibraryItem, toLibraryState, toLogLine, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
 import type {
   AppInfo,
+  FFmpegStatus,
   LibraryItem,
   LibraryState,
   LogLine,
@@ -124,6 +129,11 @@ export async function getSettings(): Promise<Settings> {
     name: dto.name,
     requireToken: dto.requireToken,
     dlna: dto.dlna,
+    autoStart: dto.autoStart,
+    keepAwake: dto.keepAwake,
+    openAtLogin: dto.openAtLogin,
+    hideOnClose: dto.hideOnClose,
+    ffmpegPath: dto.ffmpegPath,
     accessToken: dto.accessToken,
     tokenPersisted: dto.tokenPersisted,
   };
@@ -135,6 +145,34 @@ export async function getSettings(): Promise<Settings> {
  */
 export async function updateSettings(input: SettingsInput): Promise<void> {
   await goUpdateSettings(input);
+}
+
+/** Whether ffmpeg was found, where, and what to run to install it. */
+export async function getFFmpegStatus(): Promise<FFmpegStatus> {
+  const dto = await goGetFFmpegStatus();
+  return { available: dto.available, path: dto.path, chosen: dto.chosen, installCommand: dto.installCommand };
+}
+
+/**
+ * Opens the native file picker for the person to point at ffmpeg. Resolves when
+ * Go is done (including when the person cancels); the result arrives as a
+ * "settings:changed" event. Rejects with Go's reason when the file cannot be run.
+ */
+export async function chooseFFmpeg(): Promise<void> {
+  await goChooseFFmpeg();
+}
+
+/** Goes back to looking for ffmpeg without help. */
+export async function clearFFmpegPath(): Promise<void> {
+  await goClearFFmpegPath();
+}
+
+/**
+ * Restarts the running server so it uses the computer's current addresses. Remote
+ * access goes down with it. Does nothing when the server is not running.
+ */
+export async function refreshAddresses(): Promise<void> {
+  await goRefreshAddresses();
 }
 
 /** Replaces the access token; devices using the old link are locked out. */

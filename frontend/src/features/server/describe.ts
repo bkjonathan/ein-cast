@@ -25,3 +25,13 @@ export function allowedActions(state: ServerState): { canStart: boolean; canStop
     canStop: state === "running",
   };
 }
+
+/**
+ * Did the server fail because another program holds its port? Go passes the
+ * operating system's words through, and they differ: macOS says "address already
+ * in use", Windows says "Only one usage of each socket address".
+ */
+export function isPortInUse(error: string): boolean {
+  const e = error.toLowerCase();
+  return e.includes("address already in use") || e.includes("only one usage of each socket address");
+}

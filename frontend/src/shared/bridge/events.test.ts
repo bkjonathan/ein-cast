@@ -81,7 +81,7 @@ describe("onEvent", () => {
   });
 
   it.each([
-    ["settings:changed", { port: 9000, name: "Den", requireToken: true, dlna: false, accessToken: "t", tokenPersisted: true }],
+    ["settings:changed", { port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: false, keepAwake: true, openAtLogin: false, hideOnClose: false, ffmpegPath: "", accessToken: "t", tokenPersisted: true }],
   ] as const)("delivers %s payloads", (name, payload) => {
     let deliver: (payload: unknown) => void = () => undefined;
     runtime.EventsOn.mockImplementation((_n: string, cb: (p: unknown) => void) => {

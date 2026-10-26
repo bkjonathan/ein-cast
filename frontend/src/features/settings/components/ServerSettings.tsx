@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useServerStore } from "@/features/server";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 import { Input } from "@/shared/ui/input";
-import { formFrom, isDirty, needsRestart, parsePort } from "../dirty";
+import type { SettingsInput } from "@/shared/bridge";
+import { formFrom, inputFrom, isDirty, needsRestart, parsePort } from "../dirty";
 import { useSettingsCommands } from "../hooks/useSettingsCommands";
 import { useSettingsStore } from "../store";
 
@@ -14,7 +15,7 @@ export function ServerSettings() {
   return <ServerForm key={`${saved.port}|${saved.name}`} saved={saved} />;
 }
 
-function ServerForm({ saved }: { saved: { port: number; name: string; requireToken: boolean; dlna: boolean } }) {
+function ServerForm({ saved }: { saved: SettingsInput }) {
   const [form, setForm] = useState(() => formFrom(saved));
   const { save, pending, error } = useSettingsCommands();
   const running = useServerStore((s) => s.status);
@@ -27,7 +28,7 @@ function ServerForm({ saved }: { saved: { port: number; name: string; requireTok
         // A real form, so Enter saves.
         onSubmit={(e) => {
           e.preventDefault();
-          void save({ port: parsePort(form.port), name: form.name, requireToken: saved.requireToken, dlna: saved.dlna });
+          void save(inputFrom(saved, { port: parsePort(form.port), name: form.name }));
         }}
       >
         <header>

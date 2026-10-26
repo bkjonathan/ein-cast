@@ -87,6 +87,26 @@ type fakeSettings struct {
 	gotInput  settings.Input
 	updates   int
 	rotations int
+	ffmpegSet []string
+	ffmpegErr error
+}
+
+func (f *fakeSettings) SetFFmpegPath(path string) error {
+	f.ffmpegSet = append(f.ffmpegSet, path)
+	return f.ffmpegErr
+}
+
+// fakeFFmpeg answers for the ffmpeg adapter.
+type fakeFFmpeg struct {
+	path     string
+	checkErr error
+	checked  []string
+}
+
+func (f *fakeFFmpeg) Path() string { return f.path }
+func (f *fakeFFmpeg) Check(path string) error {
+	f.checked = append(f.checked, path)
+	return f.checkErr
 }
 
 func (f *fakeSettings) Get() app.SettingsView { return f.view }
@@ -1139,5 +1159,199 @@ func TestFreePort(t *testing.T) {
 				t.Fatalf("freed = %v", ports.freed)
 			}
 		})
+	}
+}
+
+func TestStartServer_KeepAwakeFollowsTheSetting(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		a, st := newTestAppWithStreaming(&fakeLibrary{})
+		a.settings = &fakeSettings{view: app.SettingsView{Settings: app.Settings{Port: 9000, Name: "Den", KeepAwake: on}}}
+		if err := a.StartServer(); err != nil {
+			t.Fatal(err)
+		}
+		if st.startCfg.KeepAwake != on {
+			t.Errorf("KeepAwake = %v, want %v", st.startCfg.KeepAwake, on)
+		}
+	}
+}
+
+func autoStartApp(autoStart bool, libraries int, state server.State) (*App, *fakeStreaming, *fakeLibrary) {
+	lib := &fakeLibrary{state: make([]app.LibraryState, libraries)}
+	a, st := newTestAppWithStreaming(lib)
+	a.settings = &fakeSettings{view: app.SettingsView{Settings: app.Settings{Port: 9000, Name: "Den", AutoStart: autoStart}}}
+	st.status = app.ServerStatus{State: state}
+	return a, st, lib
+}
+
+func TestAutoStart(t *testing.T) {
+	tests := []struct {
+		name      string
+		autoStart bool
+		libraries int
+		state     server.State
+		wantStart int
+	}{
+		{"on, with a library, idle", true, 1, server.Idle, 1},
+		{"off", false, 1, server.Idle, 0},
+		{"nothing to share yet", true, 0, server.Idle, 0},
+		{"already running", true, 1, server.Running, 0},
+		{"on its way up", true, 1, server.Starting, 0},
+		{"failed: the person decides", true, 1, server.Failed, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, st, _ := autoStartApp(tt.autoStart, tt.libraries, tt.state)
+			a.autoStart()
+			if st.starts != tt.wantStart {
+				t.Errorf("starts = %d, want %d", st.starts, tt.wantStart)
+			}
+		})
+	}
+}
+
+func TestAutoStart_FollowsRestoringTheLibrary(t *testing.T) {
+	a, st, lib := autoStartApp(true, 1, server.Idle)
+	a.restoreLibrary(context.Background())
+	if lib.restores != 1 || st.starts != 1 {
+		t.Errorf("restores=%d starts=%d, want the server started after the folders are back", lib.restores, st.starts)
+	}
+}
+
+func TestAutoStart_FollowsChoosingTheFirstFolder(t *testing.T) {
+	a, st, _ := autoStartApp(true, 1, server.Idle)
+	a.pickFolder = func(context.Context) (string, error) { return "/media", nil }
+	if err := a.ChooseFolder(); err != nil {
+		t.Fatal(err)
+	}
+	if st.starts != 1 {
+		t.Errorf("starts = %d, want sharing to begin right after the folder is chosen", st.starts)
+	}
+}
+
+func TestAutoStart_NotAfterAFolderThatFailed(t *testing.T) {
+	a, st, lib := autoStartApp(true, 1, server.Idle)
+	lib.addErr = errors.New("boom")
+	a.pickFolder = func(context.Context) (string, error) { return "/media", nil }
+	if err := a.ChooseFolder(); err == nil {
+		t.Fatal("want the error")
+	}
+	if st.starts != 0 {
+		t.Errorf("starts = %d after a folder that failed", st.starts)
+	}
+}
+
+func TestAutoStart_AFailedStartIsOnlyLogged(t *testing.T) {
+	a, st, _ := autoStartApp(true, 1, server.Idle)
+	st.startErr = errors.New("address already in use")
+	a.autoStart() // must not panic or surface: the server:state event carries it
+	if st.starts != 1 {
+		t.Errorf("starts = %d, want 1", st.starts)
+	}
+}
+
+func TestRefreshAddresses(t *testing.T) {
+	t.Run("restarts a running server with the saved settings", func(t *testing.T) {
+		a, st, _ := autoStartApp(false, 1, server.Running)
+		if err := a.RefreshAddresses(); err != nil {
+			t.Fatal(err)
+		}
+		if st.stops != 1 || st.starts != 1 || st.startCfg.Port != 9000 {
+			t.Errorf("stops=%d starts=%d cfg=%+v", st.stops, st.starts, st.startCfg)
+		}
+	})
+	t.Run("does nothing when the server is not running", func(t *testing.T) {
+		a, st, _ := autoStartApp(false, 1, server.Idle)
+		if err := a.RefreshAddresses(); err != nil || st.stops+st.starts != 0 {
+			t.Errorf("err=%v stops=%d starts=%d", err, st.stops, st.starts)
+		}
+	})
+	t.Run("a stop that fails does not start a second server", func(t *testing.T) {
+		a, st, _ := autoStartApp(false, 1, server.Running)
+		st.stopErr = errors.New("stuck")
+		if err := a.RefreshAddresses(); err == nil || st.starts != 0 {
+			t.Errorf("err=%v starts=%d", err, st.starts)
+		}
+	})
+}
+
+func TestUpdateSettings_PassesTheStartupAndPowerChoices(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fs := &fakeSettings{}
+	a.settings = fs
+	err := a.UpdateSettings(SettingsInputDTO{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := settings.Input{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true}
+	if fs.gotInput != want {
+		t.Errorf("input = %+v, want %+v", fs.gotInput, want)
+	}
+}
+
+func TestGetFFmpegStatus(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	a.settings = &fakeSettings{view: app.SettingsView{Settings: app.Settings{FFmpegPath: "/old/ffmpeg"}}}
+	a.ffmpeg = &fakeFFmpeg{path: "/opt/homebrew/bin/ffmpeg"}
+	got := a.GetFFmpegStatus()
+	if !got.Available || got.Path != "/opt/homebrew/bin/ffmpeg" || got.Chosen != "/old/ffmpeg" || got.InstallCommand != ffmpegInstallCommand(runtime.GOOS) {
+		t.Errorf("status = %+v", got)
+	}
+
+	a.ffmpeg = &fakeFFmpeg{}
+	if got := a.GetFFmpegStatus(); got.Available || got.Path != "" {
+		t.Errorf("status with no ffmpeg = %+v", got)
+	}
+	a.ffmpeg = nil
+	if got := a.GetFFmpegStatus(); got.Available {
+		t.Errorf("status with no adapter = %+v", got)
+	}
+}
+
+func TestFFmpegInstallCommand(t *testing.T) {
+	for goos, want := range map[string]string{"darwin": "brew install ffmpeg", "windows": "winget install ffmpeg", "linux": ""} {
+		if got := ffmpegInstallCommand(goos); got != want {
+			t.Errorf("ffmpegInstallCommand(%q) = %q, want %q", goos, got, want)
+		}
+	}
+}
+
+func TestChooseFFmpeg(t *testing.T) {
+	tests := []struct {
+		name     string
+		picked   string
+		pickErr  error
+		checkErr error
+		wantErr  bool
+		wantSet  []string
+	}{
+		{name: "a usable program is remembered", picked: "/opt/ffmpeg", wantSet: []string{"/opt/ffmpeg"}},
+		{name: "cancelling is not an error", picked: ""},
+		{name: "a file that cannot run is refused and not remembered", picked: "/opt/notes.txt", checkErr: errors.New("not executable"), wantErr: true},
+		{name: "the dialog failing is an error", pickErr: errors.New("no window"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newTestApp(&fakeLibrary{})
+			fs := &fakeSettings{}
+			a.settings = fs
+			a.ffmpeg = &fakeFFmpeg{checkErr: tt.checkErr}
+			a.pickFile = func(context.Context, string) (string, error) { return tt.picked, tt.pickErr }
+
+			if err := a.ChooseFFmpeg(); (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(fs.ffmpegSet, tt.wantSet) {
+				t.Errorf("remembered = %v, want %v", fs.ffmpegSet, tt.wantSet)
+			}
+		})
+	}
+}
+
+func TestClearFFmpegPath(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fs := &fakeSettings{}
+	a.settings = fs
+	if err := a.ClearFFmpegPath(); err != nil || !reflect.DeepEqual(fs.ffmpegSet, []string{""}) {
+		t.Errorf("err=%v remembered=%v", err, fs.ffmpegSet)
 	}
 }

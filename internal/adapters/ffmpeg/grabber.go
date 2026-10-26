@@ -34,9 +34,12 @@ type Grabber struct {
 	finder
 }
 
-// New returns a Grabber that looks for ffmpeg on PATH and where installers put it.
-func New(log *slog.Logger) *Grabber {
-	return &Grabber{finder{log: log.With(slog.String("source", "thumbnails")), find: locate}}
+// New returns a Grabber that looks for ffmpeg on PATH and where installers put
+// it, unless an option names a place.
+func New(log *slog.Logger, opts ...Option) *Grabber {
+	g := &Grabber{}
+	g.init(log.With(slog.String("source", "thumbnails")), opts)
+	return g
 }
 
 // Grab makes a JPEG of the first picture ffmpeg can find in the file: a video

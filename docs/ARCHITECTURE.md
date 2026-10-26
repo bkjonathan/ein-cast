@@ -46,7 +46,10 @@ changes.
 | `adapters/mdns` | `Announcer`: publishes `eincast.local` and an `_http._tcp` service for exactly the announced LAN addresses (ADR 0019) |
 | `adapters/dlna` | Smart TV support (ADR 0020): `Handler` (device/service descriptions, ContentDirectory Browse, ConnectionManager, events), `buildTree`/`didl`/`soap`, pure SSDP messages, the `Responder` (UDP 1900, announce, answer, goodbye) and the `Announcer` that starts it |
 | `adapters/fswatch` | `fsnotify` watcher: one signal for any burst of relevant changes, follows new folders, all-or-nothing |
-| `adapters/ffmpeg` | `Grabber`: one JPEG (video frame, cover art, shrunken photo). `Transcoder`: ffprobe → plan (copy or encode) → HLS into a temporary folder, readiness polling, kill-and-delete on `Stop` |
+| `adapters/ffmpeg` | `Grabber`: one JPEG (video frame, cover art, shrunken photo). Both look for ffmpeg in the location the person chose, else on `PATH` and the usual install folders. `Transcoder`: ffprobe → plan (copy or encode) → HLS into a temporary folder, readiness polling, kill-and-delete on `Stop` |
+| `adapters/powerguard` | `Guard`: keeps the computer awake while a run lasts; `caffeinate -i -w <pid>` on macOS, `SetThreadExecutionState` from a pinned thread on Windows (ADR 0025) |
+| `adapters/loginitem` | `Item`: opens EinCast at login; a LaunchAgent on macOS, a `Run` key value on Windows; both start with `--background` (ADR 0030) |
+| `adapters/tray` | Windows notification-area icon (Open / Quit) so a hidden window can come back; nothing on macOS, where the Dock does it (ADR 0030) |
 | `adapters/thumbcache` | Folder of `<key>.jpg` files in the user cache dir; atomic writes, age-based `Prune` |
 | `adapters/safepath` | `Inside(root, file)`: the symlink-safe "stays in the library" check used by streaming and thumbnails |
 | `adapters/memrepo` | `sync.RWMutex`-guarded snapshot repository |

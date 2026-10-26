@@ -247,6 +247,11 @@ type SettingsDTO struct {
 	Name           string `json:"name"`
 	RequireToken   bool   `json:"requireToken"`
 	DLNA           bool   `json:"dlna"`
+	AutoStart      bool   `json:"autoStart"`
+	KeepAwake      bool   `json:"keepAwake"`
+	OpenAtLogin    bool   `json:"openAtLogin"`
+	HideOnClose    bool   `json:"hideOnClose"`
+	FFmpegPath     string `json:"ffmpegPath"`
 	AccessToken    string `json:"accessToken"`
 	TokenPersisted bool   `json:"tokenPersisted"`
 }
@@ -257,6 +262,11 @@ func toSettingsDTO(v app.SettingsView) SettingsDTO {
 		Name:           v.Name,
 		RequireToken:   v.RequireToken,
 		DLNA:           v.DLNA,
+		AutoStart:      v.AutoStart,
+		KeepAwake:      v.KeepAwake,
+		OpenAtLogin:    v.OpenAtLogin,
+		HideOnClose:    v.HideOnClose,
+		FFmpegPath:     v.FFmpegPath,
 		AccessToken:    v.Token,
 		TokenPersisted: v.TokenPersisted,
 	}
@@ -269,6 +279,19 @@ type SettingsInputDTO struct {
 	Name         string `json:"name"`
 	RequireToken bool   `json:"requireToken"`
 	DLNA         bool   `json:"dlna"`
+	AutoStart    bool   `json:"autoStart"`
+	KeepAwake    bool   `json:"keepAwake"`
+	OpenAtLogin  bool   `json:"openAtLogin"`
+	HideOnClose  bool   `json:"hideOnClose"`
+}
+
+// FFmpegStatusDTO says where ffmpeg is. Chosen is the location the person set,
+// which can be set and broken, so it is shown even when Available is false.
+type FFmpegStatusDTO struct {
+	Available      bool   `json:"available"`
+	Path           string `json:"path"`
+	Chosen         string `json:"chosen"`
+	InstallCommand string `json:"installCommand"`
 }
 
 // PortHolderDTO is a program using a port. Self marks EinCast's own process,

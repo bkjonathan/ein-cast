@@ -279,6 +279,35 @@ type Settings struct {
 	// together with RequireToken: a TV cannot present a token, so the server
 	// would either lock it out or show the library to the whole network.
 	DLNA bool
+	// AutoStart starts the server when EinCast opens, and right after the first
+	// folder is added, so sharing needs no extra click.
+	AutoStart bool
+	// KeepAwake stops the computer sleeping while the server runs: a sleeping
+	// laptop is a server nobody can reach.
+	KeepAwake bool
+	// OpenAtLogin starts EinCast when the person signs in to the computer.
+	OpenAtLogin bool
+	// HideOnClose keeps EinCast sharing when its window is closed. The window
+	// comes back from the Dock or the tray, and Quit really stops it.
+	HideOnClose bool
+	// FFmpegPath is where the person said ffmpeg is. Empty means "look for it".
+	FFmpegPath string
+}
+
+// PowerGuard keeps the computer from sleeping on its own while something needs
+// it awake.
+type PowerGuard interface {
+	// Hold asks the system to stay awake. reason is shown to the person by the
+	// system where it lists such requests. The returned release gives the request
+	// back; it is safe to call more than once.
+	Hold(reason string) (release func(), err error)
+}
+
+// LoginItem starts the app when the person signs in to the computer.
+type LoginItem interface {
+	// Set turns the login entry on or off. Turning off what is not on is not an
+	// error.
+	Set(enabled bool) error
 }
 
 // ErrNoSettings means nothing has been saved yet (first run). It is not a failure.

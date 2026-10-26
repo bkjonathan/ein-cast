@@ -63,6 +63,16 @@ export interface Settings {
   requireToken: boolean;
   /** Smart TV (DLNA) discovery. Never on together with requireToken: Go refuses both. */
   dlna: boolean;
+  /** Start the server when EinCast opens and right after the first folder is added. */
+  autoStart: boolean;
+  /** Keep the computer from sleeping while the server runs. */
+  keepAwake: boolean;
+  /** Open EinCast when the person signs in to the computer. */
+  openAtLogin: boolean;
+  /** Closing the window keeps sharing; read when EinCast starts. */
+  hideOnClose: boolean;
+  /** Where the person said ffmpeg is; empty means "look for it". */
+  ffmpegPath: string;
   /** Empty unless requireToken is on. */
   accessToken: string;
   /** False when the token could not be saved to the system credential store. */
@@ -70,7 +80,21 @@ export interface Settings {
 }
 
 /** The editable part of Settings. */
-export type SettingsInput = Pick<Settings, "port" | "name" | "requireToken" | "dlna">;
+export type SettingsInput = Pick<
+  Settings,
+  "port" | "name" | "requireToken" | "dlna" | "autoStart" | "keepAwake" | "openAtLogin" | "hideOnClose"
+>;
+
+/** Whether ffmpeg was found, and what the person can do about it. */
+export interface FFmpegStatus {
+  available: boolean;
+  /** Where it was found; empty when it was not. */
+  path: string;
+  /** The location the person set, shown even when it no longer works. */
+  chosen: string;
+  /** A one-line install command for this system; empty when there is none to suggest. */
+  installCommand: string;
+}
 
 /** A program using a TCP port. `self` is EinCast's own process, which cannot be ended from here. */
 export interface PortHolder {

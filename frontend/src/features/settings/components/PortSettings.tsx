@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CircleCheck, OctagonX, Search } from "lucide-react";
 import type { PortHolder } from "@/shared/bridge";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
@@ -12,17 +12,30 @@ import { useSettingsStore } from "../store";
  * port. It first shows which program that is, and ends it only on a second,
  * explicit click: killing a process is not something to do from a guess.
  */
-export function PortSettings() {
+export function PortSettings({ checkPort }: { checkPort?: number }) {
   const saved = useSettingsStore((s) => s.settings);
   if (!saved) return null;
-  return <PortTools initialPort={saved.port} />;
+  return <PortTools initialPort={checkPort ?? saved.port} lookNow={checkPort !== undefined} />;
 }
 
-function PortTools({ initialPort }: { initialPort: number }) {
+/**
+ * `lookNow` is set when the Dashboard sent the person here because the server
+ * could not bind: the answer to "who has it?" is then shown without another click.
+ */
+function PortTools({ initialPort, lookNow }: { initialPort: number; lookNow: boolean }) {
   const [text, setText] = useState(String(initialPort));
+  const panel = useRef<HTMLDivElement>(null);
   const [confirming, setConfirming] = useState<number | null>(null);
   const { holders, checkedPort, freedNote, pending, error, check, free, reset } = usePortTools();
   const port = parsePort(text);
+
+  useEffect(() => {
+    if (!lookNow) return;
+    panel.current?.scrollIntoView?.({ block: "start" });
+    void check(initialPort);
+    // Once, when the screen opens. `check` is stable, and a later edit of the
+    // text must not search again by itself.
+  }, []);
 
   const onCheck = () => {
     setConfirming(null);
@@ -30,7 +43,7 @@ function PortTools({ initialPort }: { initialPort: number }) {
   };
 
   return (
-    <GlassPanel className="flex flex-col gap-4 p-6">
+    <GlassPanel ref={panel} className="flex flex-col gap-4 p-6">
       <header className="space-y-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <OctagonX className="size-5" aria-hidden /> Free a port

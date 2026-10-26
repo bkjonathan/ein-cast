@@ -31,14 +31,22 @@ const go = vi.hoisted(() => ({
   ThumbnailsAvailable: vi.fn(),
   SetRemotePIN: vi.fn(),
   ClearRemotePIN: vi.fn(),
+  GetFFmpegStatus: vi.fn(),
+  ChooseFFmpeg: vi.fn(),
+  ClearFFmpegPath: vi.fn(),
+  RefreshAddresses: vi.fn(),
 }));
 vi.mock("../../../wailsjs/go/bridge/App", () => go);
 
 import {
   checkPort,
   freePort,
+  chooseFFmpeg,
   chooseFile,
   chooseFolder,
+  clearFFmpegPath,
+  getFFmpegStatus,
+  refreshAddresses,
   clearRemotePin,
   clearRemoteProviderField,
   getRemoteProviderConfig,
@@ -220,20 +228,26 @@ describe("library commands", () => {
 describe("settings", () => {
   it("getSettings maps the DTO", async () => {
     go.GetSettings.mockResolvedValue({
-      port: 9000, name: "Den", requireToken: true, dlna: false, accessToken: "tok", tokenPersisted: true, junk: 1,
+      port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: true, keepAwake: true,
+      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", accessToken: "tok", tokenPersisted: true, junk: 1,
     });
     await expect(getSettings()).resolves.toStrictEqual({
-      port: 9000, name: "Den", requireToken: true, dlna: false, accessToken: "tok", tokenPersisted: true,
+      port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: true, keepAwake: true,
+      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", accessToken: "tok", tokenPersisted: true,
     });
   });
 
-  it("updateSettings sends the three editable fields and surfaces Go's validation message", async () => {
+  it("updateSettings sends the editable fields and surfaces Go's validation message", async () => {
+    const input = {
+      port: 9100, name: "Den", requireToken: false, dlna: false,
+      autoStart: true, keepAwake: true, openAtLogin: false, hideOnClose: false,
+    };
     go.UpdateSettings.mockResolvedValueOnce(undefined);
-    await updateSettings({ port: 9100, name: "Den", requireToken: false, dlna: false });
-    expect(go.UpdateSettings).toHaveBeenCalledWith({ port: 9100, name: "Den", requireToken: false, dlna: false });
+    await updateSettings(input);
+    expect(go.UpdateSettings).toHaveBeenCalledWith(input);
 
     go.UpdateSettings.mockRejectedValueOnce("port must be between 1024 and 65535");
-    await expect(updateSettings({ port: 80, name: "Den", requireToken: false, dlna: false })).rejects.toMatch(/between 1024/);
+    await expect(updateSettings({ ...input, port: 80 })).rejects.toMatch(/between 1024/);
   });
 
   it("rotateAccessToken resolves with nothing", async () => {
@@ -386,5 +400,32 @@ describe("port commands", () => {
   it("freePort propagates Go's reason", async () => {
     go.FreePort.mockRejectedValue("Not allowed: that program belongs to another user");
     await expect(freePort(8765, 300)).rejects.toMatch(/Not allowed/);
+  });
+});
+
+describe("ffmpeg and addresses", () => {
+  it("getFFmpegStatus maps the DTO", async () => {
+    go.GetFFmpegStatus.mockResolvedValue({
+      available: false, path: "", chosen: "/old/ffmpeg", installCommand: "brew install ffmpeg", junk: 1,
+    });
+    await expect(getFFmpegStatus()).resolves.toStrictEqual({
+      available: false, path: "", chosen: "/old/ffmpeg", installCommand: "brew install ffmpeg",
+    });
+  });
+
+  it("chooseFFmpeg resolves when cancelled and rejects with Go's reason for a file that cannot run", async () => {
+    go.ChooseFFmpeg.mockResolvedValueOnce(undefined);
+    await expect(chooseFFmpeg()).resolves.toBeUndefined();
+    go.ChooseFFmpeg.mockRejectedValueOnce("/tmp/x is not executable");
+    await expect(chooseFFmpeg()).rejects.toMatch(/not executable/);
+  });
+
+  it("clearFFmpegPath and refreshAddresses just ask Go", async () => {
+    go.ClearFFmpegPath.mockResolvedValue(undefined);
+    go.RefreshAddresses.mockResolvedValue(undefined);
+    await clearFFmpegPath();
+    await refreshAddresses();
+    expect(go.ClearFFmpegPath).toHaveBeenCalledOnce();
+    expect(go.RefreshAddresses).toHaveBeenCalledOnce();
   });
 });

@@ -22,6 +22,8 @@ type Config struct {
 	Name string
 	// DLNA turns on Smart TV discovery and the pages TVs browse.
 	DLNA bool
+	// KeepAwake holds the computer awake while the server runs.
+	KeepAwake bool
 }
 
 // Option customizes a Config.
@@ -40,6 +42,12 @@ func WithName(name string) Option {
 // WithDLNA turns Smart TV (DLNA) discovery on or off.
 func WithDLNA(on bool) Option {
 	return func(c *Config) { c.DLNA = on }
+}
+
+// WithKeepAwake keeps the computer from sleeping while the server runs. It only
+// has an effect when the Service was given a PowerGuard.
+func WithKeepAwake(on bool) Option {
+	return func(c *Config) { c.KeepAwake = on }
 }
 
 // NewConfig returns the defaults with opts applied. It does not validate:

@@ -6,9 +6,13 @@ export function AppInfo():Promise<bridge.AppInfoDTO>;
 
 export function CheckPort(arg1:number):Promise<Array<bridge.PortHolderDTO>>;
 
+export function ChooseFFmpeg():Promise<void>;
+
 export function ChooseFile(arg1:string):Promise<string>;
 
 export function ChooseFolder():Promise<void>;
+
+export function ClearFFmpegPath():Promise<void>;
 
 export function ClearRemotePIN():Promise<void>;
 
@@ -19,6 +23,8 @@ export function DisableRemote():Promise<void>;
 export function EnableRemote(arg1:string):Promise<void>;
 
 export function FreePort(arg1:number,arg2:number):Promise<void>;
+
+export function GetFFmpegStatus():Promise<bridge.FFmpegStatusDTO>;
 
 export function GetLogHistory():Promise<Array<bridge.LogLineDTO>>;
 
@@ -37,6 +43,8 @@ export function ListLibraries():Promise<Array<bridge.LibraryStateDTO>>;
 export function ListLibrary():Promise<Array<bridge.LibraryItemDTO>>;
 
 export function ListRemoteProviders():Promise<Array<bridge.RemoteProviderDTO>>;
+
+export function RefreshAddresses():Promise<void>;
 
 export function RemoveLibrary(arg1:string):Promise<void>;
 

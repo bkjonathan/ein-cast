@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formFrom, isDirty, needsRestart, parsePort, tvNeedsRestart } from "./dirty";
+import { formFrom, inputFrom, isDirty, needsRestart, parsePort, smartTvsInsteadOfToken, tvNeedsRestart } from "./dirty";
 
 const saved = { port: 8765, name: "EinCast" };
 
@@ -65,5 +65,33 @@ describe("parsePort", () => {
     ["1e3", 1000],
   ])("%j → %d", (text, expected) => {
     expect(parsePort(text)).toBe(expected);
+  });
+});
+
+describe("inputFrom", () => {
+  const all = {
+    port: 8765, name: "EinCast", requireToken: true, dlna: false,
+    autoStart: true, keepAwake: true, openAtLogin: false, hideOnClose: true,
+  };
+
+  it("sends every field back, because Go replaces them all on each save", () => {
+    expect(inputFrom(all)).toStrictEqual(all);
+  });
+
+  it("changes only what it is told to, and drops fields that are not editable", () => {
+    const withExtras = { ...all, accessToken: "secret", tokenPersisted: true, ffmpegPath: "/x" };
+    const got = inputFrom(withExtras, { keepAwake: false });
+    expect(got).toStrictEqual({ ...all, keepAwake: false });
+    expect(Object.keys(got)).not.toContain("accessToken"); // a token must never ride back
+  });
+});
+
+describe("smartTvsInsteadOfToken", () => {
+  it("makes the exclusive choice in one save and leaves everything else alone", () => {
+    const saved = {
+      port: 9000, name: "Den", requireToken: true, dlna: false,
+      autoStart: true, keepAwake: false, openAtLogin: true, hideOnClose: false,
+    };
+    expect(smartTvsInsteadOfToken(saved)).toStrictEqual({ ...saved, requireToken: false, dlna: true });
   });
 });

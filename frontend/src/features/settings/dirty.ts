@@ -1,4 +1,4 @@
-import type { Settings } from "@/shared/bridge";
+import type { Settings, SettingsInput } from "@/shared/bridge";
 
 export interface ServerForm {
   /** Kept as text so a half-typed number is not rewritten under the cursor. */
@@ -47,4 +47,32 @@ export function tvNeedsRestart(
 export function parsePort(text: string): number {
   const n = Number(text.trim());
   return Number.isInteger(n) ? n : 0;
+}
+
+/**
+ * The whole editable form, taken from what is saved with some fields changed.
+ * Go replaces every field on each save, so a screen that changes one setting must
+ * send the others back unchanged; building the input here keeps that in one place.
+ */
+export function inputFrom(saved: SettingsInput, change: Partial<SettingsInput> = {}): SettingsInput {
+  return {
+    port: saved.port,
+    name: saved.name,
+    requireToken: saved.requireToken,
+    dlna: saved.dlna,
+    autoStart: saved.autoStart,
+    keepAwake: saved.keepAwake,
+    openAtLogin: saved.openAtLogin,
+    hideOnClose: saved.hideOnClose,
+    ...change,
+  };
+}
+
+/**
+ * Turning Smart TVs on while the access token is on is the person's choice to
+ * make: a TV cannot send the token, so Go allows only one of the two. This is the
+ * change that makes that choice, in one save.
+ */
+export function smartTvsInsteadOfToken(saved: SettingsInput): SettingsInput {
+  return inputFrom(saved, { requireToken: false, dlna: true });
 }

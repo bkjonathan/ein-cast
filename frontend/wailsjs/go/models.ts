@@ -16,6 +16,24 @@ export namespace bridge {
 	        this.platform = source["platform"];
 	    }
 	}
+	export class FFmpegStatusDTO {
+	    available: boolean;
+	    path: string;
+	    chosen: string;
+	    installCommand: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FFmpegStatusDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.path = source["path"];
+	        this.chosen = source["chosen"];
+	        this.installCommand = source["installCommand"];
+	    }
+	}
 	export class KindCountsDTO {
 	    video: number;
 	    audio: number;
@@ -303,6 +321,11 @@ export namespace bridge {
 	    name: string;
 	    requireToken: boolean;
 	    dlna: boolean;
+	    autoStart: boolean;
+	    keepAwake: boolean;
+	    openAtLogin: boolean;
+	    hideOnClose: boolean;
+	    ffmpegPath: string;
 	    accessToken: string;
 	    tokenPersisted: boolean;
 	
@@ -316,6 +339,11 @@ export namespace bridge {
 	        this.name = source["name"];
 	        this.requireToken = source["requireToken"];
 	        this.dlna = source["dlna"];
+	        this.autoStart = source["autoStart"];
+	        this.keepAwake = source["keepAwake"];
+	        this.openAtLogin = source["openAtLogin"];
+	        this.hideOnClose = source["hideOnClose"];
+	        this.ffmpegPath = source["ffmpegPath"];
 	        this.accessToken = source["accessToken"];
 	        this.tokenPersisted = source["tokenPersisted"];
 	    }
@@ -325,6 +353,10 @@ export namespace bridge {
 	    name: string;
 	    requireToken: boolean;
 	    dlna: boolean;
+	    autoStart: boolean;
+	    keepAwake: boolean;
+	    openAtLogin: boolean;
+	    hideOnClose: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsInputDTO(source);
@@ -336,6 +368,10 @@ export namespace bridge {
 	        this.name = source["name"];
 	        this.requireToken = source["requireToken"];
 	        this.dlna = source["dlna"];
+	        this.autoStart = source["autoStart"];
+	        this.keepAwake = source["keepAwake"];
+	        this.openAtLogin = source["openAtLogin"];
+	        this.hideOnClose = source["hideOnClose"];
 	    }
 	}
 

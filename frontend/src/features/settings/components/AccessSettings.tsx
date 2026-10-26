@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Check, Copy, Eye, EyeOff, KeyRound, ShieldAlert } from "lucide-react";
 import { useCopy } from "@/shared/hooks/useCopy";
-import { cn } from "@/shared/lib/cn";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
+import { Switch } from "@/shared/ui/Switch";
 import { useSettingsCommands } from "../hooks/useSettingsCommands";
+import { inputFrom } from "../dirty";
 import { useSettingsStore } from "../store";
 
 /** Turns the access token on or off, shows it, and replaces it. */
@@ -28,25 +29,12 @@ export function AccessSettings() {
               : "Off: anyone on your Wi-Fi who knows the address can open your library."}
           </p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
-          aria-label="Require an access token"
+        <Switch
+          checked={on}
+          label="Require an access token"
           disabled={pending || (!on && saved.dlna)}
-          onClick={() => save({ port: saved.port, name: saved.name, requireToken: !on, dlna: saved.dlna })}
-          className={cn(
-            "app-no-drag relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50",
-            on ? "bg-primary" : "bg-(--glass-surface-hover)",
-          )}
-        >
-          <span
-            className={cn(
-              "absolute top-1 left-1 size-5 rounded-full bg-white shadow transition-transform",
-              on && "translate-x-5",
-            )}
-          />
-        </button>
+          onChange={(next) => save(inputFrom(saved, { requireToken: next }))}
+        />
       </header>
 
       {!on && saved.dlna && (

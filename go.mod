@@ -3,6 +3,7 @@ module eincast
 go 1.26.0
 
 require (
+	fyne.io/systray v1.12.2
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/libp2p/zeroconf/v2 v2.2.0
 	github.com/wailsapp/wails/v2 v2.12.0

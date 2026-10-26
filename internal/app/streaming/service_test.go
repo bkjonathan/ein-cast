@@ -760,3 +760,96 @@ func TestDiscovery_NoneConfiguredChangesNothing(t *testing.T) {
 		t.Errorf("Status() = %+v", st)
 	}
 }
+
+// fakePower counts the holds a service asked for and gave back.
+type fakePower struct {
+	mu       sync.Mutex
+	holds    int
+	released int
+	err      error
+}
+
+func (f *fakePower) Hold(string) (func(), error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.holds++
+	return func() { f.mu.Lock(); f.released++; f.mu.Unlock() }, nil
+}
+
+func (f *fakePower) counts() (holds, released int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.holds, f.released
+}
+
+func newServiceWithPower(web *fakeWeb, g app.PowerGuard) *Service {
+	return NewService(web, fakeNet{}, &fakeEvents{}, slog.New(slog.DiscardHandler), WithPowerGuard(g))
+}
+
+func TestKeepAwake_HeldWhileRunningAndReleasedOnStop(t *testing.T) {
+	g := &fakePower{}
+	svc := newServiceWithPower(okWeb(), g)
+	if err := svc.Start(context.Background(), NewConfig(WithKeepAwake(true))); err != nil {
+		t.Fatal(err)
+	}
+	if h, r := g.counts(); h != 1 || r != 0 {
+		t.Fatalf("while running: holds=%d released=%d, want 1 and 0", h, r)
+	}
+	if err := svc.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h, r := g.counts(); h != 1 || r != 1 {
+		t.Errorf("after stop: holds=%d released=%d, want the computer free to sleep again", h, r)
+	}
+}
+
+func TestKeepAwake_ReleasedWhenTheServerCrashes(t *testing.T) {
+	g := &fakePower{}
+	web := okWeb()
+	svc := newServiceWithPower(web, g)
+	_ = svc.Start(context.Background(), NewConfig(WithKeepAwake(true)))
+
+	web.last().end(errors.New("listener closed"))
+	eventually(t, func() bool { return svc.Status().State == server.Failed })
+	if _, r := g.counts(); r != 1 {
+		t.Errorf("released %d times after a crash, want 1: a dead server must not keep the computer awake", r)
+	}
+}
+
+func TestKeepAwake_OnlyWhenAskedFor(t *testing.T) {
+	g := &fakePower{}
+	svc := newServiceWithPower(okWeb(), g)
+	_ = svc.Start(context.Background(), NewConfig(WithKeepAwake(false)))
+	if h, _ := g.counts(); h != 0 {
+		t.Errorf("holds = %d with the setting off, want 0", h)
+	}
+}
+
+func TestKeepAwake_EachRunHoldsOnce(t *testing.T) {
+	g := &fakePower{}
+	svc := newServiceWithPower(okWeb(), g)
+	for i := 0; i < 2; i++ {
+		if err := svc.Start(context.Background(), NewConfig(WithKeepAwake(true))); err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.Stop(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h, r := g.counts(); h != 2 || r != 2 {
+		t.Errorf("holds=%d released=%d, want 2 and 2: a restart must not leak the first hold", h, r)
+	}
+}
+
+func TestKeepAwake_AFailureDoesNotStopTheServer(t *testing.T) {
+	svc := newServiceWithPower(okWeb(), &fakePower{err: errors.New("no power API")})
+	if err := svc.Start(context.Background(), NewConfig(WithKeepAwake(true))); err != nil {
+		t.Fatalf("Start() error = %v, want the server to run anyway", err)
+	}
+	if svc.Status().State != server.Running {
+		t.Errorf("state = %v, want Running", svc.Status().State)
+	}
+}
