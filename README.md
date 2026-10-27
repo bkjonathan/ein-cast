@@ -4,80 +4,105 @@
 
 *Your home media, on every screen.* "Ein" (အိမ်) is Burmese for *home*.
 
+[![CI](https://github.com/bkjonathan/ein-cast/actions/workflows/ci.yml/badge.svg)](https://github.com/bkjonathan/ein-cast/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/bkjonathan/ein-cast)](https://github.com/bkjonathan/ein-cast/releases/latest)
+
 **မြန်မာဘာသာ:** [README.my.md](README.my.md) (install, first run, troubleshooting; an unreviewed draft).
 
-A desktop app (macOS + Windows) that serves a folder of media over your LAN so TVs, iPads and phones can play it. Built with Go, Wails v2 and React.
+**EinCast turns a folder on your Mac or Windows PC into a media server for the TVs, tablets and phones in your home.** Pick a folder, scan a QR code on any screen, and play. No accounts, no cloud, nothing to install on the TV.
 
-> Status: **Phase 11 — several libraries (toward v1.0).** Choose a media folder, start the server, and open it from a TV, iPad or phone by scanning the QR code or typing the address; the page streams video, music and photos, and an M3U playlist works in VLC and Infuse. Add as many media folders as you like (Settings → Libraries). The Library screen lists, searches and sorts your files, across all of them or one at a time, shows thumbnails when `ffmpeg` is installed, and follows the folder by itself as you add or remove files. Remote access (Tailscale, Cloudflare, ngrok) is available behind an access PIN, and the Logs view shows everything the app does. Appearance can follow the system or be set to light or dark. The player page shows subtitles, remembers where you stopped on each device, and converts videos an iPhone or iPad can't play as they are. The server answers to `http://eincast.local:8765` on devices that support mDNS, and, if you turn on **Smart TVs** in Settings, shows up by itself in the media-server list of smart TVs and apps like VLC. On a new install the **access token is on**, and the QR code on the Dashboard carries it, so a phone that scans the code is signed in. An install from before v1.1 keeps whatever it had: if the token was never turned on, anyone on your Wi-Fi who knows the address can open the library while the server runs, and Settings recommends turning it on. Turning on **Smart TVs** turns the token off, because a TV can't send it (you are asked first). EinCast can start sharing when it opens, keep the computer awake while it shares, open at login and keep sharing when its window is closed (Settings → Starting up). A first-run wizard walks through choosing the folder, starting, and opening it on a screen. ffmpeg is optional; Settings → ffmpeg says whether it was found and how to install it. EinCast reads titles, years and series from file names (`Movie.Name.2019.1080p.mkv`, `Show.S02E05.mkv`, `Show/Season 2/05 - Title.mkv`), picks up a `.nfo` file and a poster (`poster.jpg`, `folder.jpg`, `Movie-poster.jpg`) next to a video, and shows posters, series and a detail page on the device page, all from your own disk with no internet lookup. **Profiles** (Settings → Profiles) let a household share the library: each profile can be limited to some libraries, kinds (videos, music, photos) or folders, and given a PIN. A device picks who is watching, and the server enforces the limits on every request, including the playlist and converted streams; a forbidden title answers exactly like one that does not exist. Each profile has its own “Continue watching”, kept by the server so it follows a person from the phone to the TV. Smart TVs cannot say who is watching, so they see only libraries you leave switched on for TVs (Settings → Libraries). A PIN keeps a curious child out; it is not protection against someone who can read this computer's files. Features land phase by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+<!-- TODO (Phase 20.6 and 20.7): demo GIF (about 20 seconds) and screenshots: light, dark, Burmese, the player on a phone and on a TV. Put them in docs/assets/screenshots/ and show them here. -->
 
-## Requirements
+## Download
 
-- Go 1.26+
-- Node 20+ and npm
-- [Wails v2 CLI](https://wails.io/docs/gettingstarted/installation) (`wails doctor` should report success)
+Get the latest build from the **[Releases page](https://github.com/bkjonathan/ein-cast/releases/latest)**:
 
-## Run, build, test
+| System | File |
+|---|---|
+| macOS (Intel and Apple silicon) | `eincast-<version>-macos-universal.zip` |
+| Windows 10/11 | `eincast-<version>-windows-amd64-installer.exe`, or `…-windows-amd64.exe` (portable, no install) |
+
+Each release lists the SHA-256 of every file (`SHA256SUMS.txt`). EinCast can also tell you when a newer version exists; it never installs anything by itself.
+
+**These builds are not code-signed yet**, so your system warns the first time:
+
+- **macOS:** unzip, then run `xattr -dr com.apple.quarantine eincast.app` (or right-click, Open, the first time).
+- **Windows:** SmartScreen warns; choose **More info, Run anyway**.
+
+## Quick start
+
+1. Open EinCast and **choose a media folder**. (A short wizard walks you through it.)
+2. EinCast scans it and **starts sharing**. The Dashboard shows an address and a **QR code**.
+3. On a phone, tablet or TV browser, **scan the code** (or type the address). The library opens.
+4. Press play. Or open `…/playlist.m3u` in **VLC** or **Infuse**. Smart TVs can find it by themselves if you turn on *Smart TVs* in Settings.
+
+Videos a device cannot play as they are (MKV, HEVC…) are converted on the fly if [ffmpeg](https://ffmpeg.org) is installed (`brew install ffmpeg`, `winget install ffmpeg`). Without it everything else still works. More in the [guide](docs/GUIDE.md).
+
+### What you get
+
+- Video, music and photos from any number of folders, in a page that works on every browser.
+- Subtitles (`.srt`, `.vtt`, and text tracks inside MKV/MP4), several audio languages, and **continue watching** that follows a person from phone to TV.
+- **Profiles** for a household: limit a profile to some libraries, kinds or folders, with an optional PIN.
+- Titles, years, series and posters read from your file names and the files beside the video. Nothing is looked up online.
+- Watch away from home through **Tailscale** (private) or a Cloudflare or ngrok tunnel, which always requires a PIN.
+- The app and the player page in **English and Burmese**; a live log of everything the server does.
+
+## Why not Jellyfin?
+
+Often you should use Jellyfin or Plex. EinCast is for the household that wants *"play this folder on that TV, now"* with no accounts, no database and nothing to maintain.
+
+| | EinCast | A media server (Jellyfin, Plex) |
+|---|---|---|
+| Setup | Pick a folder, scan a QR code | Install a server, set up users and libraries |
+| Accounts | None | Server users (Jellyfin); a company account (Plex) |
+| Catalogue with posters from the internet | No: names and local files only | Yes |
+| Native apps on TVs | No: browser, DLNA, VLC, Infuse | Yes |
+| Always on | While the app is open | Yes, on a NAS or spare computer |
+
+The honest long version, including when to pick something else: **[docs/WHY-NOT-JELLYFIN.md](docs/WHY-NOT-JELLYFIN.md)**.
+
+## Privacy and security
+
+- **No accounts, no analytics, no phoning home.** The only request EinCast makes by itself is a once-a-day look at this project's public release list, which you can turn off. Tunnels connect only when you turn them on. Details, and how CI keeps it true: [docs/PRIVACY.md](docs/PRIVACY.md).
+- A new install has the **access token on**: a device needs the link or QR code to open your library. Public access (a tunnel) is refused without a PIN. Devices can never ask for a file path, only an ID.
+- Anyone on your Wi-Fi can open the library if you turn the token off or turn on *Smart TVs*; Settings says so beside each switch.
+- Found a vulnerability? Please report it privately: [SECURITY.md](SECURITY.md).
+
+## Known limits
+
+- **Not code-signed yet** (see Download). Signing needs certificates; it is planned.
+- **Young software.** Only some devices have been tried: [docs/TESTING-DEVICES.md](docs/TESTING-DEVICES.md) lists what has, and what has not. Please add yours.
+- **It runs while the app is open.** EinCast can open at login and keep sharing with its window closed, but there is no headless or NAS mode yet.
+- **macOS and Windows only.** No live TV, recording or plugins, on purpose.
+- Remote viewing is limited by your home internet's *upload* speed, and Cloudflare's terms restrict heavy video through their proxy; Tailscale is the recommended way to watch away from home.
+- The Burmese text is a draft waiting for a native reviewer ([docs/TRANSLATING.md](docs/TRANSLATING.md)). Old Zawgyi-encoded file names are shown as stored.
+
+## Help and community
+
+- Something wrong? Settings → **Help and feedback** → **Copy diagnostics**, then [open a bug report](https://github.com/bkjonathan/ein-cast/issues/new?template=bug_report.yml).
+- Ideas and questions: [Discussions](https://github.com/bkjonathan/ein-cast/discussions) and [issues](https://github.com/bkjonathan/ein-cast/issues).
+- Want to help? Read **[CONTRIBUTING.md](CONTRIBUTING.md)**. Translations, device reports and small fixes are all welcome. Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
+## For developers
+
+Built with Go, [Wails v2](https://wails.io) and React, as ports and adapters ([architecture](docs/ARCHITECTURE.md), [decisions](docs/adr/), [roadmap and where things stand](docs/ROADMAP.md)).
+
+Requirements: Go 1.26+, Node 20+ and npm, and the [Wails v2 CLI](https://wails.io/docs/gettingstarted/installation) (`wails doctor` should report success).
 
 ```sh
 wails dev                       # live-reloading dev window
-wails build -ldflags "-X main.version=1.0.1"   # → build/bin/eincast.app
+wails build -ldflags "-X main.version=1.1.1"   # → build/bin/eincast.app
 
 go test ./...                   # Go tests
 scripts/check-deps.sh           # hexagonal dependency rules
+scripts/check-network.sh        # outbound connections only where docs/PRIVACY.md says
 scripts/check-cross.sh          # compiles for macOS and Windows; add --full for a complete Windows Wails build
 scripts/make-icons.sh           # rebuilds every icon from build/logo.png (needs ImageMagick)
 cd frontend && npm run typecheck && npm test
 ```
 
-## Release
-
-Versions are `1.0.x` for fixes, `1.1.1` for new features, `2.0.1` for major changes. The git tag is the version. Once CI is green on `main`, push a tag:
-
-```sh
-git tag -a v1.0.2 -m "EinCast v1.0.2"
-git push origin v1.0.2
-```
-
-The `release` workflow creates the GitHub release and attaches the macOS zip and the Windows installer and portable exe. The full checklist, troubleshooting and how to redo a release are in [docs/RELEASING.md](docs/RELEASING.md).
-
-## Try the API
-
-Choose a folder, press **Start server**, then open the **Connect a device** card. On the same machine, or any device on your network, use the address it shows (default port 8765):
-
-```sh
-curl http://127.0.0.1:8765/api/health
-curl http://127.0.0.1:8765/api/library
-curl -H "Range: bytes=0-99" -i http://127.0.0.1:8765/stream/<id>
-curl http://127.0.0.1:8765/playlist.m3u      # open in VLC / Infuse
-```
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full route table.
-
-## Settings, token and data
-
-| What | Where |
-|---|---|
-| Port, display name, library folders (and their names, and whether each is shown to smart TVs), token on/off, Smart TVs on/off, start/awake/login/close-window choices, the ffmpeg location, the update check on/off | `settings.json` in `~/Library/Application Support/EinCast` (macOS) or `%AppData%\EinCast` (Windows) |
-| Profiles and their PIN hashes (`profiles.json`) and where each profile stopped (`resume.json`) | The same folder as `settings.json`, readable by you only |
-| The access token | The system Keychain / Credential Manager, service `com.bkthomas.eincast`. Never in `settings.json` or the logs |
-
-Thumbnails are made with `ffmpeg` if it is installed (for example `brew install ffmpeg`); without it EinCast shows icons instead. They are cached in `~/Library/Caches/EinCast/thumbs` (macOS) or `%LocalAppData%\EinCast\thumbs` (Windows) and are safe to delete. The Light/Dark/System choice is remembered by the app window itself.
-
-Subtitles: put `.srt` (or `.vtt`) files next to the video with the same name, optionally with a language, e.g. `Film.mkv` and `Film.en.srt`. Pick one in the player's menu. Text subtitles stored inside an MKV or MP4 are listed too (needs `ffmpeg`); picture subtitles (Blu-ray, DVD) are listed but can't be shown. A video with several audio languages gets an Audio menu on its page.
-
-Videos a device can't play as they are (MKV, AVI, HEVC…) are converted on the fly with `ffmpeg` for Safari, iPhone, iPad, Firefox (through the bundled hls.js) and TVs that play HLS. The computer's video chip does the work when it can (Settings → ffmpeg → Use hardware acceleration, on by default), and EinCast refuses to start a conversion that would fill the disk. Conversions are temporary files in `~/Library/Caches/EinCast/hls` (macOS) or `%LocalAppData%\EinCast\hls` (Windows), deleted when you stop watching and when EinCast quits.
-
-Smart TVs (Settings → Smart TVs) is off by default. A TV can't send the access token, so while it is on the whole library is visible, without a password, to everyone on your network; it can't be on together with the access token.
-
-If the server won't start because another program already holds its port, Settings → Free a port shows which program that is (using `lsof` on macOS, `netstat` on Windows) and ends it when you confirm. It never ends EinCast itself, and only offers ports 1024–65535.
-
-Burmese file names: names in Myanmar Unicode are listed, searched and read for titles like any other, and search treats the two spellings of a letter (for example U+1026 and U+1025 U+102E) as the same text. Names in the old **Zawgyi** encoding are shown as they are stored, which can look garbled (overlapping or misordered letters); EinCast does not convert them. Rename such files in Unicode with any Zawgyi-to-Unicode converter, and rescan.
-
-Updates: about once a day EinCast asks GitHub whether a newer release exists (Settings → Updates). If one does, a line appears in the sidebar and the Updates card shows what's new and each download's SHA-256; **Open download page** takes you to the release, and you install it yourself. EinCast never downloads or installs anything on its own. The request is one anonymous read of this project's public release list: no account, no cookie, nothing about you, this computer or the version you run (GitHub sees your IP address, as any website does). Turn **Check for updates automatically** off and EinCast makes no request until you press **Check now**. This is the only request EinCast makes to the internet unprompted (finding your devices on your own Wi-Fi is separate); tunnels and the like happen only when you turn them on.
-
-Deleting `settings.json` resets EinCast to its defaults. A damaged one is moved to `settings.json.bad` and EinCast starts with defaults.
-
-## Folder map
+Releases: the git tag is the version. Push `v1.1.2` once CI is green and the `release` workflow builds and publishes the apps; the checklist is in [docs/RELEASING.md](docs/RELEASING.md).
 
 | Path | What lives there |
 |---|---|
@@ -86,9 +111,11 @@ Deleting `settings.json` resets EinCast to its defaults. A damaged one is moved 
 | `internal/app` | Use cases, talking to the outside through small interfaces (ports). |
 | `internal/adapters` | Implementations of those ports (filesystem, HTTP, logging, ...). |
 | `internal/bridge` | The only package that may import Wails. Facade + DTOs for the frontend. |
-| `frontend/src/app` | Layout shell: title bar, sidebar, view switching. |
-| `frontend/src/features` | One folder per feature slice. |
-| `frontend/src/shared` | Bridge to Go, glass UI kit, motion presets, helpers. |
-| `build/` | Wails build assets. `logo.png` is the master logo; `appicon.png` and `windows/icon.ico` are generated from it. |
-| `scripts/` | Repo tooling (`check-deps.sh`, `make-icons.sh`). |
-| `docs/` | Architecture, roadmap, and decision records (`docs/adr`). |
+| `frontend/src` | `app` (shell), `features` (one folder per feature), `shared` (bridge to Go, glass UI kit, helpers). |
+| `build/` | Wails build assets. `logo.png` is the master logo; the app icons are generated from it. |
+| `scripts/` | Repo tooling. |
+| `docs/` | Guide, architecture, roadmap, privacy, and decision records (`docs/adr`). |
+
+## Licence
+
+[MIT](LICENSE) © 2026 BK Thomas. Dependencies keep their own licences (MIT, BSD, ISC, Apache-2.0, and MPL-2.0 for `hashicorp/yamux`, which the ngrok SDK uses); the bundled hls.js is Apache-2.0 (`internal/adapters/httpapi/web/hls.js.LICENSE`).

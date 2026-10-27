@@ -19,7 +19,10 @@ const Service = "com.bkthomas.eincast"
 // Keyring is an app.SecretStore backed by the system credential store.
 type Keyring struct{}
 
-var _ app.SecretStore = Keyring{}
+var (
+	_ app.SecretStore  = Keyring{}
+	_ app.SecretEraser = Keyring{}
+)
 
 // New returns the system-backed store.
 func New() Keyring { return Keyring{} }
@@ -51,4 +54,15 @@ func (Keyring) Delete(key string) error {
 		return nil
 	}
 	return fmt.Errorf("delete %q from the system credential store: %w", key, err)
+}
+
+// EraseAll removes every secret filed under Service, whatever its name, so a
+// reset does not depend on remembering each key that was ever used. Having none
+// is not an error.
+func (Keyring) EraseAll() error {
+	err := keyring.DeleteAll(Service)
+	if err == nil || errors.Is(err, keyring.ErrNotFound) {
+		return nil
+	}
+	return fmt.Errorf("erase secrets from the system credential store: %w", err)
 }

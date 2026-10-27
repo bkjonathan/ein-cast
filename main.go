@@ -21,6 +21,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
 	"eincast/internal/adapters/dlna"
+	"eincast/internal/adapters/eraser"
 	"eincast/internal/adapters/ffmpeg"
 	"eincast/internal/adapters/fsscan"
 	"eincast/internal/adapters/fswatch"
@@ -34,6 +35,7 @@ import (
 	"eincast/internal/adapters/portproc"
 	"eincast/internal/adapters/powerguard"
 	"eincast/internal/adapters/profilefile"
+	"eincast/internal/adapters/relaunch"
 	"eincast/internal/adapters/resumefile"
 	"eincast/internal/adapters/secrets"
 	"eincast/internal/adapters/settingsfile"
@@ -44,11 +46,13 @@ import (
 	"eincast/internal/adapters/tunnel/ngrok"
 	"eincast/internal/adapters/tunnel/tailscale"
 	"eincast/internal/app"
+	"eincast/internal/app/diagnostics"
 	"eincast/internal/app/library"
 	"eincast/internal/app/portfree"
 	"eincast/internal/app/profiles"
 	"eincast/internal/app/providerconfig"
 	"eincast/internal/app/remote"
+	"eincast/internal/app/reset"
 	"eincast/internal/app/resume"
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
@@ -96,6 +100,10 @@ func main() {
 	// Logs go to the console as before and, through the bus, to the UI.
 	logs := logbus.NewBus(logHistory)
 	log := slog.New(logbus.NewHandler(slog.NewTextHandler(os.Stderr, nil), logs))
+
+	// A copy opened by "Reset EinCast" waits here for the old one to be gone, so
+	// it never reads files the old one is still deleting, nor meets its lock.
+	relaunch.WaitIfRelaunched(os.Args[1:], log)
 
 	emitter := bridge.NewEmitter(log)
 
@@ -199,8 +207,23 @@ func main() {
 	// service needs our own process id to refuse ending ourselves.
 	portService := portfree.NewService(portproc.New(), os.Getpid(), portfree.DefaultTiming, log)
 
+	// "Reset EinCast" in Settings: everything EinCast made for itself goes (its
+	// settings folder, its cache folder, its entries in the credential store, the
+	// open-at-login entry), and a new copy opens as a first run. The media folders
+	// are not on this list (ADR 0034).
+	resetService := reset.NewService(eraser.New(settingsDir(log), cacheDir(log, "")), credentialStore,
+		loginItem(log), relaunch.New(log), log)
+
+	// "Copy diagnostics" in Settings: what to paste into a bug report, made only
+	// when asked for and with folder names and secrets left out.
+	home, _ := os.UserHomeDir() // empty when unknown: nothing then to hide
+	diagnosticsService := diagnostics.NewService(
+		diagnostics.Identity{Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, Home: home},
+		diagnostics.Deps{Settings: settingsService, Server: streamingService, Remote: remoteService,
+			Libraries: libraryService, Logs: logs, FFmpeg: thumbnailer})
+
 	app := bridge.New(bridge.Deps{
-		Info:        bridge.Info{Name: appName, Version: version},
+		Info:        bridge.Info{Name: appName, Version: version, Repo: releaseRepo},
 		Library:     libraryService,
 		Settings:    settingsService,
 		Streaming:   streamingService,
@@ -211,6 +234,8 @@ func main() {
 		FFmpeg:      thumbnailer,
 		Profiles:    profileService,
 		Updates:     updateService,
+		Reset:       resetService,
+		Diagnostics: diagnosticsService,
 		// The last seconds of watching are written once the server has stopped.
 		OnShutdown: []func(){func() {
 			if err := resumeService.Close(); err != nil {

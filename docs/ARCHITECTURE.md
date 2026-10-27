@@ -43,6 +43,7 @@ changes.
 | `app/resume` | `Service`: where each profile stopped in each title, written in batches and on quit |
 | `domain/version` | `Version`, `Parse`, `Compare`/`Newer`: release numbers by semantic-versioning precedence |
 | `app/updates` | `Service`: asks a `ReleaseSource` whether a newer version exists (on a timer and on request), keeps the status, publishes `UpdateChanged`; never installs (ADR 0029) |
+| `app/reset` | `Service`: `Erase` (login entry, credential-store entries, config and cache folders; every step runs, failures are joined) and `Relaunch`; the media folders are never touched (ADR 0034) |
 | `app/settings` | `Service`: load/validate/save preferences, access token (`Required`, `Verify`, `RotateToken`); implements `LibraryMemory` |
 | `app/streaming` | `Config` + functional options (port, name, DLNA), `Service`: `Start`, `Stop`, `Status`, crash watcher, `Local()` (the running server, for tunnels); announces on the network once running (`WithDiscovery`) and withdraws that, then public access, before the server stops |
 | `app/providerconfig` | `Store`: a provider's saved settings in the credential store; cleans and checks values; secrets are write-only |
@@ -53,6 +54,8 @@ changes.
 | `adapters/fswatch` | `fsnotify` watcher: one signal for any burst of relevant changes, follows new folders, all-or-nothing |
 | `adapters/ffmpeg` | `Grabber`: one JPEG (video frame, cover art, shrunken photo). Both look for ffmpeg in the location the person chose, else on `PATH` and the usual install folders. `Transcoder`: free-space check → ffprobe → plan (copy or encode, which audio track) → HLS into a temporary folder through a chain of encoders (the video chip, then the processor), readiness polling, kill-and-delete on `Stop`. `Prober` and `Extractor`: the tracks inside a video, and one text subtitle track as WebVTT (ADRs 0031, 0032) |
 | `adapters/powerguard` | `Guard`: keeps the computer awake while a run lasts; `caffeinate -i -w <pid>` on macOS, `SetThreadExecutionState` from a pinned thread on Windows (ADR 0025) |
+| `adapters/eraser` | `Eraser`: removes EinCast's own config and cache folders; refuses an empty or relative path, a disk root and the home folder (ADR 0034) |
+| `adapters/relaunch` | `Launcher`: starts a detached new copy with `--relaunch-after=<pid>` (`open -n` inside a macOS bundle); `WaitIfRelaunched` makes the new copy wait for the old process to exit before it takes the single-instance lock (ADR 0034) |
 | `adapters/loginitem` | `Item`: opens EinCast at login; a LaunchAgent on macOS, a `Run` key value on Windows; both start with `--background` (ADR 0030) |
 | `adapters/tray` | Windows notification-area icon (Open / Quit) so a hidden window can come back; nothing on macOS, where the Dock does it (ADR 0030) |
 | `adapters/thumbcache` | Folder of `<key>.jpg` files in the user cache dir (or `.vtt` for extracted subtitles, `WithFiles`); atomic writes, age-based `Prune` |
@@ -68,7 +71,7 @@ changes.
 | `adapters/tunnel/cloudflared` | `Quick` and `Named`: the Cloudflare tunnels, on one shared engine; `Quick` reads its address from the banner, `Named` is up on `Registered tunnel connection`; finds `cloudflared` (saved location first) |
 | `adapters/tunnel/ngrok` | `Provider`: ngrok through its Go SDK, behind a small interface; reconnecting is the SDK's, ending is noticed by a watcher |
 | `adapters/tunnel/tailscale` | Private provider: asks the local Tailscale for this device's address and has the server listen on it while on (ADR 0012) |
-| `adapters/secrets` | OS credential store (Keychain / Credential Manager) via go-keyring |
+| `adapters/secrets` | OS credential store (Keychain / Credential Manager) via go-keyring; `EraseAll` empties everything filed under EinCast's service name |
 | `adapters/netinfo` | LAN IPv4 detection: pure `Pick` over interfaces + the `System` reader |
 | `adapters/logbus` | `Handler` (slog decorator), `Bus` (non-blocking pub/sub), ring buffer |
 | `bridge` | `App` facade, `Emitter` (event → Wails runtime), log forwarder, DTOs, startup/shutdown hooks |

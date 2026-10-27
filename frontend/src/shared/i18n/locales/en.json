@@ -355,5 +355,21 @@
   "updates.verify": "To check a download, compare its SHA-256 with the one above. On a Mac, run “shasum -a 256 <file>” in Terminal; on Windows, run “Get-FileHash <file>” in PowerShell.",
   "updates.openPage": "Open download page",
   "updates.notice": "Update available: {version}",
-  "updates.copyAria": "Copy the checksum of {name}"
+  "updates.copyAria": "Copy the checksum of {name}",
+  "settings.reset.title": "Reset EinCast",
+  "settings.reset.intro": "Start over, as if EinCast had just been installed. It forgets your libraries, profiles, watch positions, settings, access token and PINs, stops opening at login, and clears its caches. Then it restarts and shows the first-run setup.",
+  "settings.reset.safe": "Your media files are not touched. Devices using your old link will need the new one.",
+  "settings.reset.button": "Reset EinCast…",
+  "settings.reset.confirmGroup": "Confirm resetting EinCast",
+  "settings.reset.confirm": "Erase everything EinCast has saved and restart? This can't be undone.",
+  "settings.reset.confirmButton": "Erase and restart",
+  "settings.reset.working": "Erasing… EinCast will reopen by itself.",
+  "settings.help.title": "Help and feedback",
+  "settings.help.intro": "EinCast has no accounts and sends nothing about you. If something goes wrong, copy the diagnostics and paste them into a report. You read them first.",
+  "settings.help.copy": "Copy diagnostics",
+  "settings.help.copied": "Copied. Read it before you post it.",
+  "settings.help.failed": "Could not make the diagnostics: {reason}",
+  "settings.help.report": "Report a problem",
+  "settings.help.idea": "Suggest an idea",
+  "settings.help.privacy": "Privacy statement"
 }

@@ -1665,3 +1665,158 @@ func TestStartup_RunsTheUpdateCheckUntilTheAppEnds(t *testing.T) {
 		t.Fatal("startup did not start the update check")
 	}
 }
+
+// fakeReset records the order of the reset steps into a shared log, so a test
+// can say what must happen before what.
+type fakeReset struct {
+	steps                 *[]string
+	eraseErr, relaunchErr error
+}
+
+func (f *fakeReset) Erase() error    { *f.steps = append(*f.steps, "erase"); return f.eraseErr }
+func (f *fakeReset) Relaunch() error { *f.steps = append(*f.steps, "relaunch"); return f.relaunchErr }
+
+func newResetApp(t *testing.T) (*App, *fakeReset, *fakeStreaming, *[]string) {
+	t.Helper()
+	a, st := newTestAppWithStreaming(&fakeLibrary{})
+	var steps []string
+	fr := &fakeReset{steps: &steps}
+	a.reset = fr
+	a.closers = []func(){func() { steps = append(steps, "closers") }}
+	a.quit = func(context.Context) { steps = append(steps, "quit") }
+	return a, fr, st, &steps
+}
+
+func TestResetApp_StopsFlushesErasesThenReopensAndQuits(t *testing.T) {
+	a, _, st, steps := newResetApp(t)
+
+	if err := a.ResetApp(); err != nil {
+		t.Fatalf("ResetApp() = %v", err)
+	}
+
+	// The closers write the last resume positions: they must be done before the
+	// files are erased, or they would bring one back.
+	want := []string{"closers", "erase", "relaunch", "quit"}
+	if !reflect.DeepEqual(*steps, want) {
+		t.Errorf("steps = %v, want %v", *steps, want)
+	}
+	if st.stops != 1 {
+		t.Errorf("server stopped %d times, want 1", st.stops)
+	}
+}
+
+func TestResetApp_TheShutdownThatFollowsDoesNotStopOrWriteAgain(t *testing.T) {
+	a, _, st, steps := newResetApp(t)
+	if err := a.ResetApp(); err != nil {
+		t.Fatal(err)
+	}
+
+	a.shutdown(context.Background()) // Wails runs this after quit
+
+	if st.stops != 1 {
+		t.Errorf("server stopped %d times in all, want 1", st.stops)
+	}
+	if n := countOf(*steps, "closers"); n != 1 {
+		t.Errorf("closers ran %d times; a second run could write a file back after the erase", n)
+	}
+}
+
+func TestResetApp_IfEraseFailsNothingIsReopenedAndTheAppStaysOpen(t *testing.T) {
+	a, fr, _, steps := newResetApp(t)
+	fr.eraseErr = errors.New("remove /x: permission denied")
+
+	err := a.ResetApp()
+
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("ResetApp() = %v, want the cause", err)
+	}
+	if countOf(*steps, "relaunch") != 0 || countOf(*steps, "quit") != 0 {
+		t.Errorf("steps = %v; a failed erase must leave the app open for the person to read the error", *steps)
+	}
+}
+
+func TestResetApp_IfReopeningFailsItStillQuits(t *testing.T) {
+	a, fr, _, steps := newResetApp(t)
+	fr.relaunchErr = errors.New("no such program")
+
+	if err := a.ResetApp(); err != nil {
+		t.Fatalf("ResetApp() = %v; the data is gone, so the reset itself succeeded", err)
+	}
+	if countOf(*steps, "quit") != 1 {
+		t.Errorf("steps = %v, want a quit: staying open would show a library that no longer exists", *steps)
+	}
+}
+
+func TestResetApp_WithoutAResetServiceChangesNothing(t *testing.T) {
+	a, st := newTestAppWithStreaming(&fakeLibrary{})
+	if err := a.ResetApp(); err == nil {
+		t.Fatal("ResetApp() = nil, want an error")
+	}
+	if st.stops != 0 {
+		t.Error("the server was stopped by a reset that is not available")
+	}
+}
+
+func countOf(steps []string, want string) int {
+	n := 0
+	for _, s := range steps {
+		if s == want {
+			n++
+		}
+	}
+	return n
+}
+
+type fakeDiagnostics struct{ text string }
+
+func (f fakeDiagnostics) Report() string { return f.text }
+
+func TestGetDiagnostics(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	if _, err := a.GetDiagnostics(); err == nil {
+		t.Error("GetDiagnostics() = nil error without a service, want one")
+	}
+
+	a.diag = fakeDiagnostics{"EinCast diagnostics"}
+	got, err := a.GetDiagnostics()
+	if err != nil || got != "EinCast diagnostics" {
+		t.Errorf("GetDiagnostics() = %q, %v", got, err)
+	}
+}
+
+func TestOpenHelpPage(t *testing.T) {
+	tests := []struct {
+		topic, repo, want string
+		wantErr           bool
+	}{
+		{"bug", "me/eincast", "https://github.com/me/eincast/issues/new?template=bug_report.yml", false},
+		{"idea", "me/eincast", "https://github.com/me/eincast/issues/new?template=feature_request.yml", false},
+		{"privacy", "me/eincast", "https://github.com/me/eincast/blob/main/docs/PRIVACY.md", false},
+		{"https://evil.example", "me/eincast", "", true}, // the window cannot choose an address
+		{"", "me/eincast", "", true},
+		{"bug", "", "", true}, // a build with no project page opens nothing
+	}
+	for _, tt := range tests {
+		t.Run(tt.topic+"/"+tt.repo, func(t *testing.T) {
+			a := newTestApp(&fakeLibrary{})
+			a.info.Repo = tt.repo
+			var opened []string
+			a.openURL = func(_ context.Context, u string) { opened = append(opened, u) }
+
+			err := a.OpenHelpPage(tt.topic)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("OpenHelpPage(%q) error = %v, wantErr %v", tt.topic, err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if len(opened) != 0 {
+					t.Errorf("opened %v despite the refusal", opened)
+				}
+				return
+			}
+			if len(opened) != 1 || opened[0] != tt.want {
+				t.Errorf("opened %v, want [%s]", opened, tt.want)
+			}
+		})
+	}
+}

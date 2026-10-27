@@ -70,3 +70,36 @@ func TestKeyring_UnavailableStoreIsAnErrorNotNotFound(t *testing.T) {
 		t.Errorf("Set() error = %v", err)
 	}
 }
+
+func TestKeyring_EraseAllRemovesEverySecretOfEinCastOnly(t *testing.T) {
+	keyring.MockInit()
+	k := New()
+	for _, key := range []string{"access-token", "remote-pin", "provider/ngrok/authtoken"} {
+		if err := k.Set(key, "v"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := keyring.Set("someone.else", "key", "keep"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := k.EraseAll(); err != nil {
+		t.Fatalf("EraseAll() = %v", err)
+	}
+
+	for _, key := range []string{"access-token", "remote-pin", "provider/ngrok/authtoken"} {
+		if _, err := k.Get(key); !errors.Is(err, app.ErrSecretNotFound) {
+			t.Errorf("Get(%q) after EraseAll: %v, want not found", key, err)
+		}
+	}
+	if got, err := keyring.Get("someone.else", "key"); err != nil || got != "keep" {
+		t.Errorf("another program's secret = %q, %v; it must survive", got, err)
+	}
+}
+
+func TestKeyring_EraseAllWithNothingStoredIsNotAnError(t *testing.T) {
+	keyring.MockInit()
+	if err := New().EraseAll(); err != nil {
+		t.Fatalf("EraseAll() = %v, want nil", err)
+	}
+}

@@ -414,6 +414,27 @@ type LoginItem interface {
 	Set(enabled bool) error
 }
 
+// DataEraser deletes the files EinCast keeps between runs: settings, profiles,
+// resume positions and the caches. It never touches the media folders.
+type DataEraser interface {
+	// Erase removes everything, and succeeds when there was nothing to remove.
+	Erase() error
+}
+
+// SecretEraser removes every secret EinCast filed in the credential store (the
+// access token, the PINs, the tunnel tokens), without needing to know their names.
+type SecretEraser interface {
+	// EraseAll succeeds when there was nothing to remove.
+	EraseAll() error
+}
+
+// Relauncher starts EinCast again after the running one has exited.
+type Relauncher interface {
+	// Relaunch arranges for a new EinCast to open once this process is gone. It
+	// returns at once; the caller then quits.
+	Relaunch() error
+}
+
 // ErrNoSettings means nothing has been saved yet (first run). It is not a failure.
 var ErrNoSettings = errors.New("no saved settings")
 

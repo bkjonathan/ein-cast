@@ -44,6 +44,9 @@ const go = vi.hoisted(() => ({
   GetUpdateStatus: vi.fn(),
   CheckForUpdatesNow: vi.fn(),
   OpenUpdatePage: vi.fn(),
+  ResetApp: vi.fn(),
+  GetDiagnostics: vi.fn(),
+  OpenHelpPage: vi.fn(),
 }));
 vi.mock("../../../wailsjs/go/bridge/App", () => go);
 
@@ -51,6 +54,9 @@ import {
   checkForUpdatesNow,
   getUpdateStatus,
   openUpdatePage,
+  resetApp,
+  getDiagnostics,
+  openHelpPage,
   checkPort,
   freePort,
   chooseFFmpeg,
@@ -537,5 +543,31 @@ describe("updates", () => {
 
     go.OpenUpdatePage.mockRejectedValueOnce("there is no newer version to download");
     await expect(openUpdatePage()).rejects.toMatch(/no newer version/);
+  });
+});
+
+describe("resetApp", () => {
+  it("asks Go to erase everything, with no arguments: what to erase is not the window's choice", async () => {
+    go.ResetApp.mockResolvedValueOnce(undefined);
+    await resetApp();
+    expect(go.ResetApp).toHaveBeenCalledWith();
+  });
+
+  it("rejects with Go's reason when only part was erased", async () => {
+    go.ResetApp.mockRejectedValueOnce("Could not erase everything: remove /x: permission denied");
+    await expect(resetApp()).rejects.toMatch(/permission denied/);
+  });
+});
+
+describe("help", () => {
+  it("getDiagnostics returns Go's text unchanged", async () => {
+    go.GetDiagnostics.mockResolvedValueOnce("EinCast diagnostics\nVersion: 1");
+    await expect(getDiagnostics()).resolves.toBe("EinCast diagnostics\nVersion: 1");
+  });
+
+  it("openHelpPage sends a topic, never an address", async () => {
+    go.OpenHelpPage.mockResolvedValueOnce(undefined);
+    await openHelpPage("bug");
+    expect(go.OpenHelpPage).toHaveBeenCalledWith("bug");
   });
 });

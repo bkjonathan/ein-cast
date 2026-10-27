@@ -1,0 +1,40 @@
+:root {
+  --bg: #f6f7f9; --fg: #14161a; --muted: #5a6270; --card: #ffffff; --line: #dfe3ea;
+  --accent: #3b6cff; --accent-fg: #ffffff;
+  --font: -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI", "Noto Sans Myanmar", "Myanmar Text", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1115; --fg: #eef0f4; --muted: #9aa3b2; --card: #171a21; --line: #272c36; --accent: #6b8cff; --accent-fg: #0b0d12; }
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); color: var(--fg); font-family: var(--font); line-height: 1.6; }
+body { margin: 0; }
+/* Burmese needs more room between lines than Latin. */
+html[data-lang="my"] body { line-height: 1.9; }
+/* Show only the chosen language; without script both would show, which is still readable. */
+html[data-lang="en"] [lang="my"] { display: none; }
+html[data-lang="my"] [lang="en"] { display: none; }
+.top, main, footer { max-width: 56rem; margin: 0 auto; padding: 0 16px; }
+.top { display: flex; align-items: center; justify-content: space-between; padding-top: 16px; padding-bottom: 16px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; color: inherit; text-decoration: none; }
+nav button { font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 4px 14px; margin-left: 6px; cursor: pointer; }
+nav button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+a { color: var(--accent); }
+.hero { padding: 48px 0 24px; }
+h1 { font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.15; margin: 0 0 16px; letter-spacing: -0.02em; }
+html[data-lang="my"] h1 { line-height: 1.5; }
+h2 { font-size: 1.5rem; margin: 48px 0 12px; }
+.lead { font-size: 1.15rem; color: var(--muted); max-width: 42rem; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0 8px; }
+.button { display: inline-block; padding: 12px 20px; border-radius: 12px; background: var(--accent); color: var(--accent-fg); font-weight: 600; text-decoration: none; }
+.button.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+.button:focus-visible, nav button:focus-visible, summary:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.note { color: var(--muted); font-size: 0.9rem; max-width: 42rem; }
+.steps { padding-left: 1.25rem; display: grid; gap: 14px; }
+.steps li strong { display: block; }
+.steps li span { color: var(--muted); }
+.features { display: grid; gap: 10px; padding: 0; list-style: none; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.features li { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+details { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 10px 0; }
+summary { cursor: pointer; font-weight: 600; }
+footer { padding-top: 48px; padding-bottom: 48px; color: var(--muted); }

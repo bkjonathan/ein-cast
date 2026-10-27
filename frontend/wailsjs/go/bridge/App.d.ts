@@ -30,6 +30,8 @@ export function EnableRemote(arg1:string):Promise<void>;
 
 export function FreePort(arg1:number,arg2:number):Promise<void>;
 
+export function GetDiagnostics():Promise<string>;
+
 export function GetFFmpegStatus():Promise<bridge.FFmpegStatusDTO>;
 
 export function GetLogHistory():Promise<Array<bridge.LogLineDTO>>;
@@ -54,6 +56,8 @@ export function ListProfiles():Promise<Array<bridge.ProfileDTO>>;
 
 export function ListRemoteProviders():Promise<Array<bridge.RemoteProviderDTO>>;
 
+export function OpenHelpPage(arg1:string):Promise<void>;
+
 export function OpenUpdatePage():Promise<void>;
 
 export function RefreshAddresses():Promise<void>;
@@ -65,6 +69,8 @@ export function RenameLibrary(arg1:string,arg2:string):Promise<void>;
 export function RescanAllLibraries():Promise<void>;
 
 export function RescanLibrary(arg1:string):Promise<void>;
+
+export function ResetApp():Promise<void>;
 
 export function RotateAccessToken():Promise<void>;
 

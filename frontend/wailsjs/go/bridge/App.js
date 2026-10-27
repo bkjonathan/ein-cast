@@ -58,6 +58,10 @@ export function FreePort(arg1, arg2) {
   return window['go']['bridge']['App']['FreePort'](arg1, arg2);
 }
 
+export function GetDiagnostics() {
+  return window['go']['bridge']['App']['GetDiagnostics']();
+}
+
 export function GetFFmpegStatus() {
   return window['go']['bridge']['App']['GetFFmpegStatus']();
 }
@@ -106,6 +110,10 @@ export function ListRemoteProviders() {
   return window['go']['bridge']['App']['ListRemoteProviders']();
 }
 
+export function OpenHelpPage(arg1) {
+  return window['go']['bridge']['App']['OpenHelpPage'](arg1);
+}
+
 export function OpenUpdatePage() {
   return window['go']['bridge']['App']['OpenUpdatePage']();
 }
@@ -128,6 +136,10 @@ export function RescanAllLibraries() {
 
 export function RescanLibrary(arg1) {
   return window['go']['bridge']['App']['RescanLibrary'](arg1);
+}
+
+export function ResetApp() {
+  return window['go']['bridge']['App']['ResetApp']();
 }
 
 export function RotateAccessToken() {

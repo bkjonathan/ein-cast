@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"runtime"
 	"strings"
+	"sync"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -29,6 +30,9 @@ import (
 type Info struct {
 	Name    string
 	Version string
+	// Repo is the GitHub repository as "owner/name". The help links are built from
+	// it; empty means the build has none and they are refused.
+	Repo string
 }
 
 // Library is the part of the library use cases the bridge needs. It is declared
@@ -128,6 +132,19 @@ type Updates interface {
 	Run(ctx context.Context)
 }
 
+// Diagnostics builds the text a person attaches to a bug report.
+type Diagnostics interface {
+	Report() string
+}
+
+// Reset is the part of "Reset EinCast" the bridge drives.
+type Reset interface {
+	// Erase removes every saved setting, token and cache; media folders are untouched.
+	Erase() error
+	// Relaunch arranges for EinCast to open again once this process has exited.
+	Relaunch() error
+}
+
 // App is the Wails-bound facade. Every exported method is callable from JS, so
 // keep this surface small and stable (and keep lifecycle hooks unexported).
 type App struct {
@@ -142,10 +159,16 @@ type App struct {
 	ffmpeg    FFmpeg      // nil: ffmpeg is not managed from Settings
 	profiles  Profiles    // nil: profiles are not managed from Settings
 	updates   Updates     // nil: no update check
+	reset     Reset       // nil: no reset
+	diag      Diagnostics // nil: no diagnostics
 	closers   []func()    // run at shutdown, after the server has stopped
 	logs      app.LogStream
 	emitter   *Emitter
 	log       *slog.Logger
+
+	// windDown makes sure the server and the closers stop once, whether the app
+	// ends by itself or a reset ends it first.
+	windDown sync.Once
 
 	// ctx lives for the whole app run and is cancelled on shutdown. Wails
 	// binding calls carry no context of their own, so long operations use this.
@@ -157,6 +180,8 @@ type App struct {
 	// openURL opens an address in the default browser. A field so tests can
 	// observe the choice without a real browser.
 	openURL func(ctx context.Context, url string)
+	// quit ends the app. A field so tests do not end themselves.
+	quit func(ctx context.Context)
 	// windowThemes maps a theme name to the Wails call that applies it. A field
 	// so tests can observe the choice without a native window.
 	windowThemes map[string]func(ctx context.Context)
@@ -180,6 +205,10 @@ type Deps struct {
 	Profiles Profiles
 	// Updates may be nil.
 	Updates Updates
+	// Reset may be nil.
+	Reset Reset
+	// Diagnostics may be nil.
+	Diagnostics Diagnostics
 	// OnShutdown runs once the server has stopped, for whatever must be written
 	// before the app ends (resume positions).
 	OnShutdown []func()
@@ -202,6 +231,8 @@ func New(d Deps) *App {
 		ffmpeg:     d.FFmpeg,
 		profiles:   d.Profiles,
 		updates:    d.Updates,
+		reset:      d.Reset,
+		diag:       d.Diagnostics,
 		closers:    d.OnShutdown,
 		logs:       d.Logs,
 		emitter:    d.Emitter,
@@ -209,6 +240,7 @@ func New(d Deps) *App {
 		pickFolder: openFolderDialog,
 		pickFile:   openFileDialog,
 		openURL:    wruntime.BrowserOpenURL,
+		quit:       wruntime.Quit,
 		windowThemes: map[string]func(context.Context){
 			"system": wruntime.WindowSetSystemDefaultTheme,
 			"light":  wruntime.WindowSetLightTheme,
@@ -245,24 +277,34 @@ func Quit(a *App) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
-	// The app context may already be cancelled; shutdown must still run.
-	ctx = context.WithoutCancel(ctx)
-	// Stopping the server also turns remote access off, but a tunnel must never
-	// outlive the app, so do not depend on the server being in a state to stop.
-	if err := a.remote.Disable(ctx); err != nil {
-		a.log.Warn("turn off remote access on shutdown", slog.String("error", err.Error()))
-	}
-	if err := a.streaming.Stop(ctx); err != nil && !errors.Is(err, server.ErrInvalidTransition) {
-		// Nothing more to do while quitting, but leave a trace.
-		a.log.Warn("stop server on shutdown", slog.String("error", err.Error()))
-	}
-	// No ffmpeg or temporary file may outlive the app.
-	if a.convert != nil {
-		a.convert.StopAll()
-	}
-	for _, f := range a.closers {
-		f()
-	}
+	a.stopEverything(ctx)
+}
+
+// stopEverything turns off remote access, stops the server and the conversions,
+// and runs the closers, once. A reset calls it before erasing, and the shutdown
+// hook that follows finds it already done: the closers (resume positions) must
+// not write again after the files are gone.
+func (a *App) stopEverything(ctx context.Context) {
+	a.windDown.Do(func() {
+		// The app context may already be cancelled; this must still run.
+		ctx = context.WithoutCancel(ctx)
+		// Stopping the server also turns remote access off, but a tunnel must never
+		// outlive the app, so do not depend on the server being in a state to stop.
+		if err := a.remote.Disable(ctx); err != nil {
+			a.log.Warn("turn off remote access on shutdown", slog.String("error", err.Error()))
+		}
+		if err := a.streaming.Stop(ctx); err != nil && !errors.Is(err, server.ErrInvalidTransition) {
+			// Nothing more to do while quitting, but leave a trace.
+			a.log.Warn("stop server on shutdown", slog.String("error", err.Error()))
+		}
+		// No ffmpeg or temporary file may outlive the app.
+		if a.convert != nil {
+			a.convert.StopAll()
+		}
+		for _, f := range a.closers {
+			f()
+		}
+	})
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -829,5 +871,63 @@ func (a *App) OpenUpdatePage() error {
 		return errors.New("there is no newer version to download")
 	}
 	a.openURL(a.ctx, url)
+	return nil
+}
+
+// ResetApp forgets everything this install knows and opens EinCast again as a
+// first run: it stops sharing, erases settings, libraries, profiles, resume
+// positions, tokens, PINs and caches, then quits and starts a new copy. The
+// person's media files are not touched. On success the app ends, so the promise
+// never resolves; an error means it was erased only in part (the cause is in
+// the message) and nothing was restarted.
+func (a *App) ResetApp() error {
+	if a.reset == nil {
+		return errors.New("reset is not available in this build")
+	}
+	a.log.Warn("reset requested: erasing all saved data")
+	// Nothing may write while the files are deleted, so stop first.
+	a.stopEverything(a.ctx)
+	if err := a.reset.Erase(); err != nil {
+		return fmt.Errorf("Could not erase everything: %w", err)
+	}
+	// The data is gone either way. If the new copy cannot be started, quitting
+	// is still right: staying open would show a library that no longer exists.
+	if err := a.reset.Relaunch(); err != nil {
+		a.log.Error("could not reopen EinCast after the reset; open it again yourself", slog.String("error", err.Error()))
+	}
+	a.quit(a.ctx)
+	return nil
+}
+
+// GetDiagnostics returns the text for a bug report: version, system, a summary of
+// the settings and the latest log lines, with folder names and secrets hidden. It
+// is only made when asked for and goes nowhere by itself: the person copies it.
+func (a *App) GetDiagnostics() (string, error) {
+	if a.diag == nil {
+		return "", errors.New("diagnostics are not available in this build")
+	}
+	return a.diag.Report(), nil
+}
+
+// helpPages are the pages the Settings screen can open, by topic. The window
+// names a topic, never an address, so it cannot be made to open anything else
+// (the same rule as OpenUpdatePage).
+var helpPages = map[string]string{
+	"bug":     "/issues/new?template=bug_report.yml",
+	"idea":    "/issues/new?template=feature_request.yml",
+	"privacy": "/blob/main/docs/PRIVACY.md",
+}
+
+// OpenHelpPage opens "bug" (report a problem), "idea" (suggest something) or
+// "privacy" (what EinCast sends, and to whom) in the person's browser.
+func (a *App) OpenHelpPage(topic string) error {
+	path, ok := helpPages[topic]
+	if !ok {
+		return fmt.Errorf("open help page: unknown topic %q", topic)
+	}
+	if a.info.Repo == "" {
+		return errors.New("this build does not know where its project page is")
+	}
+	a.openURL(a.ctx, "https://github.com/"+a.info.Repo+path)
 	return nil
 }

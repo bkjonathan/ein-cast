@@ -1,0 +1,47 @@
+name: Bug report
+description: Something does not work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time. **Security problem?** Please do not post it here: see [SECURITY.md](https://github.com/bkjonathan/ein-cast/blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: EinCast version
+      description: Shown at the bottom of the sidebar, or in Settings → Updates.
+      placeholder: "1.1.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Computer running EinCast
+      options: ["macOS (Apple silicon)", "macOS (Intel)", "Windows 11", "Windows 10", "Other"]
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device you were watching on
+      description: For example "iPhone 14, Safari", "Samsung TV 2021, built-in browser", "VLC on Android". Leave empty if it is the computer itself.
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        In EinCast: Settings → Help and feedback → **Copy diagnostics**, then paste here. It hides folder names and secrets, but **read it before you post**: it also contains log lines and your settings.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Screenshots, a file name that does not play (the name only), how often it happens.

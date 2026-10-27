@@ -14,6 +14,7 @@ import {
   DisableRemote as goDisableRemote,
   EnableRemote as goEnableRemote,
   FreePort as goFreePort,
+  GetDiagnostics as goGetDiagnostics,
   GetFFmpegStatus as goGetFFmpegStatus,
   GetLogHistory as goGetLogHistory,
   GetRemoteProviderConfig as goGetRemoteProviderConfig,
@@ -28,6 +29,7 @@ import {
   SetLibraryHiddenFromTVs as goSetLibraryHiddenFromTVs,
   SetProfilePIN as goSetProfilePIN,
   ListLibrary as goListLibrary,
+  OpenHelpPage as goOpenHelpPage,
   OpenUpdatePage as goOpenUpdatePage,
   RefreshAddresses as goRefreshAddresses,
   RemoveLibrary as goRemoveLibrary,
@@ -35,6 +37,7 @@ import {
   RescanAllLibraries as goRescanAllLibraries,
   GetSettings as goGetSettings,
   RescanLibrary as goRescanLibrary,
+  ResetApp as goResetApp,
   RotateAccessToken as goRotateAccessToken,
   SetRemotePIN as goSetRemotePIN,
   SetWindowTheme as goSetWindowTheme,
@@ -356,4 +359,29 @@ export async function checkForUpdatesNow(): Promise<UpdateStatus> {
  */
 export async function openUpdatePage(): Promise<void> {
   await goOpenUpdatePage();
+}
+
+/**
+ * Erases everything EinCast saved (settings, libraries, profiles, tokens, caches)
+ * and restarts it as a first run. When it works the app quits, so the promise
+ * never settles; it rejects with Go's reason when only part could be erased.
+ */
+export async function resetApp(): Promise<void> {
+  await goResetApp();
+}
+
+/** The pages the Settings screen can open. Go maps each to an address; the window never supplies one. */
+export type HelpTopic = "bug" | "idea" | "privacy";
+
+/** Opens a help page in the browser. */
+export async function openHelpPage(topic: HelpTopic): Promise<void> {
+  await goOpenHelpPage(topic);
+}
+
+/**
+ * The text to paste into a bug report: version, system, a summary of the
+ * settings and the latest log lines, with folder names and secrets hidden.
+ */
+export async function getDiagnostics(): Promise<string> {
+  return goGetDiagnostics();
 }
