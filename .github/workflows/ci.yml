@@ -71,16 +71,22 @@ jobs:
         run: go test -race -count=1 ./...
 
       # The timeout turns a hung test into a quick, readable failure instead of
-      # ten minutes of silence; failing lines are repeated as annotations so they
-      # show on the run's summary page.
+      # ten minutes of silence. Every failing line goes into ONE annotation (up to
+      # 80 lines; %0A is how an annotation spells a newline, and a literal % must
+      # be %25) so the run's summary page shows the whole list, not just the first
+      # few: GitHub caps how many separate annotations a step may have.
       - name: Go tests (Windows)
         if: runner.os == 'Windows'
         run: |
           status=0
           go test -count=1 -timeout 4m ./... 2>&1 | tee test.log || status=$?
-          { grep -E '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+' test.log || true; } | head -10 | while IFS= read -r line; do
-            echo "::error::${line//$'\r'/}"
-          done
+          failures=$(
+            { grep -E '^[[:space:]]*(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+' test.log || true; } |
+              head -80 | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}'
+          )
+          if [ -n "${failures}" ]; then
+            echo "::error title=Windows test failures::${failures}"
+          fi
           exit "${status}"
 
       - name: Cross-compile check
