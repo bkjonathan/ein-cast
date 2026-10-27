@@ -30,6 +30,7 @@ type api struct {
 	dlna     http.Handler // nil unless Smart TV discovery is on for this run
 	version  string
 	name     string
+	text     *translations // the player page's words, by language
 	log      *slog.Logger
 }
 
@@ -40,6 +41,7 @@ func (a *api) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", a.handleIndex)
 	mux.HandleFunc("GET /static/{file}", a.handleStatic)
 	mux.HandleFunc("GET /api/health", a.handleHealth)
+	mux.HandleFunc("GET /api/strings", a.handleStrings)
 	mux.HandleFunc("GET /api/library", a.handleLibrary)
 	mux.HandleFunc("GET /api/library/{id}", a.handleLibraryItem)
 	mux.HandleFunc("GET /stream/{id}", a.handleStream)

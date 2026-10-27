@@ -216,7 +216,7 @@ func addrStrings(addrs []netip.AddrPort) []string {
 // newAPI builds the handler state for one run.
 func (s *Server) newAPI(cfg app.ServeConfig) *api {
 	a := &api{lib: s.lib, access: s.access, remote: s.remote, thumbs: s.thumbs, hls: s.hls, tracks: s.tracks,
-		profiles: s.profiles, resume: s.resume, version: s.version, name: cfg.Name, log: s.log}
+		profiles: s.profiles, resume: s.resume, version: s.version, name: cfg.Name, text: mustLoadTranslations(), log: s.log}
 	if cfg.DLNA && s.dlnaID != "" {
 		// A TV cannot say who is watching, so it lists only libraries marked
 		// visible to TVs.

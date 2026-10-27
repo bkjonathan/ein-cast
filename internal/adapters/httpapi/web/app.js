@@ -7,6 +7,55 @@
 
 const $ = (id) => document.getElementById(id);
 
+// ---- Words -------------------------------------------------------------------
+
+// The page's text in the device's language, from /api/strings. The server picks
+// the language (and fills any gap with English), so there is nothing to register
+// here when a language is added. The text in index.html is English until this
+// arrives; a key that is missing shows as itself, which is easy to spot.
+let strings = {};
+let lang = 'en';
+
+function fill(text, params) {
+  if (!params) return text;
+  return text.replace(/\{(\w+)\}/g, (whole, name) => (name in params ? String(params[name]) : whole));
+}
+
+function t(key, params) {
+  return key in strings ? fill(strings[key], params) : key;
+}
+
+// The right form of a plural for the language: English has "one" and "other",
+// Burmese only "other".
+function tn(base, count, params) {
+  const form = new Intl.PluralRules(lang).select(count);
+  const key = base + '.' + form;
+  return t(key in strings ? key : base + '.other', Object.assign({ count: count }, params));
+}
+
+// Fills the text that is written in index.html.
+function translatePage() {
+  document.documentElement.lang = lang;
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) el.placeholder = t(el.dataset.i18nPlaceholder);
+  for (const el of document.querySelectorAll('[data-i18n-label]')) el.setAttribute('aria-label', t(el.dataset.i18nLabel));
+}
+
+// ?lang=my asks for a language by hand, for a TV whose browser language cannot
+// be changed. Without it the server goes by the browser's own list.
+async function loadStrings() {
+  const asked = new URLSearchParams(location.search).get('lang');
+  try {
+    const found = await getJSON('/api/strings' + (asked ? '?lang=' + encodeURIComponent(asked) : ''));
+    strings = found.messages;
+    lang = found.lang;
+  } catch (err) {
+    // The server is not answering; the English in index.html stays, and the
+    // requests that follow report the problem.
+  }
+  translatePage();
+}
+
 let items = [];
 let current = null;
 // What the page shows below the player: the grid of posters, or the detail page
@@ -348,7 +397,7 @@ function onLoadedMetadata() {
   if (saved.t < length - RESUME_END_MARGIN) {
     if (converted) seekWhenPossible(player, saved.t);
     else player.currentTime = saved.t;
-    $('resume-text').textContent = 'Resumed from ' + formatTime(saved.t) + '.';
+    $('resume-text').textContent = t('player.resumed', { time: formatTime(saved.t) });
     $('resume').hidden = false;
   }
 }
@@ -423,7 +472,7 @@ function wantsConversion(item) {
 
 function showConverting() {
   const hint = $('hint');
-  hint.textContent = 'Converting this video for your device. It can take a few seconds to start.';
+  hint.textContent = t('player.converting');
   hint.hidden = false;
 }
 
@@ -678,11 +727,7 @@ function onPlaybackError() {
 function giveUp() {
   if (!current) return;
   const hint = $('hint');
-  hint.textContent = converted
-    ? "This video couldn't be converted for this device. " +
-      'Use the playlist button to open the library in VLC or Infuse.'
-    : "This browser can't play this file (common for MKV or HEVC). " +
-      'Use the playlist button to open the library in VLC or Infuse.';
+  hint.textContent = converted ? t('player.cantConvert') : t('player.cantPlay');
   hint.hidden = false;
   if (converted) explainConversion(current);
 }
@@ -701,10 +746,9 @@ function explainConversion(item) {
       if (token !== playToken) return;
       const hint = $('hint');
       if (res.status === 507) {
-        hint.textContent = "There isn't enough free disk space on the computer running EinCast to convert this video. " +
-          'Free some space there, or use the playlist button to open the library in VLC or Infuse.';
+        hint.textContent = t('player.diskFull');
       } else if (res.status === 503) {
-        hint.textContent = 'EinCast is converting other videos right now. Try again in a minute.';
+        hint.textContent = t('player.busy');
       } else {
         return;
       }
@@ -724,11 +768,11 @@ function onPlaying() {
   if (converted) $('hint').hidden = true;
 }
 
-// "12:34 in" for a title the viewer stopped part-way, or "".
+// "12:34 in" (how far the viewer got) for a title stopped part-way, or "".
 function resumeLabel(item) {
   if (item.kind === 'image') return '';
   const saved = loadResume(item);
-  return saved ? formatTime(saved.t) + ' in' : '';
+  return saved ? t('player.timeIn', { time: formatTime(saved.t) }) : '';
 }
 
 // ---- The library: a grid of posters, and a page for each title --------------
@@ -846,10 +890,14 @@ function movieCard(item) {
     saved && saved.d > 0 ? saved.t / saved.d : 0);
 }
 
+// "3 seasons · 24 episodes"; the seasons are left out for a series that has one.
+function showSummary(show) {
+  const episodes = tn('show.episodes', show.episodes.length);
+  return show.seasons > 1 ? tn('show.seasons', show.seasons) + ' · ' + episodes : episodes;
+}
+
 function showCard(show) {
-  const n = show.episodes.length;
-  const sub = (show.seasons > 1 ? show.seasons + ' seasons · ' : '') + n + (n === 1 ? ' episode' : ' episodes');
-  return card(show.cover, show.name, sub, () => go({ type: 'show', key: show.key }), 0);
+  return card(show.cover, show.name, showSummary(show), () => go({ type: 'show', key: show.key }), 0);
 }
 
 function section(title, count, content) {
@@ -914,24 +962,24 @@ function renderGrid(root, needle) {
       const cards = resumable.map((r) => {
         const it = r.item;
         const title = isEpisode(it) ? it.show + ' ' + episodeCode(it) : titleOf(it);
-        return card(it, title, formatTime(r.saved.t) + ' in', () => go(detailOf(it)),
+        return card(it, title, t('player.timeIn', { time: formatTime(r.saved.t) }), () => go(detailOf(it)),
           r.saved.d > 0 ? r.saved.t / r.saved.d : 0);
       });
-      root.append(...section('Continue watching', resumable.length, cardGrid('shelf', cards)));
+      root.append(...section(t('library.continue'), resumable.length, cardGrid('shelf', cards)));
     }
   }
 
   const movies = catalog.movies.filter((i) => matches(i, needle));
   if (movies.length > 0) {
     shown += movies.length;
-    root.append(...section('Videos', movies.length, cardGrid('cards', movies.map(movieCard))));
+    root.append(...section(t('library.videos'), movies.length, cardGrid('cards', movies.map(movieCard))));
   }
   const shows = catalog.shows.filter((s) => showMatches(s, needle));
   if (shows.length > 0) {
     shown += shows.length;
-    root.append(...section('TV shows', shows.length, cardGrid('cards', shows.map(showCard))));
+    root.append(...section(t('library.shows'), shows.length, cardGrid('cards', shows.map(showCard))));
   }
-  for (const group of [{ list: catalog.music, title: 'Music' }, { list: catalog.photos, title: 'Photos' }]) {
+  for (const group of [{ list: catalog.music, title: t('library.music') }, { list: catalog.photos, title: t('library.photos') }]) {
     const list = group.list.filter((i) => matches(i, needle));
     if (list.length === 0) continue;
     shown += list.length;
@@ -955,7 +1003,7 @@ function backButton() {
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'linkbutton back';
-  back.textContent = '← Back to the library';
+  back.textContent = t('page.back');
   back.addEventListener('click', () => history.back());
   return back;
 }
@@ -983,14 +1031,14 @@ function renderItem(root, item) {
   const play1 = document.createElement('button');
   play1.type = 'button';
   play1.className = 'button primary';
-  play1.textContent = saved ? 'Resume from ' + formatTime(saved.t) : 'Play';
+  play1.textContent = saved ? t('item.resume', { time: formatTime(saved.t) }) : t('item.play');
   play1.addEventListener('click', () => play(item));
   info.append(play1);
   if (saved) {
     const again = document.createElement('button');
     again.type = 'button';
     again.className = 'button';
-    again.textContent = 'Start over';
+    again.textContent = t('page.startOver');
     again.addEventListener('click', () => {
       try {
         localStorage.removeItem(RESUME_PREFIX + item.id);
@@ -1045,7 +1093,7 @@ function addOption(select, value, text, disabled) {
 }
 
 function audioPicker(item) {
-  const { label, select } = pickerOf('Audio');
+  const { label, select } = pickerOf(t('item.audio'));
   const refresh = () => {
     const audio = tracksOf(item).audio;
     select.replaceChildren();
@@ -1063,13 +1111,13 @@ function audioPicker(item) {
 }
 
 function subtitlePicker(item) {
-  const { label, select } = pickerOf('Subtitles');
+  const { label, select } = pickerOf(t('item.subtitles'));
   const refresh = () => {
     const choices = subtitleChoices(item);
     select.replaceChildren();
-    addOption(select, -1, 'Off', false);
+    addOption(select, -1, t('item.subtitlesOff'), false);
     choices.forEach((sub, index) => {
-      const text = sub.supported ? sub.label : sub.label + " (pictures, can't be shown)";
+      const text = sub.supported ? sub.label : t('item.subtitlePictures', { label: sub.label });
       addOption(select, index, text, !sub.supported);
     });
     label.hidden = choices.length === 0;
@@ -1139,10 +1187,9 @@ function renderShow(root, show) {
   const h = document.createElement('h2');
   h.textContent = show.name;
   info.append(h);
-  const n = show.episodes.length;
   const count = document.createElement('p');
   count.className = 'hint';
-  count.textContent = (show.seasons > 1 ? show.seasons + ' seasons · ' : '') + n + (n === 1 ? ' episode' : ' episodes');
+  count.textContent = showSummary(show);
   info.append(count);
   page.append(info);
   root.append(page);
@@ -1153,7 +1200,7 @@ function renderShow(root, show) {
     if (ep.season !== season || ul === null) {
       season = ep.season;
       const heading = document.createElement('h3');
-      heading.textContent = season > 0 ? 'Season ' + season : 'Episodes';
+      heading.textContent = season > 0 ? t('show.season', { number: season }) : t('show.noSeason');
       ul = document.createElement('ul');
       root.append(heading, ul);
     }
@@ -1212,8 +1259,8 @@ function render() {
   $('search').hidden = false;
 
   const shown = renderGrid(root, needle);
-  if (items.length === 0) status.textContent = 'This library has no media yet.';
-  else if (shown === 0) status.textContent = 'Nothing matches your search.';
+  if (items.length === 0) status.textContent = t('library.empty');
+  else if (shown === 0) status.textContent = t('library.noMatch');
   else status.textContent = '';
 }
 
@@ -1266,7 +1313,7 @@ function showLibrary() {
   button.hidden = who === null;
   if (who) {
     button.replaceChildren(avatar(who), document.createTextNode(who.name));
-    button.setAttribute('aria-label', 'Switch profile. Now: ' + who.name);
+    button.setAttribute('aria-label', t('profile.switch', { name: who.name }));
   }
 }
 
@@ -1292,7 +1339,7 @@ function showPicker() {
     if (p.hasPin) {
       const lock = document.createElement('span');
       lock.className = 'card-sub';
-      lock.textContent = 'PIN';
+      lock.textContent = t('profile.pin');
       btn.append(lock);
     }
     btn.addEventListener('click', () => (p.hasPin ? askPin(p) : choose(p, '')));
@@ -1302,7 +1349,7 @@ function showPicker() {
 
 function askPin(profile) {
   pinFor = profile;
-  $('pin-for').textContent = 'PIN for ' + profile.name;
+  $('pin-for').textContent = t('profile.pinFor', { name: profile.name });
   $('pin-error').textContent = '';
   $('pin-input').value = '';
   $('pin-form').hidden = false;
@@ -1317,13 +1364,13 @@ async function choose(profile, pin) {
     await sendJSON('POST', '/api/profile', { id: profile.id, pin: pin });
   } catch (err) {
     if (!profile.hasPin) {
-      $('status').textContent = "Couldn't choose that profile.";
+      $('status').textContent = t('profile.chooseFailed');
       return;
     }
     $('pin-error').textContent =
-      err.status === 429 ? 'Too many wrong PINs. Try again in a few minutes.'
-        : err.status === 401 ? "That PIN didn't work."
-          : "Couldn't sign in. Try again.";
+      err.status === 429 ? t('profile.tooManyPins')
+        : err.status === 401 ? t('profile.wrongPin')
+          : t('profile.signInFailed');
     $('pin-input').value = '';
     return;
   }
@@ -1345,7 +1392,7 @@ async function leaveProfile() {
     await sendJSON('DELETE', '/api/profile');
     profiles = await getJSON('/api/profiles');
   } catch (err) {
-    $('status').textContent = "Couldn't switch profile. Check that EinCast is still running.";
+    $('status').textContent = t('profile.switchFailed');
     return;
   }
   profiles.current = '';
@@ -1392,7 +1439,7 @@ async function openLibrary() {
       showPicker();
       return;
     }
-    $('status').textContent = "Couldn't load the library. Check that EinCast is still running.";
+    $('status').textContent = t('library.loadFailed');
   }
 }
 
@@ -1419,6 +1466,7 @@ async function init() {
     submitPin();
   });
 
+  await loadStrings();
   try {
     const [health, who] = await Promise.all([getJSON('/api/health'), getJSON('/api/profiles')]);
     if (health.name) {
@@ -1435,7 +1483,7 @@ async function init() {
     }
     await openLibrary();
   } catch (err) {
-    $('status').textContent = "Couldn't load the library. Check that EinCast is still running.";
+    $('status').textContent = t('library.loadFailed');
   }
 }
 

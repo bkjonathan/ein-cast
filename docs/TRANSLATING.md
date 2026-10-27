@@ -16,8 +16,21 @@ Rules of the files:
 - Do not translate product names (EinCast, Tailscale, ngrok, VLC), the log level names, or file paths.
 - Short labels (a button) should stay short: the window is laid out for them.
 
+## The player page (phones and TVs)
+The page that devices open has its own, smaller files: `internal/adapters/httpapi/web/locales/en.json` and
+`my.json` (about forty keys). Design: [ADR 0033](adr/0033-player-page-words-come-from-go.md).
+
+- To add a language, copy `en.json` to `<code>.json` in that folder and translate the right-hand sides. Nothing
+  else needs changing: the server finds the file and offers it to any device whose browser language matches.
+- Translate every key. `go test ./internal/adapters/httpapi/` fails if you leave one out, invent one, or drop a
+  `{placeholder}`. (English fills any gap on the device as a safety net; a deliberately partial language means
+  relaxing `TestTranslations_ShippedLanguagesAreComplete`.)
+- A device's language is its browser's. To see another one on a device that cannot change it (a TV), open the
+  address with `?lang=my` at the end.
+- Not translated yet: the "access token needed" page and the PIN page a tunnel visitor signs in with.
+
 ## Burmese (`my.json`)
-**Status: an unreviewed draft** written by the assistant, not a person who speaks Burmese. Nothing in it
+**Status: an unreviewed draft (both the window and the player page)** written by the assistant, not a person who speaks Burmese. Nothing in it
 should be trusted for security wording (access token, PIN, public access) until it has been reviewed.
 
 Terms used, so they stay consistent. Change them here and in the file together:
