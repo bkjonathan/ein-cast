@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -69,14 +70,16 @@ func TestReport_SaysWhatIsRunningAndHowItIsSetUp(t *testing.T) {
 
 func TestReport_NeverCarriesTheTokenTheAddressesOrFolders(t *testing.T) {
 	d := baseDeps()
+	// NewLibrary cleans the path, which on Windows turns the slashes into
+	// backslashes; the log lines below must carry the folder the way the app does.
 	lib := media.NewLibrary("/Volumes/Family Movies/Kids")
 	d.Libraries = fakeLibs{[]app.LibraryState{{Library: lib, Stats: media.Stats{Total: 3, Counts: map[media.Kind]int{media.KindVideo: 3}},
-		Error: "cannot read /Volumes/Family Movies/Kids: permission denied"}}}
+		Error: "cannot read " + lib.Root + ": permission denied"}}}
 	d.Remote = fakeRemote{app.RemoteStatus{Provider: "ngrok", Public: true, State: server.Running, URL: "https://abc-123.ngrok.app", PINSet: true}}
 	d.Server = fakeServer{app.ServerStatus{State: server.Failed, Error: "listen on /Users/someone/x: busy"}}
 	d.Logs = fakeLogs{[]app.LogEntry{{
 		Time: time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC), Level: slog.LevelInfo, Source: "library", Message: "scanned",
-		Attrs: []app.LogAttr{{Key: "root", Value: "/Volumes/Family Movies/Kids"}, {Key: "home", Value: "/Users/someone/Movies"}, {Key: "url", Value: "http://x/?t=abc123&y=1"}},
+		Attrs: []app.LogAttr{{Key: "root", Value: lib.Root},{Key: "home", Value: "/Users/someone/Movies"}, {Key: "url", Value: "http://x/?t=abc123&y=1"}},
 	}}}
 
 	got := newService(d).Report()
@@ -97,11 +100,12 @@ func TestReport_NestedLibraryFoldersAreHiddenWhole(t *testing.T) {
 	d := baseDeps()
 	outer, inner := media.NewLibrary("/Volumes/Media"), media.NewLibrary("/Volumes/Media/Private")
 	d.Libraries = fakeLibs{[]app.LibraryState{{Library: outer}, {Library: inner}}}
-	d.Logs = fakeLogs{[]app.LogEntry{{Source: "library", Message: "scan /Volumes/Media/Private/secret.mkv"}}}
+	sep := string(filepath.Separator)
+	d.Logs = fakeLogs{[]app.LogEntry{{Source: "library", Message: "scan " + inner.Root + sep + "secret.mkv"}}}
 
 	got := newService(d).Report()
 
-	if strings.Contains(got, "Private") || strings.Contains(got, "secret.mkv") && !strings.Contains(got, "[library 2]/secret.mkv") {
+	if strings.Contains(got, "Private") || strings.Contains(got, "secret.mkv") && !strings.Contains(got, "[library 2]"+sep+"secret.mkv") {
 		t.Errorf("the inner folder name leaked, probably replaced by the outer one first:\n%s", got)
 	}
 }

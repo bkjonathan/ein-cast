@@ -133,22 +133,25 @@ func TestCheckDiskSpace(t *testing.T) {
 		})
 	}
 
-	t.Run("a huge source is estimated at the cap, not its own size", func(t *testing.T) {
-		// A sparse file: 60 GB on paper, nothing on disk.
-		huge := filepath.Join(root, "huge.mkv")
-		f, err := os.Create(huge)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := f.Truncate(60 << 30); err != nil {
-			t.Skip("cannot make a sparse file here")
-		}
-		f.Close()
-		tc.freeBytes = func(string) (uint64, error) { return diskEstimateCap + diskHeadroom, nil }
-		if err := tc.checkDiskSpace(huge); err != nil {
-			t.Fatalf("checkDiskSpace() = %v", err)
-		}
-	})
+}
+
+func TestDiskNeeded(t *testing.T) {
+	tests := []struct {
+		name string
+		size int64
+		want uint64
+	}{
+		{"a small source is estimated at its own size", 1000, diskHeadroom + 1000},
+		{"a huge source is estimated at the cap, not its own size", 60 << 30, diskEstimateCap + diskHeadroom},
+		{"exactly the cap", diskEstimateCap, diskEstimateCap + diskHeadroom},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := diskNeeded(tt.size); got != tt.want {
+				t.Fatalf("diskNeeded(%d) = %d, want %d", tt.size, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestFreeBytes_ReportsTheRealDisk(t *testing.T) {

@@ -115,6 +115,14 @@ const (
 	diskEstimateCap = 8 << 30
 )
 
+// diskNeeded is the free space a conversion of a source this size must find: a
+// guess at the output, capped, plus the headroom. A function of its own so a test
+// can feed it a 60 GB size without making a 60 GB file, which Windows does not
+// make sparse.
+func diskNeeded(sourceSize int64) uint64 {
+	return min(uint64(sourceSize), diskEstimateCap) + diskHeadroom
+}
+
 // checkDiskSpace refuses to start when the disk holding the conversion folder
 // would probably fill up. A failed check lets the conversion go ahead: not being
 // able to ask is no reason to refuse a film, and ffmpeg still fails cleanly if
@@ -129,7 +137,7 @@ func (t *Transcoder) checkDiskSpace(file string) error {
 		t.log.Warn("could not check the free disk space", slog.String("error", err.Error()))
 		return nil
 	}
-	need := min(uint64(info.Size()), diskEstimateCap) + diskHeadroom
+	need := diskNeeded(info.Size())
 	if free < need {
 		t.log.Warn("not converting: the disk is too full",
 			slog.Uint64("free_bytes", free), slog.Uint64("needed_bytes", need))
