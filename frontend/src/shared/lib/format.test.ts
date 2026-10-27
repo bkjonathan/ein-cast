@@ -19,3 +19,11 @@ describe("formatBytes", () => {
     expect(formatBytes(input)).toBe("—");
   });
 });
+
+describe("formatBytes in other languages", () => {
+  it("uses the language's separators but Latin digits and the usual units", () => {
+    expect(formatBytes(1536, "de")).toBe("1,5 KB");
+    expect(formatBytes(1536, "my")).toBe("1.5 KB");
+    expect(formatBytes(5 * 1024 ** 3, "my")).toBe("5.0 GB");
+  });
+});

@@ -18,7 +18,7 @@ const kinds: readonly {
 /** Counts by kind and total size across every library, and how each library is doing. */
 export function LibraryStats() {
   const libraries = useLibraryStore((s) => s.libraries);
-  const { t, tn } = useT();
+  const { t, tn, locale } = useT();
   if (libraries.length === 0) return null;
   const totals = totalsOf(libraries);
 
@@ -38,7 +38,7 @@ export function LibraryStats() {
           {kinds.map(({ key, labelKey, icon: Icon }) => (
             <Stat key={key} label={t(labelKey)} icon={Icon} value={totals.counts[key]} />
           ))}
-          <Stat label={t("stats.totalSize")} value={formatBytes(totals.totalSize)} />
+          <Stat label={t("stats.totalSize")} value={formatBytes(totals.totalSize, locale)} />
         </dl>
       )}
 

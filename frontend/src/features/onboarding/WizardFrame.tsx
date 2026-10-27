@@ -1,3 +1,4 @@
+import { useT } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import { stepNumber, wizardSteps, type WizardStep } from "./wizard";
 
@@ -10,9 +11,10 @@ interface WizardFrameProps {
 /** The progress line above each step, and the way out of the whole setup. */
 export function WizardFrame({ step, onSkip, children }: WizardFrameProps) {
   const current = stepNumber(step);
+  const { t } = useT();
   return (
     <div className="flex h-full flex-col gap-4">
-      <nav aria-label="Setup progress" className="flex items-center justify-between gap-4 px-2 pt-1">
+      <nav aria-label={t("wizard.progress")} className="flex items-center justify-between gap-4 px-2 pt-1">
         <ol className="flex items-center gap-2">
           {wizardSteps.map((s, i) => (
             <li
@@ -31,7 +33,7 @@ export function WizardFrame({ step, onSkip, children }: WizardFrameProps) {
               >
                 {i + 1}
               </span>
-              <span className="hidden sm:inline">{s.title}</span>
+              <span className="hidden sm:inline">{t(s.titleKey)}</span>
             </li>
           ))}
         </ol>
@@ -40,7 +42,7 @@ export function WizardFrame({ step, onSkip, children }: WizardFrameProps) {
           onClick={onSkip}
           className="app-no-drag text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
-          Skip setup
+          {t("wizard.skip")}
         </button>
       </nav>
       <div className="min-h-0 flex-1">{children}</div>

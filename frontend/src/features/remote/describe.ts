@@ -1,23 +1,25 @@
 import type { RemoteProvider, RemoteStatus } from "@/shared/bridge";
 
+import type { MessageKey, Translator } from "@/shared/i18n";
+
 export type Tone = "neutral" | "success" | "warning" | "danger";
 
 /** How remote access looks in the status pill. */
-export function summarize(status: RemoteStatus): { label: string; tone: Tone } {
+export function summarize(status: RemoteStatus): { labelKey: MessageKey; tone: Tone } {
   switch (status.state) {
     case "idle":
-      return { label: "Off", tone: "neutral" };
+      return { labelKey: "remote.state.idle", tone: "neutral" };
     case "starting":
-      return { label: "Connecting…", tone: "warning" };
+      return { labelKey: "remote.state.starting", tone: "warning" };
     case "running":
       // The provider can lose its connection while we still intend it to be on.
-      if (status.live !== "running") return { label: "Reconnecting…", tone: "warning" };
+      if (status.live !== "running") return { labelKey: "remote.state.reconnecting", tone: "warning" };
       // Amber, not green, while the Internet can reach it.
-      return { label: "On", tone: status.public ? "warning" : "success" };
+      return { labelKey: "remote.state.on", tone: status.public ? "warning" : "success" };
     case "stopping":
-      return { label: "Turning off…", tone: "warning" };
+      return { labelKey: "remote.state.stopping", tone: "warning" };
     case "failed":
-      return { label: "Failed", tone: "danger" };
+      return { labelKey: "remote.state.failed", tone: "danger" };
   }
 }
 
@@ -44,12 +46,12 @@ export function enableBlocker(
   status: RemoteStatus,
   serverRunning: boolean,
   noticePending = false,
-): string | null {
-  if (!serverRunning) return "Start the server first.";
-  if (!provider) return "Choose a way to connect.";
-  if (status.needsSetup.includes(provider.id)) return "Finish setting this up first.";
-  if (provider.public && !status.pinSet) return "Set an access PIN first.";
-  if (noticePending) return "Read the notice above first.";
+): MessageKey | null {
+  if (!serverRunning) return "remote.blocker.server";
+  if (!provider) return "remote.blocker.choose";
+  if (status.needsSetup.includes(provider.id)) return "remote.blocker.setup";
+  if (provider.public && !status.pinSet) return "remote.blocker.pin";
+  if (noticePending) return "remote.blocker.notice";
   return null;
 }
 
@@ -58,16 +60,16 @@ export function enableBlocker(
  * on the side of alarm: while a stop is unconfirmed the library may still be
  * reachable, and the text says so.
  */
-export function publicBadge(status: RemoteStatus | null): string | null {
+export function publicBadge(status: RemoteStatus | null, tr: Translator): string | null {
   if (!status?.public) return null;
   switch (status.state) {
     case "stopping":
-      return "Public access turning off…";
+      return tr.t("remote.badge.stopping");
     case "failed":
-      return "Public access may still be ON";
+      return tr.t("remote.badge.failed");
     default: {
       const n = status.sessions;
-      return n > 0 ? `Public access ON · ${n} signed in` : "Public access ON";
+      return n > 0 ? tr.t("remote.badge.onSessions", { count: n }) : tr.t("remote.badge.on");
     }
   }
 }

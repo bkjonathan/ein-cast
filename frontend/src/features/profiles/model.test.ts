@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { LibraryState, Profile } from "@/shared/bridge";
+import { translatorFor } from "@/shared/i18n";
+
+const en = translatorFor("en");
 import { blankProfile, describeAccess, foldersText, liveLibraries, openProfileAdvice, parseFolders, pinLooksValid, toggleKind, toggleLibrary } from "./model";
 
 const profile = (over: Partial<Profile> = {}): Profile => ({
@@ -67,26 +70,26 @@ describe("describeAccess", () => {
     [profile({ hiddenFolders: ["a"] }), "All libraries · hides 1 folder"],
     [profile({ allLibraries: false, libraries: ["a"], kinds: ["video"], hiddenFolders: ["x", "y"] }), "Cartoons · Videos only · hides 2 folders"],
   ])("%j → %s", (p, text) => {
-    expect(describeAccess(p, libs)).toBe(text);
+    expect(describeAccess(p, libs, translatorFor("en"))).toBe(text);
   });
 });
 
 describe("openProfileAdvice", () => {
   it("says nothing with a single profile, whatever it can see", () => {
-    expect(openProfileAdvice([profile()])).toBeNull();
+    expect(openProfileAdvice([profile()], translatorFor("en"))).toBeNull();
   });
   it("warns that an unrestricted profile without a PIN is the way round the others", () => {
-    const advice = openProfileAdvice([profile({ name: "Everyone" }), profile({ id: "k", name: "Kids", kinds: ["video"] })]);
+    const advice = openProfileAdvice([profile({ name: "Everyone" }), profile({ id: "k", name: "Kids", kinds: ["video"] })], en);
     expect(advice).toMatch(/“Everyone” can see everything and has no PIN/);
     expect(advice).not.toMatch(/Kids/);
   });
   it("is satisfied by a PIN, or by a restriction", () => {
     const kids = profile({ id: "k", name: "Kids", kinds: ["video"] });
-    expect(openProfileAdvice([profile({ hasPin: true }), kids])).toBeNull();
-    expect(openProfileAdvice([profile({ hiddenFolders: ["x"] }), kids])).toBeNull();
+    expect(openProfileAdvice([profile({ hasPin: true }), kids], en)).toBeNull();
+    expect(openProfileAdvice([profile({ hiddenFolders: ["x"] }), kids], en)).toBeNull();
   });
   it("names every open profile", () => {
-    expect(openProfileAdvice([profile({ name: "A" }), profile({ id: "b", name: "B" })])).toMatch(/“A” and “B” can/);
+    expect(openProfileAdvice([profile({ name: "A" }), profile({ id: "b", name: "B" })], en)).toMatch(/“A” and “B” can/);
   });
 });
 

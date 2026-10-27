@@ -2,6 +2,7 @@ import { LoaderCircle, Play, WifiOff } from "lucide-react";
 import { connectSources, QrCode, UrlRow, withToken } from "@/features/connect";
 import { useServerControls, useServerStore } from "@/features/server";
 import { useSettingsStore } from "@/features/settings";
+import { useT } from "@/shared/i18n";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 
 /** Step 2: the server runs, and here is the code that opens it. */
@@ -9,6 +10,7 @@ export function ShareStep({ onNext }: { onNext: () => void }) {
   const status = useServerStore((s) => s.status);
   const token = useSettingsStore((s) => (s.settings?.requireToken ? s.settings.accessToken : ""));
   const { start, pending, commandError } = useServerControls();
+  const { t } = useT();
   if (!status) return null;
 
   const running = status.state === "running";
@@ -21,11 +23,9 @@ export function ShareStep({ onNext }: { onNext: () => void }) {
     <div className="flex h-full items-center justify-center">
       <GlassPanel className="flex w-full max-w-lg flex-col items-center gap-5 p-10 text-center">
         <div className="space-y-1.5">
-          <h2 className="text-xl font-semibold">{running ? "You're sharing" : "Start sharing"}</h2>
+          <h2 className="text-xl font-semibold">{running ? t("wizard.share.sharing") : t("wizard.share.start")}</h2>
           <p className="text-sm text-muted-foreground">
-            {running
-              ? "Anything on your Wi-Fi with this code or address can open your library."
-              : "EinCast serves your folder to the screens on your Wi-Fi. Nothing leaves your home."}
+            {running ? t("wizard.share.running") : t("wizard.share.notRunning")}
           </p>
         </div>
 
@@ -33,11 +33,11 @@ export function ShareStep({ onNext }: { onNext: () => void }) {
           <>
             <QrCode value={url} />
             <div className="w-full text-left">
-              <UrlRow label="Address" url={url} />
+              <UrlRow label={t("wizard.share.address")} url={url} />
             </div>
             {source.token && (
               <p className="text-xs text-muted-foreground">
-                The code includes your access token, so only devices you show it to can open the library.
+                {t("wizard.share.tokenNote")}
               </p>
             )}
           </>
@@ -46,7 +46,7 @@ export function ShareStep({ onNext }: { onNext: () => void }) {
         {running && !source && (
           <p role="status" className="flex items-center gap-2 text-sm text-warning">
             <WifiOff className="size-4 shrink-0" aria-hidden />
-            No local network found. Connect to Wi-Fi or plug in a cable, then come back to Settings → Network.
+            {t("wizard.share.noNetwork")}
           </p>
         )}
 
@@ -58,12 +58,12 @@ export function ShareStep({ onNext }: { onNext: () => void }) {
 
         {running ? (
           <GlassButton size="lg" onClick={onNext}>
-            Next
+            {t("wizard.next")}
           </GlassButton>
         ) : (
           <GlassButton size="lg" onClick={() => void start()} disabled={busy}>
             {busy ? <LoaderCircle className="animate-spin" /> : <Play />}
-            {status.state === "failed" ? "Try again" : "Start sharing"}
+            {status.state === "failed" ? t("server.retry") : t("wizard.share.start")}
           </GlassButton>
         )}
       </GlassPanel>

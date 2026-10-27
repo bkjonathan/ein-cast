@@ -2,6 +2,7 @@ import { useState } from "react";
 import { LoaderCircle, RefreshCw, Wifi } from "lucide-react";
 import { useServerStore } from "@/features/server";
 import { refreshAddresses } from "@/shared/bridge";
+import { useT } from "@/shared/i18n";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 import { networkHints } from "../network";
 
@@ -11,6 +12,7 @@ import { networkHints } from "../network";
  */
 export function NetworkSettings() {
   const running = useServerStore((s) => s.status?.state === "running");
+  const { t } = useT();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,27 +32,27 @@ export function NetworkSettings() {
     <GlassPanel className="flex flex-col gap-4 p-6">
       <header className="space-y-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Wifi className="size-5" aria-hidden /> Network
+          <Wifi className="size-5" aria-hidden /> {t("settings.network.title")}
         </h2>
-        <p className="text-sm text-muted-foreground">If a TV or phone can't see EinCast, start here.</p>
+        <p className="text-sm text-muted-foreground">{t("settings.network.intro")}</p>
       </header>
 
       <div className="space-y-2">
         <GlassButton size="sm" onClick={() => void refresh()} disabled={!running || pending}>
-          {pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />} Refresh addresses
+          {pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />} {t("settings.network.refresh")}
         </GlassButton>
         <p className="text-xs text-muted-foreground">
           {running
-            ? "Use this after the Wi-Fi or cable changed. It restarts the server, which also turns off remote access."
-            : "Available while the server is running."}
+            ? t("settings.network.refreshHelp")
+            : t("settings.network.refreshUnavailable")}
         </p>
       </div>
 
       <ul className="flex flex-col gap-2">
         {networkHints.map((h) => (
-          <li key={h.title} className="text-sm">
-            <span className="font-medium">{h.title}</span>
-            <span className="text-muted-foreground"> {h.text}</span>
+          <li key={h.id} className="text-sm">
+            <span className="font-medium">{t(h.titleKey)}</span>
+            <span className="text-muted-foreground"> {t(h.textKey)}</span>
           </li>
         ))}
       </ul>

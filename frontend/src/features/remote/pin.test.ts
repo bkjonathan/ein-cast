@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { translatorFor } from "@/shared/i18n";
 import { pinProblem } from "./pin";
+
+const en = translatorFor("en");
 
 describe("pinProblem", () => {
   it.each([
@@ -9,7 +12,7 @@ describe("pinProblem", () => {
     ["สวัสดีครับผม", null], // 12 characters, though 36 bytes
     ["😀".repeat(8), null], // 8 characters, 16 UTF-16 units
   ])("accepts %j", (pin, want) => {
-    expect(pinProblem(pin)).toBe(want);
+    expect(pinProblem(pin, en)).toBe(want);
   });
 
   it.each([
@@ -21,6 +24,6 @@ describe("pinProblem", () => {
     ["abcd\tefgh", /Control/],
     ["abcdefgh\u007f", /Control/],
   ])("rejects %j", (pin, why) => {
-    expect(pinProblem(pin)).toMatch(why);
+    expect(pinProblem(pin, en)).toMatch(why);
   });
 });

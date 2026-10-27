@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { KeyRound, Trash2 } from "lucide-react";
+import { useT } from "@/shared/i18n";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 import { Input } from "@/shared/ui/input";
 import { useRemoteCommands } from "../hooks/useRemoteCommands";
@@ -16,14 +17,16 @@ export function PinPanel() {
   const { setPin, clearPin, busy, error } = useRemoteCommands();
   const [editing, setEditing] = useState(false);
   const [pin, setPinText] = useState("");
+  const tr = useT();
+  const { t } = tr;
 
   if (!status || !(offersPublic || status.pinSet)) return null;
 
   const showForm = !status.pinSet || editing;
-  const problem = pin === "" ? null : pinProblem(pin);
+  const problem = pin === "" ? null : pinProblem(pin, tr);
 
   async function submit() {
-    if (pinProblem(pin) !== null) return;
+    if (pinProblem(pin, tr) !== null) return;
     if (await setPin(pin)) {
       setPinText("");
       setEditing(false);
@@ -33,10 +36,9 @@ export function PinPanel() {
   return (
     <GlassPanel className="flex flex-col gap-4 p-6">
       <header className="space-y-1">
-        <h2 className="text-lg font-semibold">Access PIN</h2>
+        <h2 className="text-lg font-semibold">{t("remote.pin.title")}</h2>
         <p className="text-sm text-muted-foreground">
-          Required for any connection that is open to the Internet. Devices enter it once to sign in.
-          Private options such as Tailscale don't need it.
+          {t("remote.pin.intro")}
         </p>
       </header>
 
@@ -50,7 +52,7 @@ export function PinPanel() {
         >
           <label className="space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground">
-              {status.pinSet ? "New PIN" : "PIN"}
+              {status.pinSet ? t("remote.pin.new") : t("remote.pin.label")}
             </span>
             <Input
               type="password"
@@ -63,14 +65,14 @@ export function PinPanel() {
             />
           </label>
           <p id="pin-help" className={problem ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
-            {problem ?? "At least 8 characters. A few random words is better than digits."}
+            {problem ?? t("remote.pin.hint")}
           </p>
           {status.pinSet && (
-            <p className="text-sm text-muted-foreground">Changing the PIN signs out everyone who is signed in.</p>
+            <p className="text-sm text-muted-foreground">{t("remote.pin.signsOut")}</p>
           )}
           <div className="flex gap-2">
             <GlassButton type="submit" disabled={busy.pin || pin === "" || problem !== null}>
-              <KeyRound /> {status.pinSet ? "Change PIN" : "Set PIN"}
+              <KeyRound /> {status.pinSet ? t("remote.pin.change") : t("remote.pin.set")}
             </GlassButton>
             {editing && (
               <GlassButton
@@ -80,28 +82,28 @@ export function PinPanel() {
                   setPinText("");
                 }}
               >
-                Cancel
+                {t("common.cancel")}
               </GlassButton>
             )}
           </div>
         </form>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
-          <p className="text-sm">A PIN is set.</p>
+          <p className="text-sm">{t("remote.pin.isSet")}</p>
           <GlassButton size="sm" onClick={() => setEditing(true)}>
-            <KeyRound /> Change PIN…
+            <KeyRound /> {t("remote.pin.changeAsk")}
           </GlassButton>
           <GlassButton
             size="sm"
             onClick={() => void clearPin()}
             // Go refuses too; this just explains why instead of failing.
             disabled={busy.pin || status.public}
-            title={status.public ? "Turn off public access before removing the PIN." : undefined}
+            title={status.public ? t("remote.pin.removeBlocked") : undefined}
           >
-            <Trash2 /> Remove PIN
+            <Trash2 /> {t("remote.pin.remove")}
           </GlassButton>
           {status.public && (
-            <p className="text-sm text-muted-foreground">Turn off public access to remove it.</p>
+            <p className="text-sm text-muted-foreground">{t("remote.pin.removeBlockedShort")}</p>
           )}
         </div>
       )}

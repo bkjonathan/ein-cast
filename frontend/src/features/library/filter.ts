@@ -1,12 +1,13 @@
+import type { MessageKey } from "@/shared/i18n";
 import type { LibraryItem, MediaKind } from "@/shared/bridge";
 
 export type KindFilter = "all" | MediaKind;
 export type SortKey = "name" | "newest" | "largest";
 
-export const sortLabels: Record<SortKey, string> = {
-  name: "Name",
-  newest: "Newest",
-  largest: "Largest",
+export const sortLabelKeys: Record<SortKey, MessageKey> = {
+  name: "library.sort.name",
+  newest: "library.sort.newest",
+  largest: "library.sort.largest",
 };
 
 // By the title a person sees, falling back to the file name for ties.

@@ -2,6 +2,7 @@ import { ChevronRight, Film, Image, Music, Tv, type LucideIcon } from "lucide-re
 import type { CSSProperties } from "react";
 import type { LibraryItem, MediaKind } from "@/shared/bridge";
 import { cn } from "@/shared/lib/cn";
+import { useT } from "@/shared/i18n";
 import { formatBytes } from "@/shared/lib/format";
 import { useThumbnail } from "../hooks/useThumbnail";
 import { episodeCode, itemTitle } from "../titles";
@@ -48,6 +49,7 @@ export function LibraryRow({
   /** An episode under its series' header. */
   indent?: boolean;
 }) {
+  const { locale } = useT();
   const code = episodeCode(item);
   const caption = indent
     ? item.name
@@ -66,7 +68,7 @@ export function LibraryRow({
         </p>
         {caption && <p className="truncate text-xs text-muted-foreground">{caption}</p>}
       </div>
-      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{formatBytes(item.size)}</span>
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{formatBytes(item.size, locale)}</span>
     </div>
   );
 }
@@ -89,7 +91,8 @@ export function ShowRow({
   onToggle: () => void;
   style: CSSProperties;
 }) {
-  const detail = `${seasons > 1 ? `${seasons} seasons · ` : ""}${episodes} ${episodes === 1 ? "episode" : "episodes"}`;
+  const { t, tn } = useT();
+  const detail = `${seasons > 1 ? t("library.row.seasons", { count: seasons }) : ""}${tn("library.row.episodes", episodes)}`;
   return (
     <div style={style} className="flex items-center">
       <button
@@ -113,10 +116,11 @@ export function ShowRow({
 }
 
 /** "Season 2" between a series' episodes. */
-export function SeasonRow({ label, style }: { label: string; style: CSSProperties }) {
+export function SeasonRow({ season, style }: { season: number; style: CSSProperties }) {
+  const { t } = useT();
   return (
     <div style={style} className="flex items-end px-4 pb-1 pl-12">
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</p>
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{season > 0 ? t("library.season", { n: season }) : t("library.episodesLabel")}</p>
     </div>
   );
 }

@@ -22,7 +22,7 @@ const ep = (show: string, season: number, episode: number, over: Partial<Library
   item(`${show} S${season}E${episode}.mkv`, { show, season, episode, ...over });
 
 const shape = (rows: ReturnType<typeof listRows>) =>
-  rows.map((r) => (r.type === "item" || r.type === "episode" ? `${r.type}:${r.item.name}` : r.type === "show" ? `show:${r.name}` : `season:${r.label}`));
+  rows.map((r) => (r.type === "item" || r.type === "episode" ? `${r.type}:${r.item.name}` : r.type === "show" ? `show:${r.name}` : `season:${r.season > 0 ? `Season ${r.season}` : "Episodes"}`));
 
 describe("listRows", () => {
   it("keeps files that are not episodes as lines of their own", () => {

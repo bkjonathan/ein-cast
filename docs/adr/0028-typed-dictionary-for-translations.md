@@ -41,6 +41,10 @@ beyond `navigator.languages`.
 - Text assembled from fragments (a link in the middle of a sentence) must become one
   string with the markup outside it; the first such case, "Serving your library on port
   {port}", lost the monospace styling on the port number.
+- Messages that Go produces (a failed start, a validation error, the connection log) are shown as Go
+  wrote them, in English. Translating those means error codes from Go, which is a separate change.
+- Helpers that build a sentence take the translator (`describeAccess(p, libs, tr)`) or return a key;
+  none of them reads the window's language on its own.
 - Burmese drafts were written without a native review. They are marked as drafts in
   `docs/ROADMAP.md` until a Burmese-speaking reviewer signs off (18.3).
 

@@ -1,6 +1,7 @@
 import { Check, FolderX, LoaderCircle, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { LibraryState } from "@/shared/bridge";
+import { useT } from "@/shared/i18n";
 import { formatBytes } from "@/shared/lib/format";
 import { GlassButton } from "@/shared/ui/glass";
 import { Input } from "@/shared/ui/input";
@@ -16,6 +17,7 @@ export function LibraryCard({ library }: { library: LibraryState }) {
   const { rescan, remove, rename, setHiddenFromTVs, busy, error } = useLibraryActions();
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const { t, locale } = useT();
 
   async function commitRename() {
     if (editing === null) return;
@@ -39,25 +41,25 @@ export function LibraryCard({ library }: { library: LibraryState }) {
               autoFocus
               value={editing}
               maxLength={64}
-              aria-label="Library name"
+              aria-label={t("library.card.name")}
               onChange={(e) => setEditing(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
               className="h-8 text-sm"
             />
-            <GlassButton size="icon" type="submit" aria-label="Save name" disabled={busy}>
+            <GlassButton size="icon" type="submit" aria-label={t("library.card.saveName")} disabled={busy}>
               <Check />
             </GlassButton>
           </form>
         )}
         <div className="flex gap-2">
-          <GlassButton size="icon" onClick={() => setEditing(library.name)} aria-label={`Rename ${library.name}`}>
+          <GlassButton size="icon" onClick={() => setEditing(library.name)} aria-label={t("library.card.rename", { name: library.name })}>
             <Pencil />
           </GlassButton>
           <GlassButton size="sm" onClick={() => void rescan(library.id)} disabled={busy}>
             {library.scanning ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-            {library.scanning ? "Scanning…" : "Rescan"}
+            {library.scanning ? t("library.card.scanning") : t("library.card.rescan")}
           </GlassButton>
-          <GlassButton size="icon" onClick={() => setConfirming(true)} aria-label={`Remove ${library.name}`}>
+          <GlassButton size="icon" onClick={() => setConfirming(true)} aria-label={t("library.card.remove", { name: library.name })}>
             <Trash2 />
           </GlassButton>
         </div>
@@ -68,24 +70,24 @@ export function LibraryCard({ library }: { library: LibraryState }) {
       </p>
       <p className="text-xs text-muted-foreground tabular-nums">
         {library.total === 0
-          ? "No supported media found yet."
-          : `${library.counts.video} videos · ${library.counts.audio} audio · ${library.counts.image} images · ${formatBytes(library.totalSize)}`}
+          ? t("library.card.none")
+          : t("library.card.counts", { video: library.counts.video, audio: library.counts.audio, image: library.counts.image, size: formatBytes(library.totalSize, locale) })}
       </p>
       <p className="text-xs text-muted-foreground">
         {library.watching
-          ? "Watching this folder: added and removed files appear by themselves."
-          : "Changes on disk are not picked up automatically. Use Rescan after adding or removing files."}
+          ? t("library.card.watching")
+          : t("library.card.notWatching")}
       </p>
 
       <div className="flex items-start justify-between gap-4">
         <p className="text-xs text-muted-foreground">
           {library.hiddenFromTVs
-            ? "Kept off smart TVs. A TV can't say who is watching, so it only sees libraries that are shown to TVs."
-            : "Shown to smart TVs, when Smart TVs is on. A TV can't say who is watching, so turn this off for what a child shouldn't see."}
+            ? t("library.card.hiddenFromTVs")
+            : t("library.card.shownToTVs")}
         </p>
         <Switch
           checked={!library.hiddenFromTVs}
-          label={`Show ${library.name} to smart TVs`}
+          label={t("library.card.showToTVs", { name: library.name })}
           disabled={busy}
           onChange={(show) => void setHiddenFromTVs(library.id, !show)}
         />
@@ -94,14 +96,14 @@ export function LibraryCard({ library }: { library: LibraryState }) {
       {library.error && (
         <p role="alert" className="flex items-start gap-2 text-sm text-destructive">
           <FolderX className="mt-0.5 size-4 shrink-0" aria-hidden />
-          {library.error} {library.total > 0 && "Showing the last successful scan."}
+          {library.error} {library.total > 0 && t("library.card.lastScan")}
         </p>
       )}
 
       {confirming && (
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Confirm removing the library">
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t("library.card.confirmGroup")}>
           <p className="text-sm text-muted-foreground">
-            Remove “{library.name}” from EinCast? Your files are not touched.
+            {t("library.card.confirm", { name: library.name })}
           </p>
           <GlassButton
             size="sm"
@@ -111,10 +113,10 @@ export function LibraryCard({ library }: { library: LibraryState }) {
               setConfirming(false);
             }}
           >
-            <Trash2 /> Remove
+            <Trash2 /> {t("library.card.removeButton")}
           </GlassButton>
           <GlassButton size="sm" onClick={() => setConfirming(false)}>
-            Cancel
+            {t("common.cancel")}
           </GlassButton>
         </div>
       )}

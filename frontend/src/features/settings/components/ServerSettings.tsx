@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useServerStore } from "@/features/server";
+import { useT } from "@/shared/i18n";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 import { Input } from "@/shared/ui/input";
 import type { SettingsInput } from "@/shared/bridge";
@@ -18,6 +19,7 @@ export function ServerSettings() {
 function ServerForm({ saved }: { saved: SettingsInput }) {
   const [form, setForm] = useState(() => formFrom(saved));
   const { save, pending, error } = useSettingsCommands();
+  const { t } = useT();
   const running = useServerStore((s) => s.status);
   const dirty = isDirty(form, saved);
 
@@ -32,13 +34,13 @@ function ServerForm({ saved }: { saved: SettingsInput }) {
         }}
       >
         <header>
-          <h2 className="text-lg font-semibold">Server</h2>
-          <p className="text-sm text-muted-foreground">How devices find this server.</p>
+          <h2 className="text-lg font-semibold">{t("settings.server.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("settings.server.intro")}</p>
         </header>
 
         <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
           <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Display name</span>
+            <span className="text-xs font-medium text-muted-foreground">{t("settings.server.displayName")}</span>
             <Input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -47,7 +49,7 @@ function ServerForm({ saved }: { saved: SettingsInput }) {
             />
           </label>
           <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Port</span>
+            <span className="text-xs font-medium text-muted-foreground">{t("settings.server.port")}</span>
             <Input
               value={form.port}
               onChange={(e) => setForm({ ...form, port: e.target.value })}
@@ -60,7 +62,7 @@ function ServerForm({ saved }: { saved: SettingsInput }) {
 
         {needsRestart(running, saved) && (
           <p className="text-sm text-warning">
-            Saved. The running server keeps its old port and name until you stop and start it.
+            {t("settings.server.restartNote")}
           </p>
         )}
         {error && (
@@ -71,11 +73,11 @@ function ServerForm({ saved }: { saved: SettingsInput }) {
 
         <div className="flex gap-2">
           <GlassButton type="submit" disabled={!dirty || pending}>
-            Save
+            {t("common.save")}
           </GlassButton>
           {dirty && (
             <GlassButton type="button" onClick={() => setForm(formFrom(saved))} disabled={pending}>
-              Discard
+              {t("common.discard")}
             </GlassButton>
           )}
         </div>

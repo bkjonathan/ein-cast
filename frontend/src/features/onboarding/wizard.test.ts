@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine } from "@/shared/bridge";
+import { translate } from "@/shared/i18n";
 import { firewallNote, firstDevice, stepNumber, wizardSteps } from "./wizard";
 
 const request = (seq: number, attrs: Record<string, string>, over: Partial<LogLine> = {}): LogLine => ({
@@ -64,8 +65,8 @@ describe("steps", () => {
 
 describe("firewallNote", () => {
   it("tells Windows users which box to tick, because the default leaves private Wi-Fi blocked", () => {
-    expect(firewallNote("windows")).toMatch(/Private networks/);
-    expect(firewallNote("darwin")).toMatch(/Allow/);
-    expect(firewallNote("")).toMatch(/allow/i);
+    expect(translate("en", firewallNote("windows"))).toMatch(/Private networks/);
+    expect(translate("en", firewallNote("darwin"))).toMatch(/Allow/);
+    expect(translate("en", firewallNote(""))).toMatch(/allow/i);
   });
 });

@@ -1,10 +1,11 @@
 import type { LibraryState, MediaKind, Profile } from "@/shared/bridge";
+import type { MessageKey, Translator } from "@/shared/i18n";
 import { colorNames } from "./colors";
 
-export const kindLabels: Readonly<Record<MediaKind, string>> = {
-  video: "Videos",
-  audio: "Music",
-  image: "Photos",
+export const kindLabelKeys: Readonly<Record<MediaKind, MessageKey>> = {
+  video: "profiles.kind.video",
+  audio: "profiles.kind.audio",
+  image: "profiles.kind.image",
 };
 export const allKinds: readonly MediaKind[] = ["video", "audio", "image"];
 
@@ -70,19 +71,19 @@ export function toggleKind(profile: Profile, kind: MediaKind): Profile {
 }
 
 /** A profile as one line: "All libraries · Videos only · hides 2 folders". */
-export function describeAccess(p: Profile, libraries: readonly LibraryState[]): string {
+export function describeAccess(p: Profile, libraries: readonly LibraryState[], tr: Translator): string {
   const parts: string[] = [];
   if (p.allLibraries) {
-    parts.push("All libraries");
+    parts.push(tr.t("profiles.access.all"));
   } else {
     const names = p.libraries.map((id) => libraries.find((l) => l.id === id)?.name).filter((n): n is string => !!n);
-    parts.push(names.length === 0 ? "No libraries" : names.join(", "));
+    parts.push(names.length === 0 ? tr.t("profiles.access.none") : names.join(", "));
   }
   if (p.kinds.length > 0 && p.kinds.length < allKinds.length) {
-    parts.push(`${p.kinds.map((k) => kindLabels[k]).join(" and ")} only`);
+    parts.push(tr.t("profiles.access.only", { kinds: tr.list(p.kinds.map((k) => tr.t(kindLabelKeys[k]))) }));
   }
   if (p.hiddenFolders.length > 0) {
-    parts.push(`hides ${p.hiddenFolders.length} ${p.hiddenFolders.length === 1 ? "folder" : "folders"}`);
+    parts.push(tr.tn("profiles.access.hides", p.hiddenFolders.length));
   }
   return parts.join(" · ");
 }
@@ -92,12 +93,12 @@ export function describeAccess(p: Profile, libraries: readonly LibraryState[]): 
  * pick one that has no PIN, so a profile that sees everything and has none is the
  * way round the others.
  */
-export function openProfileAdvice(profiles: readonly Profile[]): string | null {
+export function openProfileAdvice(profiles: readonly Profile[], tr: Translator): string | null {
   if (profiles.length < 2) return null;
   const open = profiles.filter((p) => p.allLibraries && p.kinds.length === 0 && p.hiddenFolders.length === 0 && !p.hasPin);
   if (open.length === 0) return null;
-  const names = open.map((p) => `“${p.name}”`).join(" and ");
-  return `${names} can see everything and has no PIN, so anyone can pick it to get past the others. Give it a PIN, or limit what it can see.`;
+  const names = tr.list(open.map((p) => `“${p.name}”`));
+  return tr.tn("profiles.advice", open.length, { names });
 }
 
 /** Libraries a profile that lists libraries no longer has, so the editor does not show ticks for ghosts. */

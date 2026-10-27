@@ -1,5 +1,6 @@
 import { Pause, Play, Search, Trash2 } from "lucide-react";
 import type { LogLevel } from "@/shared/bridge";
+import { useT } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import { Input } from "@/shared/ui/input";
 import { GlassButton, GlassToolbar } from "@/shared/ui/glass";
@@ -27,10 +28,11 @@ export function LogToolbar({ counts, shown, total }: LogToolbarProps) {
   const setQuery = useLogStore((s) => s.setQuery);
   const setPaused = useLogStore((s) => s.setPaused);
   const clear = useLogStore((s) => s.clear);
+  const { t, tn } = useT();
 
   return (
     <GlassToolbar className="flex-wrap">
-      <div className="flex gap-1" role="group" aria-label="Log levels">
+      <div className="flex gap-1" role="group" aria-label={t("logs.levels")}>
         {allLevels.map((level) => {
           const on = levels.has(level);
           return (
@@ -63,22 +65,22 @@ export function LogToolbar({ counts, shown, total }: LogToolbarProps) {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search logs"
-          aria-label="Search logs"
+          placeholder={t("logs.search")}
+          aria-label={t("logs.search")}
           className="h-8 pl-8 text-sm"
         />
       </div>
 
       <span className="text-xs text-muted-foreground tabular-nums">
-        {shown === total ? `${total} lines` : `${shown} of ${total}`}
+        {shown === total ? tn("logs.lines", total) : t("logs.shownOf", { shown, total })}
       </span>
 
       <GlassButton size="sm" onClick={() => setPaused(!paused)} aria-pressed={paused}>
         {paused ? <Play /> : <Pause />}
-        {paused ? "Resume" : "Pause"}
+        {paused ? t("logs.resume") : t("logs.pause")}
       </GlassButton>
       <GlassButton size="sm" onClick={clear} disabled={total === 0}>
-        <Trash2 /> Clear
+        <Trash2 /> {t("logs.clear")}
       </GlassButton>
     </GlassToolbar>
   );

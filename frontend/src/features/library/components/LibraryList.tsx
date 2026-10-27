@@ -64,7 +64,7 @@ export function LibraryList({
             case "episode":
               return <LibraryRow key={rowKey(row)} item={row.item} style={style} indent />;
             case "season":
-              return <SeasonRow key={rowKey(row)} label={row.label} style={style} />;
+              return <SeasonRow key={rowKey(row)} season={row.season} style={style} />;
             case "show":
               return (
                 <ShowRow

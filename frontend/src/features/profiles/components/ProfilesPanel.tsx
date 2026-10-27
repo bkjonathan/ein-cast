@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Plus, ShieldAlert, Users } from "lucide-react";
 import { useLibraryStore } from "@/features/library";
 import type { Profile } from "@/shared/bridge";
+import { useT } from "@/shared/i18n";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 import { MAX_PROFILES } from "../limits";
 import { blankProfile, describeAccess, openProfileAdvice } from "../model";
@@ -19,9 +20,11 @@ export function ProfilesPanel() {
   const libraries = useLibraryStore((s) => s.libraries);
   // The ID being edited, "" for a new one, null for none.
   const [editing, setEditing] = useState<string | null>(null);
+  const tr = useT();
+  const { t } = tr;
   if (!profiles) return null;
 
-  const advice = openProfileAdvice(profiles);
+  const advice = openProfileAdvice(profiles, tr);
   const shown: Profile | undefined =
     editing === "" ? blankProfile(profiles.map((p) => p.color)) : profiles.find((p) => p.id === editing);
 
@@ -30,16 +33,16 @@ export function ProfilesPanel() {
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <Users className="size-5" aria-hidden /> Profiles
+            <Users className="size-5" aria-hidden /> {t("profiles.title")}
           </h2>
           <p className="text-sm text-muted-foreground">
             {profiles.length < 2
-              ? "Add a profile for the kids, or for anyone who should see only part of the library. Devices then choose who is watching."
-              : "A device chooses a profile when it connects. Each profile has its own “Continue watching”."}
+              ? t("profiles.introFew")
+              : t("profiles.introMany")}
           </p>
         </div>
         <GlassButton size="sm" onClick={() => setEditing("")} disabled={editing !== null || profiles.length >= MAX_PROFILES}>
-          <Plus /> Add profile
+          <Plus /> {t("profiles.add")}
         </GlassButton>
       </header>
 
@@ -61,12 +64,12 @@ export function ProfilesPanel() {
               <Avatar name={p.name} color={p.color} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
-                  {p.name} {p.hasPin && <span className="ml-1 text-xs text-muted-foreground">· PIN</span>}
+                  {p.name} {p.hasPin && <span className="ml-1 text-xs text-muted-foreground">· {t("profiles.pinBadge")}</span>}
                 </p>
-                <p className="truncate text-xs text-muted-foreground">{describeAccess(p, libraries)}</p>
+                <p className="truncate text-xs text-muted-foreground">{describeAccess(p, libraries, tr)}</p>
               </div>
               <GlassButton size="sm" onClick={() => setEditing(p.id)} disabled={editing !== null}>
-                Edit
+                {t("profiles.edit")}
               </GlassButton>
             </li>
           ),

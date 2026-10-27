@@ -2,12 +2,13 @@ import { useState } from "react";
 import { KeyRound, Trash2 } from "lucide-react";
 import { useLibraryStore } from "@/features/library";
 import type { Profile } from "@/shared/bridge";
+import { useT } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import { GlassButton } from "@/shared/ui/glass";
 import { Input } from "@/shared/ui/input";
 import { colorNames, colorOf } from "../colors";
 import { useProfileCommands } from "../hooks/useProfileCommands";
-import { allKinds, foldersText, kindLabels, parseFolders, pinLooksValid, toggleKind, toggleLibrary } from "../model";
+import { allKinds, foldersText, kindLabelKeys, parseFolders, pinLooksValid, toggleKind, toggleLibrary } from "../model";
 
 interface ProfileEditorProps {
   /** The profile to edit, or a blank one to add. */
@@ -26,6 +27,7 @@ export function ProfileEditor({ initial, canDelete, onClose }: ProfileEditorProp
   const [confirmDelete, setConfirmDelete] = useState(false);
   const commands = useProfileCommands();
   const isNew = initial.id === "";
+  const { t } = useT();
 
   const current = (): Profile => ({ ...draft, hiddenFolders: parseFolders(folders) });
 
@@ -47,18 +49,18 @@ export function ProfileEditor({ initial, canDelete, onClose }: ProfileEditorProp
     >
       <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
         <label className="space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Name</span>
+          <span className="text-xs font-medium text-muted-foreground">{t("profiles.editor.name")}</span>
           <Input
             autoFocus
             value={draft.name}
             maxLength={32}
             autoComplete="off"
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            placeholder="Kids"
+            placeholder={t("profiles.editor.namePlaceholder")}
           />
         </label>
         <fieldset className="space-y-1.5">
-          <legend className="text-xs font-medium text-muted-foreground">Colour</legend>
+          <legend className="text-xs font-medium text-muted-foreground">{t("profiles.editor.colour")}</legend>
           <div className="flex flex-wrap gap-2">
             {colorNames.map((c) => (
               <button
@@ -76,11 +78,11 @@ export function ProfileEditor({ initial, canDelete, onClose }: ProfileEditorProp
       </div>
 
       <fieldset className="space-y-2">
-        <legend className="text-xs font-medium text-muted-foreground">Libraries it can see</legend>
+        <legend className="text-xs font-medium text-muted-foreground">{t("profiles.editor.libraries")}</legend>
         <Check
           checked={draft.allLibraries}
           onChange={(on) => setDraft({ ...draft, allLibraries: on })}
-          label="All libraries, including ones added later"
+          label={t("profiles.editor.allLibraries")}
         />
         {!draft.allLibraries &&
           libraries.map((l) => (
@@ -93,26 +95,26 @@ export function ProfileEditor({ initial, canDelete, onClose }: ProfileEditorProp
             />
           ))}
         {!draft.allLibraries && draft.libraries.length === 0 && (
-          <p className="text-xs text-warning">With no library ticked, this profile sees nothing.</p>
+          <p className="text-xs text-warning">{t("profiles.editor.noneTicked")}</p>
         )}
       </fieldset>
 
       <fieldset className="space-y-2">
-        <legend className="text-xs font-medium text-muted-foreground">What it can see</legend>
+        <legend className="text-xs font-medium text-muted-foreground">{t("profiles.editor.kinds")}</legend>
         <div className="flex flex-wrap gap-4">
           {allKinds.map((k) => (
             <Check
               key={k}
               checked={draft.kinds.length === 0 || draft.kinds.includes(k)}
               onChange={() => setDraft(toggleKind(draft, k))}
-              label={kindLabels[k]}
+              label={t(kindLabelKeys[k])}
             />
           ))}
         </div>
       </fieldset>
 
       <label className="space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">Hide folders named (one per line)</span>
+        <span className="text-xs font-medium text-muted-foreground">{t("profiles.editor.hideFolders")}</span>
         <textarea
           value={folders}
           onChange={(e) => setFolders(e.target.value)}
@@ -121,14 +123,14 @@ export function ProfileEditor({ initial, canDelete, onClose }: ProfileEditorProp
           className="glass w-full resize-y rounded-glass-sm px-3 py-2 font-mono text-sm outline-none"
         />
         <span className="block text-xs text-muted-foreground">
-          Hides everything inside a folder with that name, at any depth. <code>*</code> and <code>?</code> are wildcards.
+          {t("profiles.editor.hideHelp", { star: "*", question: "?" })}
         </span>
       </label>
 
       <div className="space-y-2">
         <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-          <KeyRound className="size-3.5" aria-hidden /> PIN
-          {initial.hasPin && <span className="text-success">set</span>}
+          <KeyRound className="size-3.5" aria-hidden /> {t("profiles.editor.pin")}
+          {initial.hasPin && <span className="text-success">{t("profiles.editor.pinSet")}</span>}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Input
@@ -136,8 +138,8 @@ export function ProfileEditor({ initial, canDelete, onClose }: ProfileEditorProp
             onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
             inputMode="numeric"
             autoComplete="off"
-            placeholder={initial.hasPin ? "New PIN" : "4 to 6 digits"}
-            aria-label="PIN"
+            placeholder={initial.hasPin ? t("profiles.editor.newPin") : t("profiles.editor.pinDigits")}
+            aria-label={t("profiles.editor.pin")}
             className="w-40 font-mono"
           />
           {!isNew && pin !== "" && (
@@ -149,17 +151,17 @@ export function ProfileEditor({ initial, canDelete, onClose }: ProfileEditorProp
                 if (await commands.setPin(initial.id, pin)) setPin("");
               }}
             >
-              {initial.hasPin ? "Change PIN" : "Set PIN"}
+              {initial.hasPin ? t("profiles.editor.changePin") : t("profiles.editor.setPin")}
             </GlassButton>
           )}
           {initial.hasPin && (
             <GlassButton size="sm" type="button" disabled={commands.pending} onClick={() => void commands.clearPin(initial.id)}>
-              Remove PIN
+              {t("profiles.editor.removePin")}
             </GlassButton>
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          Asked when someone picks this profile on a TV, phone or tablet. It stops a curious child, not someone who can read the files on this computer.
+          {t("profiles.editor.pinHelp")}
         </p>
       </div>
 
@@ -171,15 +173,15 @@ export function ProfileEditor({ initial, canDelete, onClose }: ProfileEditorProp
 
       <div className="flex flex-wrap items-center gap-2">
         <GlassButton type="submit" disabled={commands.pending || draft.name.trim() === ""}>
-          {isNew ? "Add profile" : "Save"}
+          {isNew ? t("profiles.add") : t("common.save")}
         </GlassButton>
         <GlassButton type="button" onClick={onClose} disabled={commands.pending}>
-          Cancel
+          {t("common.cancel")}
         </GlassButton>
         {canDelete &&
           (confirmDelete ? (
             <span className="ml-auto flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Delete “{initial.name}”? Its “Continue watching” goes too.</span>
+              <span className="text-sm text-muted-foreground">{t("profiles.editor.deleteConfirm", { name: initial.name })}</span>
               <GlassButton
                 size="sm"
                 type="button"
@@ -188,15 +190,15 @@ export function ProfileEditor({ initial, canDelete, onClose }: ProfileEditorProp
                   if (await commands.remove(initial.id)) onClose();
                 }}
               >
-                <Trash2 /> Delete
+                <Trash2 /> {t("profiles.editor.delete")}
               </GlassButton>
               <GlassButton size="sm" type="button" onClick={() => setConfirmDelete(false)}>
-                Keep
+                {t("profiles.editor.keep")}
               </GlassButton>
             </span>
           ) : (
             <GlassButton size="sm" type="button" className="ml-auto" onClick={() => setConfirmDelete(true)}>
-              <Trash2 /> Delete…
+              <Trash2 /> {t("profiles.editor.deleteAsk")}
             </GlassButton>
           ))}
       </div>

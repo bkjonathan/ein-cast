@@ -1,21 +1,22 @@
 import { Search } from "lucide-react";
 import { useMemo } from "react";
 import type { LibraryItem, LibraryState } from "@/shared/bridge";
+import { useT, type MessageKey } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import { GlassToolbar } from "@/shared/ui/glass";
 import { Input } from "@/shared/ui/input";
 import { effectiveLibrary } from "../derive";
-import { countByKind, sortLabels, type KindFilter, type SortKey } from "../filter";
+import { countByKind, sortLabelKeys, type KindFilter, type SortKey } from "../filter";
 import { useLibraryStore } from "../store";
 
-const chips: readonly { key: KindFilter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "video", label: "Videos" },
-  { key: "audio", label: "Audio" },
-  { key: "image", label: "Images" },
+const chips: readonly { key: KindFilter; labelKey: MessageKey }[] = [
+  { key: "all", labelKey: "library.toolbar.all" },
+  { key: "video", labelKey: "library.toolbar.videos" },
+  { key: "audio", labelKey: "library.toolbar.audio" },
+  { key: "image", labelKey: "library.toolbar.images" },
 ];
 
-const sortKeys = Object.keys(sortLabels) as SortKey[];
+const sortKeys = Object.keys(sortLabelKeys) as SortKey[];
 
 /** Kind chips (with counts), search box and sort order. */
 export function LibraryToolbar({
@@ -38,18 +39,19 @@ export function LibraryToolbar({
   const setQuery = useLibraryStore((s) => s.setQuery);
   const setSort = useLibraryStore((s) => s.setSort);
   const counts = useMemo(() => countByKind(items), [items]);
+  const { t, tn } = useT();
 
   return (
     <GlassToolbar className="flex-wrap">
       {libraries.length > 1 && (
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          Library
+          {t("library.toolbar.library")}
           <select
             value={library}
             onChange={(e) => setLibrary(e.target.value)}
             className="app-no-drag glass h-8 max-w-40 rounded-glass-sm bg-transparent px-2 text-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
-            <option value="all">All</option>
+            <option value="all">{t("library.toolbar.all")}</option>
             {libraries.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
@@ -58,8 +60,8 @@ export function LibraryToolbar({
           </select>
         </label>
       )}
-      <div className="flex gap-1" role="group" aria-label="Kind of file">
-        {chips.map(({ key, label }) => (
+      <div className="flex gap-1" role="group" aria-label={t("library.toolbar.kind")}>
+        {chips.map(({ key, labelKey }) => (
           <button
             key={key}
             type="button"
@@ -72,7 +74,7 @@ export function LibraryToolbar({
                 : "text-muted-foreground opacity-60 hover:opacity-100",
             )}
           >
-            {label}
+            {t(labelKey)}
             <span className="tabular-nums text-muted-foreground">{counts[key]}</span>
           </button>
         ))}
@@ -87,14 +89,14 @@ export function LibraryToolbar({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search files and folders"
-          aria-label="Search the library"
+          placeholder={t("library.toolbar.searchPlaceholder")}
+          aria-label={t("library.toolbar.search")}
           className="h-8 pl-8 text-sm"
         />
       </div>
 
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
-        Sort
+        {t("library.toolbar.sort")}
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
@@ -102,14 +104,14 @@ export function LibraryToolbar({
         >
           {sortKeys.map((key) => (
             <option key={key} value={key}>
-              {sortLabels[key]}
+              {t(sortLabelKeys[key])}
             </option>
           ))}
         </select>
       </label>
 
       <span className="text-xs text-muted-foreground tabular-nums">
-        {shown === items.length ? `${items.length} files` : `${shown} of ${items.length}`}
+        {shown === items.length ? tn("stats.files", items.length) : t("library.toolbar.shownOf", { shown, total: items.length })}
       </span>
     </GlassToolbar>
   );

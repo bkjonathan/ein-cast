@@ -1,11 +1,13 @@
 import type { LogLine } from "@/shared/bridge";
 
+import type { MessageKey } from "@/shared/i18n";
+
 export type WizardStep = "folder" | "share" | "connect";
 
-export const wizardSteps: readonly { id: WizardStep; title: string }[] = [
-  { id: "folder", title: "Choose your media" },
-  { id: "share", title: "Start sharing" },
-  { id: "connect", title: "Open it on a screen" },
+export const wizardSteps: readonly { id: WizardStep; titleKey: MessageKey }[] = [
+  { id: "folder", titleKey: "wizard.step.folder" },
+  { id: "share", titleKey: "wizard.step.share" },
+  { id: "connect", titleKey: "wizard.step.connect" },
 ];
 
 /** 1-based position of a step, for "Step 2 of 3". */
@@ -36,13 +38,13 @@ export function firstDevice(lines: readonly LogLine[], afterSeq: number): { clie
 }
 
 /** What each system asks the first time something listens for other computers. */
-export function firewallNote(platform: string): string {
+export function firewallNote(platform: string): MessageKey {
   switch (platform) {
     case "darwin":
-      return "If macOS asks whether EinCast may accept incoming network connections, choose Allow. Without it, other devices can't connect.";
+      return "wizard.firewall.darwin";
     case "windows":
-      return "If Windows asks whether to let EinCast through the firewall, tick Private networks and choose Allow access. Without it, other devices can't connect.";
+      return "wizard.firewall.windows";
     default:
-      return "If your system asks whether EinCast may accept incoming connections, allow it.";
+      return "wizard.firewall.fallback";
   }
 }

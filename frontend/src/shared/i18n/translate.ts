@@ -54,6 +54,8 @@ export interface Translator {
   locale: Locale;
   t: (key: MessageKey, params?: Params) => string;
   tn: (base: PluralKey, count: number, params?: Params) => string;
+  /** "A, B and C" in the language's own way of joining. */
+  list: (items: readonly string[]) => string;
 }
 
 export function translatorFor(locale: Locale): Translator {
@@ -61,6 +63,7 @@ export function translatorFor(locale: Locale): Translator {
     locale,
     t: (key, params) => translate(locale, key, params),
     tn: (base, count, params) => translatePlural(locale, base, count, params),
+    list: (items) => new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(items),
   };
 }
 

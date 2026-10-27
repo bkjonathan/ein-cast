@@ -4,7 +4,7 @@ import type { LibraryItem } from "@/shared/bridge";
 export type ListRow =
   | { type: "item"; item: LibraryItem }
   | { type: "show"; key: string; name: string; episodes: number; seasons: number; cover: LibraryItem; open: boolean }
-  | { type: "season"; key: string; label: string }
+  | { type: "season"; key: string; season: number }
   | { type: "episode"; item: LibraryItem };
 
 /** Two spellings of a series name that differ only in case or Unicode form are one series. */
@@ -60,7 +60,7 @@ export function listRows(
     for (const ep of episodes) {
       if (ep.season !== season) {
         season = ep.season;
-        rows.push({ type: "season", key: `${key}|${season}`, label: season > 0 ? `Season ${season}` : "Episodes" });
+        rows.push({ type: "season", key: `${key}|${season}`, season });
       }
       rows.push({ type: "episode", item: ep });
     }
