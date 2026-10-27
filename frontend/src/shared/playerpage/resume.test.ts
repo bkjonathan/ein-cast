@@ -14,6 +14,12 @@ const source = readFileSync(
   "utf8",
 );
 
+// The player page's words (ADR 0033). The server serves them from /api/strings;
+// here they are read from the same files, so the tests see what a device sees.
+const localesDir = resolve(__dirname, "../../../../internal/adapters/httpapi/web/locales");
+const messagesFor = (code: "en" | "my"): Record<string, string> =>
+  JSON.parse(readFileSync(resolve(localesDir, `${code}.json`), "utf8")) as Record<string, string>;
+
 interface Item {
   id: string;
   name: string;
@@ -94,6 +100,10 @@ interface Page {
   addSubtitleTracks: (player: FakeElement, item: Item) => void;
   wantsConversion: (item: Item) => boolean;
   hlsURL: (item: Item) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
+  tn: (base: string, count: number, params?: Record<string, string | number>) => string;
+  showSummary: (show: { episodes: unknown[]; seasons: number }) => string;
+  setStrings: (messages: Record<string, string>, lang: string) => void;
   canPlayHLS: () => boolean;
   lengthOf: (player: FakeElement) => number;
   needsAudioSwitch: (item: Item) => boolean;
@@ -178,7 +188,12 @@ function loadPage(storageThrows = false): Page {
       }),
       title: "",
       querySelector: () => el("__main"),
+      // translatePage() runs once the strings request has failed or answered.
+      documentElement: { lang: "" },
+      querySelectorAll: () => [],
     },
+    location: { search: "" },
+    URLSearchParams,
     // The page listens for the back button and records navigation; neither does
     // anything in these tests.
     window: win,
@@ -201,6 +216,7 @@ function loadPage(storageThrows = false): Page {
     String,
     encodeURIComponent,
     Promise,
+    Object,
     console,
   });
   vm.runInContext(source, context);
@@ -213,6 +229,8 @@ function loadPage(storageThrows = false): Page {
        setThumbnails: (on) => { thumbnails = on; },
        setSubtitleChoice: (item, index) => { subtitleItem = item; subtitleChoice = index; },
        onPauseOrEnd, onLoadedMetadata, startOver, addSubtitleTracks,
+       t, tn, showSummary,
+       setStrings: (messages, code) => { strings = messages; lang = code; },
        wantsConversion, hlsURL, onPlaybackError, onPlaying, canPlayHLS, lengthOf, needsAudioSwitch, subtitleChoices,
        setTracks: (id, data) => { trackData.set(id, data); },
        setAudioChoice: (item, index) => { audioItem = item; audioChoice = index; },
@@ -225,6 +243,9 @@ function loadPage(storageThrows = false): Page {
     context,
   );
   const page = (context as unknown as { __page: Omit<Page, "el" | "store" | "calls"> }).__page;
+  // The page asks the server for its words at start-up; there is none here, so
+  // English is put in place, as it is for a device that asks for nothing else.
+  page.setStrings(messagesFor("en"), "en");
   return { ...page, el, store, calls, win };
 }
 
@@ -892,5 +913,36 @@ describe("audio and subtitle tracks inside a video", () => {
     page.setSubtitleChoice("a b", -1); // the viewer chose "Off"
     page.onLoadedMetadata();
     expect(list.map((t) => t.mode)).toEqual(["disabled", "disabled", "disabled"]);
+  });
+});
+
+describe("the page's words", () => {
+  it("fills {placeholders}, and shows a missing key as itself so a gap is visible", () => {
+    expect(page.t("player.resumed", { time: "1:02" })).toBe("Resumed from 1:02.");
+    expect(page.t("no.such.key")).toBe("no.such.key");
+    expect(page.t("item.resume")).toBe("Resume from {time}"); // a forgotten value stays visible too
+  });
+
+  it("chooses a plural form by the language's own rules", () => {
+    expect(page.tn("show.episodes", 1)).toBe("1 episode");
+    expect(page.tn("show.episodes", 2)).toBe("2 episodes");
+    page.setStrings(messagesFor("my"), "my");
+    expect(page.tn("show.episodes", 1)).toBe("ဇာတ်လမ်းတွဲ 1 ပိုင်း"); // Burmese has one form
+    expect(page.tn("show.episodes", 5)).toBe("ဇာတ်လမ်းတွဲ 5 ပိုင်း");
+  });
+
+  it("describes a series, leaving out the seasons when there is one", () => {
+    const episodes = (n: number) => Array.from({ length: n }, () => ({}));
+    expect(page.showSummary({ episodes: episodes(1), seasons: 1 })).toBe("1 episode");
+    expect(page.showSummary({ episodes: episodes(24), seasons: 3 })).toBe("3 seasons · 24 episodes");
+    page.setStrings(messagesFor("my"), "my");
+    expect(page.showSummary({ episodes: episodes(24), seasons: 3 })).toBe("ရာသီ 3 ခု · ဇာတ်လမ်းတွဲ 24 ပိုင်း");
+  });
+
+  it("answers in Burmese for what the viewer is told while playing", () => {
+    page.setStrings(messagesFor("my"), "my");
+    page.setCurrent(video("a"));
+    page.onPlaybackError();
+    expect(page.el("hint").textContent).toBe(messagesFor("my")["player.cantPlay"]);
   });
 });

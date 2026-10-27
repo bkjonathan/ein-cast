@@ -50,6 +50,8 @@ Terms used, so they stay consistent. Change them here and in the file together:
 | playlist | ပလေးလစ်စ် | |
 | port | ပေါက် | |
 
+The same review should cover `README.my.md`, the player page files and the strings on the pages listed above.
+
 Reviewer's checklist: sentences read naturally, not word for word; the terms above are right and used the
 same way everywhere; nothing is cut off in the window (long Burmese words in buttons); stacked marks are not
 clipped; numbers and units look right.

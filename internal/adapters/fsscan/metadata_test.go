@@ -45,6 +45,27 @@ func TestScan_ReadsMetadataFromNames(t *testing.T) {
 	}
 }
 
+// Burmese file names (Myanmar Unicode) are ordinary names: scanned, kept exactly as
+// written for display, and read for a title like any other. A name in the old
+// Zawgyi encoding is also just bytes here; it is not converted (plan 18.5).
+func TestScan_BurmeseNames(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "ရုပ်ရှင်/အိမ်.2021.1080p.mkv", "x")
+	write(t, root, "တေးဂီတ/သီချင်း.mp3", "x")
+
+	items, err := scan(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	film := byRel(t, items, "ရုပ်ရှင်/အိမ်.2021.1080p.mkv")
+	if film.Name != "အိမ်.2021.1080p.mkv" || film.Meta.Title != "အိမ်" || film.Meta.Year != 2021 {
+		t.Errorf("film = name %q, meta %+v", film.Name, film.Meta)
+	}
+	if song := byRel(t, items, "တေးဂီတ/သီချင်း.mp3"); song.Kind != media.KindAudio || song.ID == "" {
+		t.Errorf("song = %+v", song)
+	}
+}
+
 func TestScan_NFOCorrectsTheName(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "Heat.1995.mkv", "x")

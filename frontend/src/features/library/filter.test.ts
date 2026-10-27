@@ -148,3 +148,23 @@ describe("browseItems: search over metadata", () => {
     expect(names(sorted)).toEqual(["z.mkv", "a.mkv"]);
   });
 });
+
+describe("browseItems with Burmese names", () => {
+  // Some Myanmar letters have two spellings that look the same: U+1026 (ဦ) is the
+  // same text as U+1025 U+102E. A file system or keyboard may hand us either.
+  const composed = "\u1026";
+  const decomposed = "\u1025\u102e";
+  const burmese = [item({ relPath: `ရုပ်ရှင်/${decomposed}.mp4`, title: decomposed })];
+
+  it("finds a name typed in the other spelling", () => {
+    expect(names(browseItems(burmese, "all", composed, "name"))).toEqual([`${decomposed}.mp4`]);
+    const other = [item({ relPath: `${composed}.mp4`, title: composed })];
+    expect(names(browseItems(other, "all", decomposed, "name"))).toEqual([`${composed}.mp4`]);
+  });
+
+  it("finds a Burmese word inside a longer name", () => {
+    const list = [item({ relPath: "ရုပ်ရှင်/အိမ်.2021.mkv", title: "အိမ်", year: 2021 })];
+    expect(browseItems(list, "all", "အိမ် 2021", "name")).toHaveLength(1);
+    expect(browseItems(list, "all", "ကား", "name")).toHaveLength(0);
+  });
+});

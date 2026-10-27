@@ -23,6 +23,8 @@ func TestParseMeta(t *testing.T) {
 		{"a name that is only noise keeps the name", "1080p.mkv", Meta{Title: "1080p"}},
 		{"unicode title", "အိမ်.2021.mp4", Meta{Title: "အိမ်", Year: 2021}},
 		{"accents", "Amélie (2001).mkv", Meta{Title: "Amélie", Year: 2001}},
+		{"burmese title with release noise", "အိမ်.2021.1080p.WEB-DL.mkv", Meta{Title: "အိမ်", Year: 2021}},
+		{"burmese digits are words, not a year", "အိမ်.၂၀၂၁.mp4", Meta{Title: "အိမ် ၂၀၂၁"}},
 		{"folders do not change a movie", "Films/Action/Heat.1995.mkv", Meta{Title: "Heat", Year: 1995}},
 		{"a year outside the range is not a year", "Film.1850.mkv", Meta{Title: "Film 1850"}},
 
@@ -45,6 +47,8 @@ func TestParseMeta(t *testing.T) {
 		{"the file's show wins over the folder's", "Downloads/Show.Name.S01E01.mkv", Meta{Title: "S01E01", Show: "Show Name", Season: 1, Episode: 1}},
 		{"no seasons at all", "Anime/Anime Name Episode 12.mkv", Meta{Title: "E12", Show: "Anime Name", Episode: 12}},
 		{"a bare number outside a season folder is not an episode", "Films/12 Angry Men.1957.mkv", Meta{Title: "12 Angry Men", Year: 1957}},
+		{"burmese show before an episode marker", "ဇာတ်လမ်း.S02E05.mkv", Meta{Title: "S02E05", Show: "ဇာတ်လမ်း", Season: 2, Episode: 5}},
+		{"burmese show and episode title in folders", "ဇာတ်လမ်း/Season 1/02 - အစ.mkv", Meta{Title: "အစ", Show: "ဇာတ်လမ်း", Season: 1, Episode: 2}},
 		{"season folder, but a name with no number", "Show/Season 1/Behind the Scenes.mkv", Meta{Title: "Behind the Scenes"}},
 	}
 	for _, tt := range tests {
