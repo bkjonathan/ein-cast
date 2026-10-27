@@ -102,7 +102,7 @@ scripts/make-icons.sh           # rebuilds every icon from build/logo.png (needs
 cd frontend && npm run typecheck && npm test
 ```
 
-Releases: the git tag is the version. Push `v1.1.2` once CI is green and the `release` workflow builds and publishes the apps; the checklist is in [docs/RELEASING.md](docs/RELEASING.md).
+Releases: the git tag is the version. Push `v1.1.1-rc1` (a pre-release; the apps are unsigned) once CI is green and the `release` workflow builds and publishes the apps; the checklist is in [docs/RELEASING.md](docs/RELEASING.md).
 
 | Path | What lives there |
 |---|---|
