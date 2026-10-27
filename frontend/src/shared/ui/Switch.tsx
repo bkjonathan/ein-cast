@@ -19,13 +19,14 @@ export function Switch({ checked, onChange, label, disabled }: SwitchProps) {
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "app-no-drag relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50",
-        checked ? "bg-primary" : "bg-(--glass-surface-hover)",
+        "app-no-drag relative h-7 w-12 shrink-0 rounded-full ring-1 ring-inset transition-colors disabled:opacity-50",
+        // The off track is tinted with the text colour: a white-on-white track vanishes on a light panel.
+        checked ? "bg-primary ring-transparent" : "bg-foreground/15 ring-foreground/10",
       )}
     >
       <span
         className={cn(
-          "absolute top-1 left-1 size-5 rounded-full bg-white shadow transition-transform",
+          "absolute top-1 left-1 size-5 rounded-full bg-white shadow-md transition-transform",
           checked && "translate-x-5",
         )}
       />

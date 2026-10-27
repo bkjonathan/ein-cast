@@ -21,10 +21,10 @@ export function StartupSettings() {
   if (!saved) return null;
 
   const row = (key: ToggleKey, titleKey: MessageKey, helpKey: MessageKey) => (
-    <li key={key} className="flex items-start justify-between gap-4">
-      <div className="space-y-0.5">
+    <li key={key} className="flex items-center justify-between gap-6 py-4 first:pt-0 last:pb-0">
+      <div className="min-w-0 space-y-1">
         <p className="text-sm font-medium">{t(titleKey)}</p>
-        <p className="text-xs text-muted-foreground">{t(helpKey)}</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{t(helpKey)}</p>
       </div>
       <Switch
         checked={saved[key]}
@@ -43,7 +43,7 @@ export function StartupSettings() {
         </h2>
         <p className="text-sm text-muted-foreground">{t("settings.startup.intro")}</p>
       </header>
-      <ul className="flex flex-col gap-4">
+      <ul className="flex flex-col divide-y divide-border">
         {startupRows.map((r) => row(r.key, r.titleKey, r.helpKey))}
         {row("hideOnClose", "settings.startup.hideOnClose.title", hideOnCloseHelp(platform))}
       </ul>
