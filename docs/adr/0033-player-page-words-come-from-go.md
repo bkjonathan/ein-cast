@@ -43,7 +43,14 @@ language at all.
 - Two sets of locale files to keep in step by hand; nothing ties a desktop key to a
   player key with the same meaning ("Start over").
 - The two pages Go renders itself, the access-token-needed page and the tunnel PIN page,
-  are not translated yet. They are server constants with their own tests and a stricter CSP.
+  use the same files and the same negotiation (`translations.text`, `.plural`), so a phone
+  that arrives through a tunnel is greeted in its own language. They have no script, so they
+  cannot fetch `/api/strings`; Go fills them in and escapes every word it prints.
+- Go's plural rule is "one when the count is 1, else other". That is right for English and
+  for Burmese (both forms written alike). A language that needs more forms needs a rule in
+  `translations.plural`; `app.js` already uses `Intl.PluralRules` and would not.
+- Every server-rendered key also travels to the player page in `/api/strings`, unused there:
+  about seven short strings.
 - The Burmese draft has had no native review (18.3), same as the desktop's.
 
 ## Alternatives rejected

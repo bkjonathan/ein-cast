@@ -64,6 +64,43 @@ func (t *translations) messages(lang string) map[string]string {
 	return out
 }
 
+// text is the words for key in the language, with {name} filled from params.
+// A key nobody wrote shows as itself, as on the page, so the gap is visible.
+func (t *translations) text(lang, key string, params map[string]any) string {
+	template, ok := t.dicts[lang][key]
+	if !ok {
+		template, ok = t.dicts[fallbackLang][key]
+	}
+	if !ok {
+		return key
+	}
+	pairs := make([]string, 0, 2*len(params))
+	for name, value := range params {
+		pairs = append(pairs, "{"+name+"}", fmt.Sprint(value))
+	}
+	return strings.NewReplacer(pairs...).Replace(template)
+}
+
+// plural is text for base.one when count is 1, else base.other, with {count}
+// filled in. That is the rule of English and, with both forms written alike, of
+// Burmese; a language that needs more forms needs a rule here (ADR 0033).
+func (t *translations) plural(lang, base string, count int, params map[string]any) string {
+	form := "other"
+	if count == 1 {
+		form = "one"
+	}
+	merged := map[string]any{"count": count}
+	for k, v := range params {
+		merged[k] = v
+	}
+	return t.text(lang, base+"."+form, merged)
+}
+
+// langOf is the language to answer a request in.
+func (a *api) langOf(r *http.Request) string {
+	return a.text.negotiate(r.URL.Query().Get("lang"), r.Header.Get("Accept-Language"))
+}
+
 // negotiate picks the language to answer in: an explicit ?lang= (for a device
 // whose browser language cannot be changed, such as a TV), else the first
 // Accept-Language entry we have, best-liked first. Regions are ignored, so
@@ -133,7 +170,7 @@ type stringsJSON struct {
 // handleStrings answers with the player page's words in the device's language.
 // It holds nothing private, so it needs no profile.
 func (a *api) handleStrings(w http.ResponseWriter, r *http.Request) {
-	lang := a.text.negotiate(r.URL.Query().Get("lang"), r.Header.Get("Accept-Language"))
+	lang := a.langOf(r)
 	h := w.Header()
 	h.Set("Content-Language", lang)
 	h.Add("Vary", "Accept-Language")

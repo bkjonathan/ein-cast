@@ -27,7 +27,8 @@ The page that devices open has its own, smaller files: `internal/adapters/httpap
   relaxing `TestTranslations_ShippedLanguagesAreComplete`.)
 - A device's language is its browser's. To see another one on a device that cannot change it (a TV), open the
   address with `?lang=my` at the end.
-- Not translated yet: the "access token needed" page and the PIN page a tunnel visitor signs in with.
+- The "access token needed" page and the PIN page a tunnel visitor signs in with use the same files (`token.*`,
+  `signin.*`). `signin.locked` is a plural.
 
 ## Burmese (`my.json`)
 **Status: an unreviewed draft (both the window and the player page)** written by the assistant, not a person who speaks Burmese. Nothing in it

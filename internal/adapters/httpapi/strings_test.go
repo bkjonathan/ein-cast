@@ -2,13 +2,28 @@ package httpapi
 
 import (
 	"encoding/json"
+	"html"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
+
+// english is what the shipped English file says for key.
+func english(t *testing.T, key string) string {
+	t.Helper()
+	text, ok := mustLoadTranslations().dicts[fallbackLang][key]
+	if !ok {
+		t.Fatalf("locales/en.json has no %q", key)
+	}
+	return text
+}
 
 func testTranslations(t *testing.T) *translations {
 	t.Helper()
@@ -182,10 +197,21 @@ func TestPlayerPage_UsesOnlyKeysEnglishHas(t *testing.T) {
 	}
 
 	// And the other way round: a key nobody asks for is dead weight sent to every phone.
+	// The pages Go renders itself ask by constant, so the constants stand in for app.js.
 	used := make(map[string]bool, len(keys))
 	for _, k := range keys {
 		used[k] = true
 	}
+	for _, k := range []string{keySignInPrompt, keySignInWrong, keySignInLocked + ".other", keySignInButton, keyTokenTitle, keyTokenBody} {
+		if _, ok := english[k]; !ok {
+			t.Errorf("a page Go renders asks for %q, which locales/en.json lacks", k)
+		}
+		used[k] = true
+	}
+	if _, ok := english[keySignInLocked+".one"]; !ok {
+		t.Errorf("locales/en.json lacks %q.one", keySignInLocked)
+	}
+	used[keySignInLocked+".one"] = true
 	for k := range english {
 		base := strings.TrimSuffix(strings.TrimSuffix(k, ".one"), ".other")
 		if !used[k] && !used[base+".other"] {
@@ -246,5 +272,115 @@ func TestStringsEndpoint_NeedsTheAccessToken(t *testing.T) {
 	f, _ := newSecured(t)
 	if resp := f.do("GET", "/api/strings", nil); resp.StatusCode != 401 {
 		t.Errorf("status = %d, want 401: only the static files are public", resp.StatusCode)
+	}
+}
+
+func TestTranslations_TextAndPlural(t *testing.T) {
+	tr, err := loadTranslations(fstest.MapFS{
+		"locales/en.json": {Data: []byte(`{"hi":"Hello {name}","n.one":"{count} cat","n.other":"{count} cats","only.en":"E"}`)},
+		"locales/my.json": {Data: []byte(`{"hi":"မင်္ဂလာပါ {name}","n.one":"ကြောင် {count}","n.other":"ကြောင် {count}"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct{ got, want string }{
+		{tr.text("en", "hi", map[string]any{"name": "Ko"}), "Hello Ko"},
+		{tr.text("my", "hi", map[string]any{"name": "Ko"}), "မင်္ဂလာပါ Ko"},
+		{tr.text("my", "only.en", nil), "E"},                           // a gap shows English
+		{tr.text("en", "nobody.wrote.this", nil), "nobody.wrote.this"}, // and a typo shows itself
+		{tr.text("en", "hi", nil), "Hello {name}"},                     // a forgotten value stays visible
+		{tr.plural("en", "n", 1, nil), "1 cat"},
+		{tr.plural("en", "n", 0, nil), "0 cats"},
+		{tr.plural("en", "n", 2, nil), "2 cats"},
+		{tr.plural("my", "n", 1, nil), "ကြောင် 1"},
+		{tr.plural("my", "n", 5, nil), "ကြောင် 5"},
+	}
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Errorf("got %q, want %q", tt.got, tt.want)
+		}
+	}
+}
+
+// ---- The pages Go renders itself ------------------------------------------
+
+func TestTokenPage_AnswersInTheVisitorsLanguage(t *testing.T) {
+	f, _ := newSecured(t)
+	get := func(accept string) (*http.Response, string) {
+		resp := f.do("GET", "/", func(r *http.Request) {
+			r.Header.Set("Accept", "text/html")
+			if accept != "" {
+				r.Header.Set("Accept-Language", accept)
+			}
+		})
+		return resp, string(readBody(t, resp))
+	}
+
+	resp, body := get("")
+	if resp.StatusCode != 401 || !strings.Contains(body, `<html lang="en">`) || !strings.Contains(body, english(t, "token.title")) {
+		t.Errorf("English page: status %d\n%s", resp.StatusCode, body)
+	}
+
+	resp, body = get("my-MM,my;q=0.9")
+	my := mustLoadTranslations().dicts["my"]
+	if !strings.Contains(body, `<html lang="my">`) || !strings.Contains(body, my["token.title"]) || !strings.Contains(body, my["token.body"]) {
+		t.Errorf("Burmese page:\n%s", body)
+	}
+	if strings.Contains(body, "Access token needed") {
+		t.Error("the Burmese page still has the English heading")
+	}
+	if resp.Header.Get("Content-Language") != "my" || !strings.Contains(resp.Header.Get("Vary"), "Accept-Language") {
+		t.Errorf("headers: Content-Language %q, Vary %q", resp.Header.Get("Content-Language"), resp.Header.Get("Vary"))
+	}
+	if strings.Contains(body, "<script") {
+		t.Error("the page must not contain script")
+	}
+}
+
+func TestSignInPage_AnswersInTheVisitorsLanguage(t *testing.T) {
+	my := mustLoadTranslations().dicts["my"]
+	tests := []struct {
+		name     string
+		accept   string
+		pin      string
+		locked   time.Duration
+		status   int
+		wantBody []string
+	}{
+		{"wrong PIN, English", "", "nope", 0, 401, []string{`<html lang="en">`, html.EscapeString(english(t, "signin.wrong")), ">" + english(t, "signin.button") + "<"}},
+		{"wrong PIN, Burmese", "my", "nope", 0, 401, []string{`<html lang="my">`, my["signin.wrong"], ">" + my["signin.button"] + "<"}},
+		{"locked out for one minute", "", goodPIN, 30 * time.Second, 429, []string{"about 1 minute."}},
+		{"locked out for two minutes", "", goodPIN, 90 * time.Second, 429, []string{"about 2 minutes."}},
+		{"locked out, Burmese", "my", goodPIN, 90 * time.Second, 429, []string{"ခန့်မှန်းခြေ 2 မိနစ်"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, rem := newTunnelFixture(t)
+			rem.lockedFor = tt.locked
+			resp := f.postForm("/login", url.Values{"pin": {tt.pin}}, func(r *http.Request) {
+				if tt.accept != "" {
+					r.Header.Set("Accept-Language", tt.accept)
+				}
+			})
+			body := string(readBody(t, resp))
+			if resp.StatusCode != tt.status {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.status)
+			}
+			for _, want := range tt.wantBody {
+				if !strings.Contains(body, want) {
+					t.Errorf("page lacks %q:\n%s", want, body)
+				}
+			}
+		})
+	}
+}
+
+func TestSignInPage_EscapesTheWordsItPrints(t *testing.T) {
+	a := &api{text: testTranslations(t)}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	a.writeLoginPage(rec, req, 401, func(string) string { return `<img src=x onerror=alert(1)>` })
+	if body := rec.Body.String(); strings.Contains(body, "<img") {
+		t.Errorf("a message was printed as markup:\n%s", body)
 	}
 }

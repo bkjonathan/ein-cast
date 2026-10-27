@@ -49,5 +49,13 @@
   "profile.switchFailed": "Couldn't switch profile. Check that EinCast is still running.",
   "profile.tooManyPins": "Too many wrong PINs. Try again in a few minutes.",
   "profile.wrongPin": "That PIN didn't work.",
-  "profile.signInFailed": "Couldn't sign in. Try again."
+  "profile.signInFailed": "Couldn't sign in. Try again.",
+
+  "signin.prompt": "Enter your EinCast PIN to continue.",
+  "signin.wrong": "That PIN didn't work. Try again.",
+  "signin.locked.one": "Too many attempts. Try again in about {count} minute.",
+  "signin.locked.other": "Too many attempts. Try again in about {count} minutes.",
+  "signin.button": "Sign in",
+  "token.title": "Access token needed",
+  "token.body": "This EinCast server is protected. Open the link or scan the QR code shown in the EinCast app on the computer that runs it."
 }

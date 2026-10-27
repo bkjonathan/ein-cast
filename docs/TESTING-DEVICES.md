@@ -78,6 +78,10 @@ These are not device rows but belong to the same reality check.
 | 17 QuickSync: same, on an Intel iGPU; and a Windows computer with neither confirms the fallback to `libx264` (log line, video still plays) | Windows, Intel and neither | not run |
 | 17 VideoToolbox on an Intel Mac and a long film (an hour or more): quality and speed with Hardware acceleration on and off | an Intel Mac | Apple silicon, 14 s and 40 s files: **done**; long film: not run |
 | 17 Low disk: with the cache disk nearly full, pressing play on an MKV shows the "not enough free disk space" message and no ffmpeg runs | any machine, a small volume | page message **done** (stand-in server); real full disk: not run |
+| 18 Burmese on the player page: open it with the browser language set to Burmese (or `?lang=my`); marks are not clipped, nothing is tofu, the grid, detail page, PIN picker and a playback hint read correctly | iPhone Safari, Windows Chrome, a TV browser | macOS Chrome 156 (headless) only |
+| 18 Burmese sign-in pages: through a tunnel, the PIN page and, on the LAN with the token on and no token, the "access token needed" page, in Burmese | a phone | not run |
+| 18 Burmese desktop window: every screen, in the Wails webview, for clipped stacked marks and cut-off buttons | macOS and Windows | not run |
+| 18.3 A Burmese speaker reads `my.json` (window), `web/locales/my.json` (player) and `README.my.md`, with the checklist in TRANSLATING.md | a person | not done |
 | 17 Embedded subtitle on a network share: the first read of a big MKV's subtitle (seconds to a minute) and that the picker is usable meanwhile | a NAS or SMB share | not run |
 | 16 Smart TV with profiles: a library marked "not shown to TVs" does not appear in the TV's browse list or play by a remembered ID | a real TV or VLC's UPnP list | not run |
 | 14.6 Keep awake: `pmset -g assertions` shows `caffeinate` while sharing (macOS); `powercfg /requests` shows EinCast (Windows); gone after Stop | real machines | macOS: not run on a Mac laptop; Windows: not run |
