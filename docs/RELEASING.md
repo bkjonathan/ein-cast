@@ -2,7 +2,7 @@
 
 How a new version gets from `main` to a download page. Read this once, then use the [checklist](#4-release-checklist) each time.
 
-**The short version:** make sure CI is green on `main`, push a tag like `v1.0.2`, and GitHub Actions builds the macOS and Windows apps and publishes the release. You do not build anything on your own machine.
+**The short version:** write the release's section in [CHANGELOG.md](../CHANGELOG.md), push a tag like `v1.0.2`, and GitHub Actions runs the tests on macOS and Windows, then builds the apps and publishes the release. You do not build anything on your own machine. Nothing runs on ordinary pushes or pull requests: a release is the only automatic trigger.
 
 ---
 
@@ -10,10 +10,10 @@ How a new version gets from `main` to a download page. Read this once, then use 
 
 ```mermaid
 flowchart LR
-    A[Merge to main] --> B[ci workflow<br/>macOS + Windows tests]
-    B -->|green| C[git tag v1.0.2<br/>git push origin v1.0.2]
+    A[Merge to main] --> C[git tag v1.0.2<br/>git push origin v1.0.2]
     C --> D[release workflow starts]
-    D --> E[create-release job<br/>makes the GitHub release]
+    D --> B[test job = ci.yml<br/>macOS + Windows tests]
+    B -->|green| E[create-release job<br/>makes the GitHub release]
     E --> F[macos job<br/>universal .app, zipped]
     E --> G[windows job<br/>installer + portable .exe]
     F --> H[Assets attached to the release]
@@ -25,8 +25,9 @@ Two workflows live in [.github/workflows/](../.github/workflows/):
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| [ci.yml](../.github/workflows/ci.yml) | every push to `main`, every pull request | Frontend typecheck + tests, `go vet`, dependency rules, `go test` (with `-race` on macOS), cross-compile check, a full `wails build`. Runs on **macOS and Windows**. |
-| [release.yml](../.github/workflows/release.yml) | pushing a tag that starts with `v` | Creates the GitHub release, then builds and uploads the apps. Does **not** run the tests, which is why you wait for green CI before tagging. |
+| [ci.yml](../.github/workflows/ci.yml) | called by `release.yml`; or by hand (Actions tab → **ci** → *Run workflow*) | Frontend typecheck + tests, `go vet`, dependency rules, `go test` (with `-race` on macOS), cross-compile check, a full `wails build`. Runs on **macOS and Windows**. It does **not** run on pushes or pull requests. |
+| [release.yml](../.github/workflows/release.yml) | pushing a tag that starts with `v` | Runs `ci.yml` first. Only if it is green: creates the GitHub release, then builds and uploads the apps. A red test run means no release and nothing built. |
+| [pages.yml](../.github/workflows/pages.yml) | a push to `main` that changes `site/**` | Publishes the landing page. Needs Settings → Pages → Source: "GitHub Actions" switched on once. |
 
 ### What a release contains
 
@@ -113,8 +114,9 @@ open build/bin/eincast.app
 
 ### Step 3: Bump the version in the repo
 
-Keep these two in step with the tag:
+Keep these in step with the tag:
 
+- `CHANGELOG.md` → a new `## [1.0.2] - YYYY-MM-DD` section at the top, with `### What's new` and `### Fixes` lists written for the person downloading the app. It becomes the release notes (see [Step 8](#step-8-edit-the-notes-optional)).
 - `wails.json` → `info.productVersion`
 - `frontend/package.json` → `version`, and the two matching `"version"` lines at the top of `frontend/package-lock.json`
 
@@ -126,16 +128,11 @@ git commit -m "chore: release v1.0.2"
 git push origin main
 ```
 
-### Step 4: Wait for CI to go green on that commit
+### Step 4: Optional dry run of the tests
 
-Open the **Actions** tab, or:
+Pushing `main` does not run CI, so a Windows-only failure would otherwise first show up when you tag. To find out earlier: Actions tab → **ci** → **Run workflow** → branch `main`. It takes about 5 minutes.
 
-```sh
-gh run list --workflow ci --limit 3
-gh run watch
-```
-
-It takes about 5 minutes. **Do not tag a red commit.** The release workflow builds whatever you tag and does not run the tests.
+You can skip this step: the release workflow runs the same tests first and builds nothing if they fail, so a red commit can never be published. The cost of skipping is only that you then have to fix the commit and tag again (see "Redo a release").
 
 ### Step 5: Tag and push
 
@@ -172,13 +169,13 @@ gh release view v1.0.2        # lists the assets from the terminal
 
 ### Step 8: Edit the notes (optional)
 
-The release notes are written by [scripts/release-notes.sh](../scripts/release-notes.sh) from the commit subjects since the previous tag: `feat:` (and any subject that is not in `type: text` form) under **What's new**, `fix:` under **Fixes**, and nothing for `chore`, `docs`, `test`, `ci`, `build`, `refactor`, `style`, `perf`. **Known limits** is the file [.github/release-known-limits.md](../.github/release-known-limits.md); edit it when a limit appears or goes away (delete the unsigned-builds paragraph when signing lands). Preview the notes before you tag:
+The release notes are written by [scripts/release-notes.sh](../scripts/release-notes.sh). The **What's new** and **Fixes** part is the `## [x.y.z]` section of [CHANGELOG.md](../CHANGELOG.md) for the tag, as you wrote it. If the changelog has no section for that version, the script builds the part from the commit subjects since the previous tag instead: `feat:` (and any subject that is not in `type: text` form) under **What's new**, `fix:` under **Fixes**, and nothing for `chore`, `docs`, `test`, `ci`, `build`, `refactor`, `style`, `perf`. A pre-release tag such as `v1.1.2-rc1` has no section of its own, so it gets the commit-built notes. **Known limits** is the file [.github/release-known-limits.md](../.github/release-known-limits.md); edit it when a limit appears or goes away (delete the unsigned-builds paragraph when signing lands). Preview the notes before you tag:
 
 ```sh
-scripts/release-notes.sh HEAD
+scripts/release-notes.sh HEAD 1.0.2     # as the notes of 1.0.2 would read
 ```
 
-To add highlights afterwards, edit the release on GitHub (pencil icon) or `gh release edit v1.0.2 --notes-file notes.md`. The commit subjects become public text, so write them for a reader.
+To add highlights afterwards, edit the release on GitHub (pencil icon) or `gh release edit v1.0.2 --notes-file notes.md`. Whatever the source, the text becomes public: write it for a reader.
 
 ---
 
@@ -193,9 +190,9 @@ The apps are **not code-signed yet** (signing is a v1.0 item in [ROADMAP.md](ROA
 
 ## 6. When something goes wrong
 
-### CI is red before you tag
+### The tests are red (in the dry run, or in the `test` job of a release)
 
-Fix it on `main`, push, and wait for green. Do not tag.
+Fix it on `main` and push. If it was a release run, nothing was published: delete the tag and tag again (see "Redo a release"). In a release run the **Go tests (Windows)** step lists every failing test in one error annotation on the run's summary page.
 
 Windows failures that are not real bugs usually come from tests written on a Mac. Things that have bitten us:
 
@@ -220,7 +217,7 @@ Open the failed run in the Actions tab and read the failing step.
 
 Only do this if **nobody has downloaded the release yet**. Redoing a published version confuses anyone who already has it; in that case just ship the next number.
 
-1. Fix the problem on `main`, push, and wait for green CI.
+1. Fix the problem on `main` and push it.
 2. Delete the release and the tag, then tag again on the new commit:
    ```sh
    gh release delete v1.0.2 --cleanup-tag --yes     # removes release + remote tag

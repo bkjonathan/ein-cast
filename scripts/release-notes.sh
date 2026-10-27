@@ -4,8 +4,11 @@
 #
 #   scripts/release-notes.sh v1.1.2        # a tag that exists
 #   scripts/release-notes.sh HEAD          # the commits since the last tag
+#   scripts/release-notes.sh HEAD 1.1.2    # the same, as the notes of 1.1.2 would read
 #
-# What goes where is decided by the commit subject (docs/RELEASING.md):
+# If CHANGELOG.md has a section "## [1.1.2] - date" for the version, that hand-written
+# section is the "What's new" and "Fixes" part of the notes. Otherwise they are built
+# from the commit subjects, and what goes where is decided by the subject (docs/RELEASING.md):
 #   feat: ...            -> What's new
 #   fix: ...             -> Fixes
 #   a subject that is not "type: text" (older commits are written freely) -> What's new
@@ -14,7 +17,19 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-rev=${1:?usage: scripts/release-notes.sh <tag-or-rev>}
+rev=${1:?usage: scripts/release-notes.sh <tag-or-rev> [version]}
+# The version whose CHANGELOG.md section to look for: the tag without its "v".
+ver=${2:-${rev#refs/tags/v}}
+
+# The text of "## [<ver>]" up to the next "## [", with its "###" headings promoted to
+# "##" so they match the commit-built notes. Empty when there is no such section.
+section=
+if [ -f CHANGELOG.md ]; then
+  section=$(awk -v v="$ver" '
+    /^## \[/ { if (on) exit; on = (index($0, "## [" v "]") == 1); next }
+    on { print }
+  ' CHANGELOG.md | sed 's/^### /## /' | awk 'NF { started = 1 } started')
+fi
 
 # The commits since the previous release; with none, since the beginning.
 prev=$(git describe --tags --abbrev=0 --match 'v*' "$rev^" 2>/dev/null || true)
@@ -39,18 +54,22 @@ while IFS= read -r subject; do
   esac
 done < <(git log --no-merges --format=%s "$range")
 
-if [ ${#new[@]} -eq 0 ] && [ ${#fixes[@]} -eq 0 ]; then
-  printf '## What'\''s new\n\nA maintenance release with no change you will notice.\n\n'
-fi
-if [ ${#new[@]} -gt 0 ]; then
-  printf '## What'\''s new\n\n'
-  printf -- '- %s\n' "${new[@]}"
-  printf '\n'
-fi
-if [ ${#fixes[@]} -gt 0 ]; then
-  printf '## Fixes\n\n'
-  printf -- '- %s\n' "${fixes[@]}"
-  printf '\n'
+if [ -n "$section" ]; then
+  printf '%s\n\n' "$section"
+else
+  if [ ${#new[@]} -eq 0 ] && [ ${#fixes[@]} -eq 0 ]; then
+    printf '## What'\''s new\n\nA maintenance release with no change you will notice.\n\n'
+  fi
+  if [ ${#new[@]} -gt 0 ]; then
+    printf '## What'\''s new\n\n'
+    printf -- '- %s\n' "${new[@]}"
+    printf '\n'
+  fi
+  if [ ${#fixes[@]} -gt 0 ]; then
+    printf '## Fixes\n\n'
+    printf -- '- %s\n' "${fixes[@]}"
+    printf '\n'
+  fi
 fi
 
 printf '## Known limits\n\n'
