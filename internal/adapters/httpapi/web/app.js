@@ -13,10 +13,15 @@ let current = null;
 // of one title or one series. Kept in the browser's history, so the back button
 // of a phone or a TV remote returns from a detail page instead of leaving.
 let view = { type: 'grid' };
-// The subtitle picked on a detail page, as a position in item.subtitles; -1 is
-// off. It belongs to one item: playing anything else starts with none.
+// The subtitle picked on a detail page, as a position in subtitleChoices(item)
+// (sidecar files first, then those stored inside the video); -1 is off. It
+// belongs to one item: playing anything else starts with none.
 let subtitleChoice = -1;
 let subtitleItem = '';
+// The audio track picked on a detail page, as a position in the video's audio
+// tracks; -1 is "as the file has it". It belongs to one item, like the subtitle.
+let audioChoice = -1;
+let audioItem = '';
 // What the library is made of, rebuilt when it loads.
 let catalog = { movies: [], shows: [], music: [], photos: [] };
 // Set from /api/health: whether the server can make thumbnails. When it cannot,
@@ -24,8 +29,26 @@ let catalog = { movies: [], shows: [], music: [], photos: [] };
 let thumbnails = false;
 // Set from /api/health: whether the server can convert videos to HLS.
 let transcoding = false;
+// Set from /api/health: whether the server can list the tracks inside a video.
+let tracksListed = false;
 // True while the current video is played through the converted (HLS) stream.
 let converted = false;
+// The hls.js player of the current video, for browsers that cannot play HLS by
+// themselves (Chrome, Firefox, Edge), and whether its playlist is still growing.
+let hlsPlayer = null;
+let hlsGrowing = false;
+// Counts videos started, so a late answer (the script, the track list) for a
+// video that was replaced since is ignored.
+let playToken = 0;
+// Where to continue after a source was replaced (a new audio track), in seconds.
+let pendingSeek = 0;
+// What is inside each video, once asked: item id -> {audio, subtitles}.
+const trackData = new Map();
+const trackAsked = new Map();
+// The subtitle choices that are <track> elements of the current video, in the
+// order the elements are in: the browser's list of text tracks has that order.
+let shownChoices = [];
+const NO_TRACKS = { audio: [], subtitles: [] };
 
 // An HTTP error with the status and the server's error code, so the page can tell
 // "choose a profile first" from "the server is down".
@@ -287,27 +310,67 @@ function onTimeUpdate() {
   if (now - lastSave < SAVE_EVERY_MS) return;
   lastSave = now;
   const player = activePlayer();
-  saveResume(current, player.currentTime, player.duration);
+  saveResume(current, player.currentTime, lengthOf(player));
 }
 
 function onPauseOrEnd() {
   if (!current || current.kind === 'image') return;
   const player = activePlayer();
   // Finished (or nearly): forget the position, so it starts over next time.
-  saveResume(current, player.ended ? 0 : player.currentTime, player.duration);
+  saveResume(current, player.ended ? 0 : player.currentTime, lengthOf(player));
   if (player.ended) render();
+}
+
+// How long the current title is, or NaN while that is not known. hls.js reports
+// the length of the playlist so far while a video is still being converted,
+// which is not a length: saving it would lose the viewer's place.
+function lengthOf(player) {
+  return hlsPlayer !== null && hlsGrowing ? NaN : player.duration;
 }
 
 function onLoadedMetadata() {
   if (!current || current.kind === 'image') return;
+  // hls.js hands the video element a new source of its own after the subtitle
+  // tracks were added, and the cues they had loaded are gone with it. Adding the
+  // tracks again, now that the source is in place, loads them again.
+  if (hlsPlayer !== null && current.kind === 'video') replaceSubtitleTracks($('video'), current);
+  settleSubtitles();
+  const player = activePlayer();
+  if (pendingSeek > 0) {
+    // The source was replaced (another audio track): carry on from the same place.
+    seekWhenPossible(player, pendingSeek);
+    pendingSeek = 0;
+    return;
+  }
   const saved = loadResume(current);
   if (!saved) return;
-  const player = activePlayer();
-  if (saved.t < player.duration - RESUME_END_MARGIN) {
-    player.currentTime = saved.t;
+  const length = hlsPlayer !== null && hlsGrowing ? Infinity : player.duration;
+  if (saved.t < length - RESUME_END_MARGIN) {
+    if (converted) seekWhenPossible(player, saved.t);
+    else player.currentTime = saved.t;
     $('resume-text').textContent = 'Resumed from ' + formatTime(saved.t) + '.';
     $('resume').hidden = false;
   }
+}
+
+// Seeks to t, waiting if the converted video has not got that far yet: a video
+// being converted can only be played up to where the conversion has reached.
+function seekWhenPossible(player, t) {
+  const token = playToken;
+  const deadline = Date.now() + 90000;
+  const attempt = () => {
+    if (token !== playToken) return true; // another video since
+    const ranges = player.seekable;
+    if (ranges.length > 0 && ranges.end(ranges.length - 1) >= t) {
+      player.currentTime = t;
+      return true;
+    }
+    return false;
+  };
+  if (attempt()) return;
+  const timer = setInterval(() => {
+    if (attempt() || Date.now() > deadline) clearInterval(timer);
+  }, 1000);
 }
 
 function startOver() {
@@ -326,18 +389,33 @@ function startOver() {
 // as a converted stream when the device can play one.
 const PLAYS_DIRECTLY = ['mp4', 'm4v', 'mov', 'webm'];
 
+// Where the converted stream of a video is. Another audio track has its own
+// folder, so its segments are not mixed up with the first track's.
 function hlsURL(item) {
-  return '/hls/' + encodeURIComponent(item.id) + '/index.m3u8';
+  const base = '/hls/' + encodeURIComponent(item.id) + '/';
+  return needsAudioSwitch(item) ? base + 'audio/' + audioChoice + '/index.m3u8' : base + 'index.m3u8';
 }
 
-// Safari, iOS, and many TVs play HLS natively; Chrome and Firefox on a computer
-// do not, and for them a converted stream would not play at all.
-function canPlayHLS() {
+// Safari, iOS, and many TVs play HLS by themselves.
+function nativeHLS() {
   return $('video').canPlayType('application/vnd.apple.mpegurl') !== '';
+}
+
+// Chrome, Firefox and Edge do not, but they can with hls.js, which needs the
+// browser's Media Source Extensions. Whether it really works is only known once
+// the script has loaded; this is the cheap question asked before.
+function hlsJsPossible() {
+  return typeof window.MediaSource === 'function' || typeof window.ManagedMediaSource === 'function';
+}
+
+function canPlayHLS() {
+  return nativeHLS() || hlsJsPossible();
 }
 
 function wantsConversion(item) {
   if (!transcoding || item.kind !== 'video' || !canPlayHLS()) return false;
+  // A browser cannot pick the audio track of a file it plays as it is.
+  if (needsAudioSwitch(item)) return true;
   const dot = item.name.lastIndexOf('.');
   const ext = dot < 0 ? '' : item.name.slice(dot + 1).toLowerCase();
   return !PLAYS_DIRECTLY.includes(ext);
@@ -350,6 +428,10 @@ function showConverting() {
 }
 
 function resetPlayers() {
+  playToken++;
+  pendingSeek = 0;
+  shownChoices = [];
+  destroyHls();
   const video = $('video');
   const audio = $('audio');
   for (const media of [video, audio]) {
@@ -369,7 +451,7 @@ function resetPlayers() {
 function flushResume() {
   if (!current || current.kind === 'image') return;
   const player = activePlayer();
-  saveResume(current, player.currentTime, player.duration);
+  saveResume(current, player.currentTime, lengthOf(player));
 }
 
 function play(item) {
@@ -391,25 +473,178 @@ function play(item) {
     img.hidden = false;
   } else {
     const player = $(item.kind === 'video' ? 'video' : 'audio');
-    if (item.kind === 'video') addSubtitleTracks(player, item);
-    converted = wantsConversion(item);
-    player.src = converted ? hlsURL(item) : streamURL(item);
+    if (item.kind === 'video') {
+      addSubtitleTracks(player, item);
+      // What is inside the video arrives a moment later; its subtitles join then.
+      const token = playToken;
+      loadTracks(item).then(() => {
+        if (token === playToken) addSubtitleTracks(player, item);
+      });
+    }
+    converted = item.kind === 'video' && wantsConversion(item);
     if (converted) showConverting();
+    startSource(player, converted ? hlsURL(item) : streamURL(item), converted, true);
     player.hidden = false;
-    player.play().catch(() => {
-      // Autoplay can be refused; the controls are visible, so just wait.
-    });
   }
 
   $('stage').scrollIntoView({ behavior: 'smooth', block: 'start' });
   render();
 }
 
-// One <track> per sidecar subtitle file. They stay off until the viewer picks
-// one, on the detail page or in the player's own menu, so nothing is shown that
-// was not asked for.
+// The player is given its source: the file as it is, or the converted stream.
+// Playback starts once the source is in place; with hls.js that is a moment after
+// this returns, and asking the player to play before then would be cancelled when
+// hls.js gives it the stream.
+function startSource(player, url, isConverted, autoplay) {
+  destroyHls();
+  const begin = () => {
+    if (autoplay) {
+      player.play().catch(() => {
+        // Autoplay can be refused; the controls are visible, so just wait.
+      });
+    }
+  };
+  if (!isConverted || nativeHLS()) {
+    player.src = url;
+    begin();
+    return;
+  }
+  const token = playToken;
+  loadHlsJs()
+    .then((Hls) => {
+      if (token !== playToken) return;
+      if (!Hls.isSupported()) throw new Error('This browser cannot play converted video.');
+      attachHlsJs(Hls, player, url, token, begin);
+    })
+    .catch(() => {
+      if (token === playToken) giveUp();
+    });
+}
+
+let hlsScript = null;
+
+// hls.js is large and most pages never need it, so it is fetched the first time
+// a converted video is played in a browser that has no HLS of its own.
+function loadHlsJs() {
+  if (typeof window.Hls === 'function') return Promise.resolve(window.Hls);
+  if (hlsScript === null) {
+    hlsScript = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = '/static/hls.min.js';
+      script.onload = () => (typeof window.Hls === 'function' ? resolve(window.Hls) : reject(new Error('hls.js did not start')));
+      script.onerror = () => {
+        hlsScript = null; // a later try may succeed
+        reject(new Error('hls.js could not be loaded'));
+      };
+      document.head.append(script);
+    });
+  }
+  return hlsScript;
+}
+
+function attachHlsJs(Hls, player, url, token, begin) {
+  const instance = new Hls({
+    // No worker: the page's policy allows scripts and media from itself only.
+    enableWorker: false,
+    // The playlist grows while a video is converted, which hls.js takes for a live
+    // stream and would start at its end. This is a film: start at the beginning.
+    startPosition: 0,
+    enableCEA708Captions: false,
+    // Same reason as getJSON: without it ngrok's free plan answers with a warning page.
+    xhrSetup: (xhr) => xhr.setRequestHeader('ngrok-skip-browser-warning', '1'),
+  });
+  hlsPlayer = instance;
+  hlsGrowing = true;
+  let recoveredMedia = false;
+  instance.on(Hls.Events.MANIFEST_PARSED, () => {
+    if (token === playToken) begin();
+  });
+  instance.on(Hls.Events.LEVEL_LOADED, (event, data) => {
+    if (instance === hlsPlayer) hlsGrowing = data.details.live === true;
+  });
+  instance.on(Hls.Events.ERROR, (event, data) => {
+    if (!data.fatal || token !== playToken) return;
+    if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !recoveredMedia) {
+      recoveredMedia = true;
+      instance.recoverMediaError();
+      return;
+    }
+    giveUp();
+  });
+  instance.loadSource(url);
+  instance.attachMedia(player);
+}
+
+function destroyHls() {
+  if (hlsPlayer === null) return;
+  const instance = hlsPlayer;
+  hlsPlayer = null;
+  hlsGrowing = false;
+  instance.destroy();
+}
+
+// ---- What is inside a video: audio tracks and subtitles ----------------------
+
+// Asks once per video what it holds. A video that cannot be looked into simply
+// has no choices.
+function loadTracks(item) {
+  if (item.kind !== 'video' || !tracksListed) return Promise.resolve(NO_TRACKS);
+  if (!trackAsked.has(item.id)) {
+    trackAsked.set(
+      item.id,
+      getJSON('/api/library/' + encodeURIComponent(item.id) + '/tracks')
+        .then((found) => {
+          trackData.set(item.id, found);
+          return found;
+        })
+        .catch(() => {
+          trackData.set(item.id, NO_TRACKS);
+          return NO_TRACKS;
+        }),
+    );
+  }
+  return trackAsked.get(item.id);
+}
+
+function tracksOf(item) {
+  return trackData.get(item.id) || NO_TRACKS;
+}
+
+// The audio track the file plays by itself: the one it marks, else the first.
+function defaultAudio(item) {
+  const found = tracksOf(item).audio.find((a) => a.default);
+  return found ? found.index : 0;
+}
+
+// Whether the viewer picked a track other than the one the file plays by itself.
+function needsAudioSwitch(item) {
+  return audioItem === item.id && audioChoice >= 0 && audioChoice !== defaultAudio(item) &&
+    tracksOf(item).audio.some((a) => a.index === audioChoice);
+}
+
+// Every subtitle the viewer can pick: the files next to the video, then the tracks
+// inside it. Tracks made of pictures are listed but cannot be shown.
+function subtitleChoices(item) {
+  const id = encodeURIComponent(item.id);
+  const choices = (item.subtitles || []).map((sub, index) => ({
+    label: sub.label, lang: sub.lang, src: '/subtitle/' + id + '/' + index, supported: true,
+  }));
+  for (const sub of tracksOf(item).subtitles) {
+    choices.push({
+      label: sub.label, lang: sub.lang, supported: sub.supported,
+      src: '/subtitle/' + id + '/embedded/' + sub.index,
+    });
+  }
+  return choices;
+}
+
+// One <track> per subtitle that can be shown. They stay off until the viewer
+// picks one, on the detail page or in the player's own menu, so nothing is shown
+// that was not asked for. Called again when the tracks inside the video are
+// known: only the ones not added yet are added.
 function addSubtitleTracks(player, item) {
-  (item.subtitles || []).forEach((sub, index) => {
+  subtitleChoices(item).forEach((sub, index) => {
+    if (!sub.supported || shownChoices.includes(index)) return;
     const track = document.createElement('track');
     track.kind = 'subtitles';
     track.label = sub.label;
@@ -417,32 +652,67 @@ function addSubtitleTracks(player, item) {
     // The track picked on the detail page starts showing; the others wait for the
     // player's own menu.
     if (item.id === subtitleItem && index === subtitleChoice) track.default = true;
-    track.src = '/subtitle/' + encodeURIComponent(item.id) + '/' + index;
+    track.src = sub.src;
     player.append(track);
+    shownChoices.push(index);
   });
+  // Only when the viewer chose one: otherwise the player's own menu is theirs.
+  if (subtitleItem === item.id && subtitleChoice >= 0) applySubtitleChoice(item);
 }
 
 function onPlaybackError() {
   if (!current) return;
-  const hint = $('hint');
 
   // The file as it is would not play (an MP4 with a codec this device lacks, say):
   // try the converted stream once before giving up.
   if (!converted && wantsConversionAfterError(current)) {
     converted = true;
     const player = $('video');
-    player.src = hlsURL(current);
-    player.play().catch(() => {});
     showConverting();
+    startSource(player, hlsURL(current), true, true);
     return;
   }
+  giveUp();
+}
 
+function giveUp() {
+  if (!current) return;
+  const hint = $('hint');
   hint.textContent = converted
     ? "This video couldn't be converted for this device. " +
       'Use the playlist button to open the library in VLC or Infuse.'
     : "This browser can't play this file (common for MKV or HEVC). " +
       'Use the playlist button to open the library in VLC or Infuse.';
   hint.hidden = false;
+  if (converted) explainConversion(current);
+}
+
+// A failed conversion is only "an error" to the video element. Asking the server
+// again says why, in words that help: a full disk or a busy computer is not the
+// same problem as a file that cannot be read.
+function explainConversion(item) {
+  const token = playToken;
+  fetch(hlsURL(item), { headers: { 'ngrok-skip-browser-warning': '1' } })
+    .then((res) => {
+      if (res.ok) {
+        if (res.body) res.body.cancel(); // it is only being asked about
+        return;
+      }
+      if (token !== playToken) return;
+      const hint = $('hint');
+      if (res.status === 507) {
+        hint.textContent = "There isn't enough free disk space on the computer running EinCast to convert this video. " +
+          'Free some space there, or use the playlist button to open the library in VLC or Infuse.';
+      } else if (res.status === 503) {
+        hint.textContent = 'EinCast is converting other videos right now. Try again in a minute.';
+      } else {
+        return;
+      }
+      hint.hidden = false;
+    })
+    .catch(() => {
+      // The generic message stays.
+    });
 }
 
 function wantsConversionAfterError(item) {
@@ -733,7 +1003,7 @@ function renderItem(root, item) {
     info.append(again);
   }
 
-  if ((item.subtitles || []).length > 0) info.append(subtitlePicker(item));
+  if (item.kind === 'video') trackPickers(info, item);
 
   const file = document.createElement('p');
   file.className = 'hint file';
@@ -743,36 +1013,118 @@ function renderItem(root, item) {
   root.append(page);
 }
 
-function subtitlePicker(item) {
+// The audio and subtitle menus of a video's page. They are drawn at once from
+// what is already known and again when what is inside the video arrives, and
+// stay out of sight while there is nothing to choose.
+function trackPickers(info, item) {
+  const audio = audioPicker(item);
+  const subtitles = subtitlePicker(item);
+  info.append(audio.label, subtitles.label);
+  loadTracks(item).then(() => {
+    audio.refresh();
+    subtitles.refresh();
+  });
+}
+
+function pickerOf(text) {
   const label = document.createElement('label');
   label.className = 'picker';
-  label.append('Subtitles ');
+  label.hidden = true;
+  label.append(text + ' ');
   const select = document.createElement('select');
-  const off = document.createElement('option');
-  off.value = '-1';
-  off.textContent = 'Off';
-  select.append(off);
-  item.subtitles.forEach((sub, index) => {
-    const option = document.createElement('option');
-    option.value = String(index);
-    option.textContent = sub.label;
-    select.append(option);
+  label.append(select);
+  return { label: label, select: select };
+}
+
+function addOption(select, value, text, disabled) {
+  const option = document.createElement('option');
+  option.value = String(value);
+  option.textContent = text;
+  option.disabled = disabled === true;
+  select.append(option);
+}
+
+function audioPicker(item) {
+  const { label, select } = pickerOf('Audio');
+  const refresh = () => {
+    const audio = tracksOf(item).audio;
+    select.replaceChildren();
+    audio.forEach((track) => addOption(select, track.index, track.label, false));
+    label.hidden = audio.length < 2;
+    select.value = String(audioItem === item.id && audioChoice >= 0 ? audioChoice : defaultAudio(item));
+  };
+  select.addEventListener('change', () => {
+    audioChoice = Number(select.value);
+    audioItem = item.id;
+    applyAudioChoice(item);
   });
-  select.value = String(subtitleItem === item.id ? subtitleChoice : -1);
+  refresh();
+  return { label: label, refresh: refresh };
+}
+
+function subtitlePicker(item) {
+  const { label, select } = pickerOf('Subtitles');
+  const refresh = () => {
+    const choices = subtitleChoices(item);
+    select.replaceChildren();
+    addOption(select, -1, 'Off', false);
+    choices.forEach((sub, index) => {
+      const text = sub.supported ? sub.label : sub.label + " (pictures, can't be shown)";
+      addOption(select, index, text, !sub.supported);
+    });
+    label.hidden = choices.length === 0;
+    select.value = String(subtitleItem === item.id ? subtitleChoice : -1);
+  };
   select.addEventListener('change', () => {
     subtitleChoice = Number(select.value);
     subtitleItem = item.id;
     applySubtitleChoice(item);
   });
-  label.append(select);
-  return label;
+  refresh();
+  return { label: label, refresh: refresh };
 }
 
-// Switches the subtitle of what is playing now, if it is this item.
+// Switches the subtitle of what is playing now, if it is this item. The browser
+// lists the text tracks in the order of the <track> elements, which shownChoices
+// follows; any track hls.js or the browser adds itself is turned off.
 function applySubtitleChoice(item) {
   if (!current || current.id !== item.id || current.kind !== 'video') return;
-  const tracks = $('video').textTracks;
-  for (let i = 0; i < tracks.length; i++) tracks[i].mode = i === subtitleChoice ? 'showing' : 'disabled';
+  const wanted = subtitleItem === item.id ? subtitleChoice : -1;
+  const list = $('video').textTracks;
+  for (let i = 0; i < list.length; i++) {
+    list[i].mode = i < shownChoices.length && shownChoices[i] === wanted ? 'showing' : 'disabled';
+  }
+}
+
+function replaceSubtitleTracks(player, item) {
+  for (const track of player.querySelectorAll('track')) track.remove();
+  shownChoices = [];
+  addSubtitleTracks(player, item);
+}
+
+// Chrome turns on every subtitle track when a source is set, whatever the track's
+// attributes say. The choice is applied again as the source starts, so what is
+// shown is what the viewer picked, and nothing when they picked nothing.
+function settleSubtitles() {
+  if (current && current.kind === 'video') applySubtitleChoice(current);
+}
+
+// Switches the audio of what is playing now, if it is this item: a new source,
+// carrying on from the same place. The browser cannot change the audio track of
+// a file it plays as it is, so the server converts the video with the track chosen.
+function applyAudioChoice(item) {
+  if (!current || current.id !== item.id || current.kind !== 'video') return;
+  const player = $('video');
+  const at = player.currentTime;
+  const wasPlaying = !player.paused;
+  playToken++;
+  pendingSeek = at > 1 ? at : 0;
+  shownChoices = [];
+  for (const track of player.querySelectorAll('track')) track.remove();
+  converted = wantsConversion(item);
+  if (converted) showConverting();
+  startSource(player, converted ? hlsURL(item) : streamURL(item), converted, wasPlaying);
+  addSubtitleTracks(player, item);
 }
 
 // The detail page of a series: its seasons, each with its episodes.
@@ -1001,6 +1353,10 @@ async function leaveProfile() {
   catalog = { movies: [], shows: [], music: [], photos: [] };
   serverResume = new Map();
   serverResumeOn = false;
+  // What a track list said for one profile (or that a video was not found) is not
+  // true for the next.
+  trackData.clear();
+  trackAsked.clear();
   view = { type: 'grid' };
   showPicker();
 }
@@ -1042,6 +1398,7 @@ async function openLibrary() {
 
 async function init() {
   $('video').addEventListener('error', onPlaybackError);
+  $('video').addEventListener('loadstart', settleSubtitles);
   $('audio').addEventListener('error', onPlaybackError);
   $('search').addEventListener('input', render);
   for (const media of [$('video'), $('audio')]) {
@@ -1070,6 +1427,7 @@ async function init() {
     }
     thumbnails = health.thumbnails === true;
     transcoding = health.transcoding === true;
+    tracksListed = health.tracks === true;
     profiles = who;
     if (who.active && !who.current) {
       showPicker();

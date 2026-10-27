@@ -34,9 +34,10 @@ changes.
 | `domain/media` | `Item`, `ID` (hash of library and relative path), `Library`/`LibraryID` (identity from the folder), `Overlaps`, `Kind` + extension detection, `Ignored` (names that are never library content), `Subtitle` + `MatchSubtitles` (sidecar rules), `Stats`, sentinel errors |
 | `domain/subtitle` | `ToWebVTT`, `Decode`: SRT/VTT text to WebVTT, UTF-8/UTF-16/Windows-1252 to UTF-8 |
 | `domain/server` | `State`, the transition table, and `Machine` (atomic check-and-set) |
-| `app` | Ports (`Scanner`, `Discovery`, `FolderWatcher`, `FrameGrabber`, `ThumbnailCache`, `Transcoder`, `HLSStream`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `NetInfo`, `LogStream`, `SettingsStore`, `SecretStore`, `LibraryMemory`), remote-access ports and types (`Tunnel`, `LocalServer`, `TunnelRegistry`, `PublicAccess`, `RemoteStatus`), `Secret` (log-safe wrapper), `LogEntry`, sealed `Event` type |
+| `app` | Ports (`Scanner`, `Discovery`, `FolderWatcher`, `FrameGrabber`, `ThumbnailCache`, `Transcoder`, `HLSStream`, `StreamProber`, `SubtitleExtractor`, `SubtitleCache`, `LibraryRepo`, `EventPublisher`, `WebServer`, `RunningServer`, `NetInfo`, `LogStream`, `SettingsStore`, `SecretStore`, `LibraryMemory`), remote-access ports and types (`Tunnel`, `LocalServer`, `TunnelRegistry`, `PublicAccess`, `RemoteStatus`), `Secret` (log-safe wrapper), `LogEntry`, sealed `Event` type |
 | `app/library` | `Service`: the list of libraries — `Add`, `Remove`, `Rename`, `Rescan`/`RescanAll`, `Restore`, `State`, `List`, `Get` (one scan at a time *per library*); `Watch` supervises one watcher per library and rescans quietly after changes settle (ADRs 0014, 0021) |
-| `app/transcode` | `Service`: one shared HLS conversion per video (`Playlist` waits until playable, `File`), at most two at once, idle ones swept, all stopped on exit (ADR 0018) |
+| `app/transcode` | `Service`: one shared HLS conversion per video and audio track (`Playlist` waits until playable, `File`), at most two at once, idle ones swept, all stopped on exit; another track of the same video may take a slot at once (ADRs 0018, 0031) |
+| `app/tracks` | `Service`: the audio and subtitle tracks inside a video (`Streams`, remembered per file version) and an embedded subtitle as WebVTT (`Subtitle`: cache → one shared ffmpeg run, two at a time) (ADR 0031) |
 | `app/thumbnails` | `Service`: `Get` (cache → one shared ffmpeg attempt, two at a time, remembered failures), `Available` (ADR 0015) |
 | `app/profiles` | `Service`: profiles and their PINs (PBKDF2, rate-limited `Select`), signed profile credentials, `Visible`/`TVVisible`; enforced by the HTTP layer on every route that takes an ID (ADR 0027) |
 | `app/resume` | `Service`: where each profile stopped in each title, written in batches and on quit |
@@ -48,11 +49,11 @@ changes.
 | `adapters/mdns` | `Announcer`: publishes `eincast.local` and an `_http._tcp` service for exactly the announced LAN addresses (ADR 0019) |
 | `adapters/dlna` | Smart TV support (ADR 0020): `Handler` (device/service descriptions, ContentDirectory Browse, ConnectionManager, events), `buildTree`/`didl`/`soap`, pure SSDP messages, the `Responder` (UDP 1900, announce, answer, goodbye) and the `Announcer` that starts it |
 | `adapters/fswatch` | `fsnotify` watcher: one signal for any burst of relevant changes, follows new folders, all-or-nothing |
-| `adapters/ffmpeg` | `Grabber`: one JPEG (video frame, cover art, shrunken photo). Both look for ffmpeg in the location the person chose, else on `PATH` and the usual install folders. `Transcoder`: ffprobe → plan (copy or encode) → HLS into a temporary folder, readiness polling, kill-and-delete on `Stop` |
+| `adapters/ffmpeg` | `Grabber`: one JPEG (video frame, cover art, shrunken photo). Both look for ffmpeg in the location the person chose, else on `PATH` and the usual install folders. `Transcoder`: free-space check → ffprobe → plan (copy or encode, which audio track) → HLS into a temporary folder through a chain of encoders (the video chip, then the processor), readiness polling, kill-and-delete on `Stop`. `Prober` and `Extractor`: the tracks inside a video, and one text subtitle track as WebVTT (ADRs 0031, 0032) |
 | `adapters/powerguard` | `Guard`: keeps the computer awake while a run lasts; `caffeinate -i -w <pid>` on macOS, `SetThreadExecutionState` from a pinned thread on Windows (ADR 0025) |
 | `adapters/loginitem` | `Item`: opens EinCast at login; a LaunchAgent on macOS, a `Run` key value on Windows; both start with `--background` (ADR 0030) |
 | `adapters/tray` | Windows notification-area icon (Open / Quit) so a hidden window can come back; nothing on macOS, where the Dock does it (ADR 0030) |
-| `adapters/thumbcache` | Folder of `<key>.jpg` files in the user cache dir; atomic writes, age-based `Prune` |
+| `adapters/thumbcache` | Folder of `<key>.jpg` files in the user cache dir (or `.vtt` for extracted subtitles, `WithFiles`); atomic writes, age-based `Prune` |
 | `adapters/safepath` | `Inside(root, file)`: the symlink-safe "stays in the library" check used by streaming and thumbnails |
 | `adapters/memrepo` | `sync.RWMutex`-guarded snapshot repository |
 | `adapters/httpapi` | Server lifecycle (errgroup, one listener per address), route table, middleware chain, handlers, embedded player page; tunnel gate (PIN sign-in, signed links, trusted forwarding headers); `Bind` for extra listeners |
@@ -76,7 +77,8 @@ changes.
 |---|---|
 | `GET /` | The device player page (embedded; list, search, `<video>`/`<audio>`/`<img>`), with a strict CSP |
 | `GET /static/{file}` | The page's script, stylesheet and icon (single path segment, never a directory listing) |
-| `GET /api/health` | `{"status":"ok","version":"…","name":"…","thumbnails":true,"transcoding":true}` |
+| `GET /api/health` | `{"status":"ok","version":"…","name":"…","thumbnails":true,"transcoding":true,"tracks":true}` |
+| `GET /api/library/{id}/tracks` | The audio and subtitle tracks inside a video: `{audio:[{index,label,lang,default}], subtitles:[{index,label,lang,supported,default}]}`; empty lists when nothing can be read |
 | `GET /api/library` | The items the request's profile may see: `[{id, name, kind, size, modTime, subtitles, title, year, show, season, episode, plot, poster, legacyId}]` (never a path). 401 `profile_required` for a guest when there is more than one profile |
 | `GET /api/library/{id}` | One item, or 404 (also for an item the profile may not see: the same answer as an unknown ID) |
 | `GET /api/profiles` | `{active, current, profiles:[{id, name, color, hasPin}]}` for the picker; no restrictions, no hashes |
@@ -84,7 +86,8 @@ changes.
 | `GET /api/resume`, `PUT` / `DELETE /api/resume/{id}` | Where this profile stopped in each title it may see |
 | `/dlna/…` | Only while Smart TVs is on and the token is off: `device.xml`, `cd.xml`, `cm.xml`, `cd/control`, `cm/control`, and the event URLs |
 | `GET /subtitle/{id}/{n}` | Track `n` of a video as WebVTT, or 404 |
-| `GET /hls/{id}/index.m3u8` | Starts (or joins) the HLS conversion and answers once it is playable; `/hls/{id}/seg00000.ts` serves its segments; `503` when busy, `422` when ffmpeg cannot convert it |
+| `GET /subtitle/{id}/embedded/{n}` | Subtitle track `n` stored inside a video as WebVTT (cached), or 404 |
+| `GET /hls/{id}/index.m3u8` | Starts (or joins) the HLS conversion and answers once it is playable; `/hls/{id}/seg00000.ts` serves its segments; `/hls/{id}/audio/{n}/…` is the same with the n-th audio track; `503` when busy, `507` when the disk is too full, `422` when ffmpeg cannot convert it |
 | `GET /thumb/{id}` | A 320 px JPEG of the item, or a plain `404` when it has none |
 | `GET /stream/{id}` | File bytes via `http.ServeContent`: `Range` → `206`, `HEAD`, correct `Content-Type` |
 | `GET /playlist.m3u` | Extended M3U of video + audio with absolute URLs built from the request `Host` |
@@ -375,6 +378,15 @@ sequenceDiagram
 
 If direct playback of a file fails instead (an MP4 with HEVC), the page retries once
 through the same route ([ADR 0018](adr/0018-hls-conversion-on-demand.md)).
+
+In Firefox (and any browser that cannot play HLS itself) the same flow runs with one
+change: the page loads `/static/hls.min.js` and gives the `<video>` to hls.js, which
+fetches the playlist and segments with XHR from the same routes. Picking another audio
+track asks for `/hls/{id}/audio/{n}/index.m3u8` instead, and picking an embedded
+subtitle adds a `<track>` for `/subtitle/{id}/embedded/{n}`
+([ADR 0031](adr/0031-playback-gaps-hlsjs-and-embedded-tracks.md)). ffmpeg tries the
+video chip first and the processor if the chip fails
+([ADR 0032](adr/0032-hardware-encoding-and-disk-safety.md)).
 
 ### Flow: the user turns on Tailscale
 

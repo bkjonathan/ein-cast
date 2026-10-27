@@ -104,6 +104,8 @@ export interface Settings {
   hideOnClose: boolean;
   /** Where the person said ffmpeg is; empty means "look for it". */
   ffmpegPath: string;
+  /** Let video conversions use the computer's video chip; Go falls back to the processor by itself. */
+  hardwareEncoding: boolean;
   /** Empty unless requireToken is on. */
   accessToken: string;
   /** False when the token could not be saved to the system credential store. */
@@ -113,7 +115,7 @@ export interface Settings {
 /** The editable part of Settings. */
 export type SettingsInput = Pick<
   Settings,
-  "port" | "name" | "requireToken" | "dlna" | "autoStart" | "keepAwake" | "openAtLogin" | "hideOnClose"
+  "port" | "name" | "requireToken" | "dlna" | "autoStart" | "keepAwake" | "openAtLogin" | "hideOnClose" | "hardwareEncoding"
 >;
 
 /** Whether ffmpeg was found, and what the person can do about it. */

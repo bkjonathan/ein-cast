@@ -99,6 +99,7 @@ type fakeTranscoder struct {
 	available bool
 	startErr  error
 	streams   []*fakeStream
+	reqs      []app.TranscodeRequest
 	// autoReady makes every started stream ready immediately.
 	autoReady bool
 }
@@ -110,6 +111,7 @@ func (f *fakeTranscoder) Start(_ context.Context, req app.TranscodeRequest) (app
 	if f.startErr != nil {
 		return nil, f.startErr
 	}
+	f.reqs = append(f.reqs, req)
 	s := newFakeStream(req.Path)
 	if f.autoReady {
 		s.becomeReady()
@@ -182,11 +184,11 @@ func read(t *testing.T, f io.ReadSeekCloser, err error) string {
 func TestPlaylist_StartsOneConversionAndSharesIt(t *testing.T) {
 	r := newRig(testOpts)
 
-	f, err := r.svc.Playlist(context.Background(), "a")
+	f, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack)
 	if got := read(t, f, err); got != "#EXTM3U\n" {
 		t.Errorf("playlist = %q", got)
 	}
-	if _, err := r.svc.Playlist(context.Background(), "a"); err != nil {
+	if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); err != nil {
 		t.Fatal(err)
 	}
 	if n := r.tc.started(); n != 1 {
@@ -203,7 +205,7 @@ func TestPlaylist_WaitsUntilPlaybackCanStart(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.svc.Playlist(context.Background(), "a")
+		_, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack)
 		done <- err
 	}()
 	select {
@@ -220,14 +222,14 @@ func TestPlaylist_WaitsUntilPlaybackCanStart(t *testing.T) {
 func TestPlaylist_ErrorCases(t *testing.T) {
 	t.Run("unknown video", func(t *testing.T) {
 		r := newRig(testOpts)
-		if _, err := r.svc.Playlist(context.Background(), "nope"); !errors.Is(err, media.ErrNotFound) {
+		if _, err := r.svc.Playlist(context.Background(), "nope", app.DefaultAudioTrack); !errors.Is(err, media.ErrNotFound) {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("no ffmpeg", func(t *testing.T) {
 		r := newRig(testOpts)
 		r.tc.available = false
-		if _, err := r.svc.Playlist(context.Background(), "a"); !errors.Is(err, app.ErrTranscodingUnavailable) {
+		if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); !errors.Is(err, app.ErrTranscodingUnavailable) {
 			t.Fatalf("error = %v", err)
 		}
 		if r.svc.Available() {
@@ -237,7 +239,7 @@ func TestPlaylist_ErrorCases(t *testing.T) {
 	t.Run("start fails", func(t *testing.T) {
 		r := newRig(testOpts)
 		r.tc.startErr = errors.New("cannot make a folder")
-		if _, err := r.svc.Playlist(context.Background(), "a"); err == nil || r.svc.Running() != 0 {
+		if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); err == nil || r.svc.Running() != 0 {
 			t.Fatalf("error = %v running = %d, want an error and no session", err, r.svc.Running())
 		}
 	})
@@ -246,7 +248,7 @@ func TestPlaylist_ErrorCases(t *testing.T) {
 		r.tc.autoReady = false
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		if _, err := r.svc.Playlist(ctx, "a"); !errors.Is(err, context.Canceled) {
+		if _, err := r.svc.Playlist(ctx, "a", app.DefaultAudioTrack); !errors.Is(err, context.Canceled) {
 			t.Fatalf("error = %v", err)
 		}
 		if r.svc.Running() != 1 {
@@ -258,7 +260,7 @@ func TestPlaylist_ErrorCases(t *testing.T) {
 		opts.ReadyTimeout = 20 * time.Millisecond
 		r := newRig(opts)
 		r.tc.autoReady = false
-		if _, err := r.svc.Playlist(context.Background(), "a"); !errors.Is(err, app.ErrNotConvertible) {
+		if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); !errors.Is(err, app.ErrNotConvertible) {
 			t.Fatalf("error = %v", err)
 		}
 	})
@@ -274,11 +276,11 @@ func TestPlaylist_AFailedConversionIsReportedAndNotRetriedAtOnce(t *testing.T) {
 		r.tc.stream(0).fail(errors.New("Invalid data found when processing input"))
 	}()
 
-	_, err := r.svc.Playlist(context.Background(), "a")
+	_, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack)
 	if !errors.Is(err, app.ErrNotConvertible) || !strings.Contains(err.Error(), "Invalid data") {
 		t.Fatalf("error = %v, want ErrNotConvertible with ffmpeg's reason", err)
 	}
-	if _, err := r.svc.Playlist(context.Background(), "a"); !errors.Is(err, app.ErrNotConvertible) {
+	if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); !errors.Is(err, app.ErrNotConvertible) {
 		t.Fatalf("second error = %v", err)
 	}
 	if n := r.tc.started(); n != 1 {
@@ -289,21 +291,21 @@ func TestPlaylist_AFailedConversionIsReportedAndNotRetriedAtOnce(t *testing.T) {
 	r.clk.advance(3 * time.Minute)
 	r.svc.sweep()
 	r.tc.autoReady = true
-	if _, err := r.svc.Playlist(context.Background(), "a"); err != nil {
+	if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); err != nil {
 		t.Fatalf("after cleanup: %v", err)
 	}
 }
 
 func TestPlaylist_AChangedFileIsConvertedAgain(t *testing.T) {
 	r := newRig(testOpts)
-	if _, err := r.svc.Playlist(context.Background(), "a"); err != nil {
+	if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); err != nil {
 		t.Fatal(err)
 	}
 	it, _ := r.items.Get("a")
 	it.ModTime = epoch.Add(time.Hour)
 	r.items.set(it)
 
-	if _, err := r.svc.Playlist(context.Background(), "a"); err != nil {
+	if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); err != nil {
 		t.Fatal(err)
 	}
 	if r.tc.started() != 2 || r.tc.stream(0).stops() != 1 || r.svc.Running() != 1 {
@@ -314,17 +316,17 @@ func TestPlaylist_AChangedFileIsConvertedAgain(t *testing.T) {
 
 func TestFile_ServesSegmentsOfARunningConversionOnly(t *testing.T) {
 	r := newRig(testOpts)
-	if _, err := r.svc.File("a", "seg00000.ts"); !errors.Is(err, ErrNotStarted) {
+	if _, err := r.svc.File("a", app.DefaultAudioTrack, "seg00000.ts"); !errors.Is(err, ErrNotStarted) {
 		t.Fatalf("before any conversion: error = %v, want ErrNotStarted", err)
 	}
-	if _, err := r.svc.Playlist(context.Background(), "a"); err != nil {
+	if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); err != nil {
 		t.Fatal(err)
 	}
-	f, err := r.svc.File("a", "seg00000.ts")
+	f, err := r.svc.File("a", app.DefaultAudioTrack, "seg00000.ts")
 	if got := read(t, f, err); got != "ts-bytes" {
 		t.Errorf("segment = %q", got)
 	}
-	if _, err := r.svc.File("a", "seg00099.ts"); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := r.svc.File("a", app.DefaultAudioTrack, "seg00099.ts"); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("missing segment: error = %v, want fs.ErrNotExist", err)
 	}
 	if r.tc.started() != 1 {
@@ -335,13 +337,13 @@ func TestFile_ServesSegmentsOfARunningConversionOnly(t *testing.T) {
 func TestSlots_AWatchedVideoIsNotCutOffForANewOne(t *testing.T) {
 	r := newRig(testOpts) // two slots
 	for _, id := range []media.ID{"a", "b"} {
-		if _, err := r.svc.Playlist(context.Background(), id); err != nil {
+		if _, err := r.svc.Playlist(context.Background(), id, app.DefaultAudioTrack); err != nil {
 			t.Fatal(err)
 		}
 	}
 	r.clk.advance(10 * time.Second) // both recently used
 
-	if _, err := r.svc.Playlist(context.Background(), "c"); !errors.Is(err, ErrBusy) {
+	if _, err := r.svc.Playlist(context.Background(), "c", app.DefaultAudioTrack); !errors.Is(err, ErrBusy) {
 		t.Fatalf("error = %v, want ErrBusy", err)
 	}
 	if r.tc.stream(0).stops()+r.tc.stream(1).stops() != 0 {
@@ -352,13 +354,13 @@ func TestSlots_AWatchedVideoIsNotCutOffForANewOne(t *testing.T) {
 func TestSlots_TheLongestIdleVideoIsReplaced(t *testing.T) {
 	r := newRig(testOpts)
 	for _, id := range []media.ID{"a", "b"} {
-		if _, err := r.svc.Playlist(context.Background(), id); err != nil {
+		if _, err := r.svc.Playlist(context.Background(), id, app.DefaultAudioTrack); err != nil {
 			t.Fatal(err)
 		}
 		r.clk.advance(20 * time.Second)
 	}
 	// a idle 40 s, b idle 20 s: a goes.
-	if _, err := r.svc.Playlist(context.Background(), "c"); err != nil {
+	if _, err := r.svc.Playlist(context.Background(), "c", app.DefaultAudioTrack); err != nil {
 		t.Fatalf("error = %v", err)
 	}
 	if r.tc.stream(0).stops() != 1 || r.tc.stream(1).stops() != 0 {
@@ -372,12 +374,12 @@ func TestSlots_TheLongestIdleVideoIsReplaced(t *testing.T) {
 func TestSweep_StopsIdleConversionsAndKeepsBusyOnes(t *testing.T) {
 	r := newRig(testOpts)
 	for _, id := range []media.ID{"a", "b"} {
-		if _, err := r.svc.Playlist(context.Background(), id); err != nil {
+		if _, err := r.svc.Playlist(context.Background(), id, app.DefaultAudioTrack); err != nil {
 			t.Fatal(err)
 		}
 	}
 	r.clk.advance(90 * time.Second)
-	if _, err := r.svc.File("b", "seg00000.ts"); err != nil { // b is being watched
+	if _, err := r.svc.File("b", app.DefaultAudioTrack, "seg00000.ts"); err != nil { // b is being watched
 		t.Fatal(err)
 	}
 	r.clk.advance(60 * time.Second) // a idle 150 s, b idle 60 s
@@ -386,7 +388,7 @@ func TestSweep_StopsIdleConversionsAndKeepsBusyOnes(t *testing.T) {
 	if r.tc.stream(0).stops() != 1 || r.tc.stream(1).stops() != 0 || r.svc.Running() != 1 {
 		t.Errorf("a stops=%d b stops=%d running=%d", r.tc.stream(0).stops(), r.tc.stream(1).stops(), r.svc.Running())
 	}
-	if _, err := r.svc.File("a", "seg00000.ts"); !errors.Is(err, ErrNotStarted) {
+	if _, err := r.svc.File("a", app.DefaultAudioTrack, "seg00000.ts"); !errors.Is(err, ErrNotStarted) {
 		t.Errorf("a's segment after cleanup: error = %v, want ErrNotStarted", err)
 	}
 }
@@ -395,10 +397,10 @@ func TestRun_SweepsOnATimerAndStopsEverythingWhenItEnds(t *testing.T) {
 	opts := testOpts
 	opts.SweepEvery = 10 * time.Millisecond
 	r := newRig(opts)
-	if _, err := r.svc.Playlist(context.Background(), "a"); err != nil {
+	if _, err := r.svc.Playlist(context.Background(), "a", app.DefaultAudioTrack); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.svc.Playlist(context.Background(), "b"); err != nil {
+	if _, err := r.svc.Playlist(context.Background(), "b", app.DefaultAudioTrack); err != nil {
 		t.Fatal(err)
 	}
 
@@ -418,7 +420,7 @@ func TestRun_SweepsOnATimerAndStopsEverythingWhenItEnds(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	if _, err := r.svc.Playlist(context.Background(), "c"); err != nil {
+	if _, err := r.svc.Playlist(context.Background(), "c", app.DefaultAudioTrack); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -429,5 +431,81 @@ func TestRun_SweepsOnATimerAndStopsEverythingWhenItEnds(t *testing.T) {
 	}
 	if r.svc.Running() != 0 || r.tc.stream(2).stops() != 1 {
 		t.Errorf("running = %d stops = %d, want everything stopped on exit", r.svc.Running(), r.tc.stream(2).stops())
+	}
+}
+
+func TestAudioTracks_EachIsItsOwnConversionAndIsPassedOn(t *testing.T) {
+	r := newRig(testOpts)
+	ctx := context.Background()
+	for _, track := range []int{app.DefaultAudioTrack, 1, 1, app.DefaultAudioTrack} {
+		if _, err := r.svc.Playlist(ctx, "a", track); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r.tc.started() != 2 {
+		t.Fatalf("started = %d, want one per track (default and 1)", r.tc.started())
+	}
+	if got := []int{r.tc.reqs[0].AudioTrack, r.tc.reqs[1].AudioTrack}; got[0] != app.DefaultAudioTrack || got[1] != 1 {
+		t.Errorf("tracks asked for = %v", got)
+	}
+
+	// Segments are found under the track they belong to.
+	if _, err := r.svc.File("a", 1, "seg00000.ts"); err != nil {
+		t.Errorf("File(track 1) error = %v", err)
+	}
+	if _, err := r.svc.File("a", 2, "seg00000.ts"); !errors.Is(err, ErrNotStarted) {
+		t.Errorf("File(track 2) error = %v, want ErrNotStarted", err)
+	}
+}
+
+func TestSlots_SwitchingLanguageReplacesTheTrackJustLeft(t *testing.T) {
+	r := newRig(testOpts) // two slots
+	ctx := context.Background()
+	for _, track := range []int{app.DefaultAudioTrack, 1} {
+		if _, err := r.svc.Playlist(ctx, "a", track); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.clk.advance(2 * time.Second) // both in use a moment ago: nothing else would give way
+
+	if _, err := r.svc.Playlist(ctx, "a", 2); err != nil {
+		t.Fatalf("a third language: error = %v", err)
+	}
+	if got := r.tc.stream(0).stops() + r.tc.stream(1).stops(); got != 1 {
+		t.Errorf("stopped %d of the video's other tracks, want 1", got)
+	}
+	if r.svc.Running() != 2 {
+		t.Errorf("running = %d", r.svc.Running())
+	}
+}
+
+func TestSlots_AnotherVideoStillCannotCutOffAWatchedOne(t *testing.T) {
+	r := newRig(testOpts)
+	ctx := context.Background()
+	_, _ = r.svc.Playlist(ctx, "a", 1)
+	_, _ = r.svc.Playlist(ctx, "a", 2)
+	r.clk.advance(2 * time.Second)
+	if _, err := r.svc.Playlist(ctx, "b", app.DefaultAudioTrack); !errors.Is(err, ErrBusy) {
+		t.Fatalf("error = %v, want ErrBusy", err)
+	}
+}
+
+func TestPlaylist_ADiskThatIsTooFullIsReportedAndAskedAgain(t *testing.T) {
+	r := newRig(testOpts)
+	ctx := context.Background()
+	r.tc.startErr = app.ErrNotEnoughDiskSpace
+	for range 2 {
+		if _, err := r.svc.Playlist(ctx, "a", app.DefaultAudioTrack); !errors.Is(err, app.ErrNotEnoughDiskSpace) {
+			t.Fatalf("error = %v, want ErrNotEnoughDiskSpace", err)
+		}
+	}
+	if r.svc.Running() != 0 {
+		t.Errorf("running = %d: a refused conversion took a slot", r.svc.Running())
+	}
+
+	// Space was freed: the same request now works, nothing was remembered.
+	r.tc.startErr = nil
+	if _, err := r.svc.Playlist(ctx, "a", app.DefaultAudioTrack); err != nil {
+		t.Fatalf("after freeing space: error = %v", err)
 	}
 }

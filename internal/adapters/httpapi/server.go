@@ -40,6 +40,7 @@ type Server struct {
 	version string
 	log     *slog.Logger
 
+	tracks   Tracks   // nil: no track lists
 	profiles Profiles // nil: no profile rules
 	resume   Resume   // nil: no server-side resume
 }
@@ -65,6 +66,14 @@ func WithDLNA(uuid string) Option {
 // route answers "not found" and the player page only plays files as they are.
 func WithTranscoding(t Transcoding) Option {
 	return func(s *Server) { s.hls = t }
+}
+
+// WithTracks lists the audio and subtitle tracks inside videos, at
+// /api/library/{id}/tracks, and serves embedded subtitles at
+// /subtitle/{id}/embedded/{n}. Without it the player page offers no choice of
+// tracks.
+func WithTracks(t Tracks) Option {
+	return func(s *Server) { s.tracks = t }
 }
 
 // WithProfiles puts the profile rules in front of the library: who may see what,
@@ -206,7 +215,7 @@ func addrStrings(addrs []netip.AddrPort) []string {
 
 // newAPI builds the handler state for one run.
 func (s *Server) newAPI(cfg app.ServeConfig) *api {
-	a := &api{lib: s.lib, access: s.access, remote: s.remote, thumbs: s.thumbs, hls: s.hls,
+	a := &api{lib: s.lib, access: s.access, remote: s.remote, thumbs: s.thumbs, hls: s.hls, tracks: s.tracks,
 		profiles: s.profiles, resume: s.resume, version: s.version, name: cfg.Name, log: s.log}
 	if cfg.DLNA && s.dlnaID != "" {
 		// A TV cannot say who is watching, so it lists only libraries marked

@@ -669,3 +669,22 @@ func TestSetFFmpegPath(t *testing.T) {
 		t.Errorf("a failed save must change nothing: err=%v path=%q", err, s.Get().FFmpegPath)
 	}
 }
+
+func TestHardwareEncoding_IsOnByDefaultAndTheChoiceIsKept(t *testing.T) {
+	if !Default().HardwareEncoding {
+		t.Fatal("Default().HardwareEncoding = false: the chip is safe to use, because a failing one falls back")
+	}
+	s := newServiceWithLoginItem(existingInstall(), &fakeLoginItem{})
+	in := Input{Port: 8765, Name: "EinCast", KeepAwake: true, HardwareEncoding: false}
+	view, err := s.Update(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.HardwareEncoding || s.Get().HardwareEncoding {
+		t.Error("turning it off did not stick")
+	}
+	in.HardwareEncoding = true
+	if view, err = s.Update(in); err != nil || !view.HardwareEncoding {
+		t.Errorf("turning it on: view = %+v, err = %v", view, err)
+	}
+}

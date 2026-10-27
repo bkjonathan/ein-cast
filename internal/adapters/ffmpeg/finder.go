@@ -19,6 +19,14 @@ func WithChosenPath(chosen func() string) Option {
 	return func(f *finder) { f.chosen = chosen }
 }
 
+// WithHardwareEncoding lets conversions use the computer's video chip when
+// ffmpeg can. on is asked every time, so a change in Settings applies to the
+// next conversion without a restart. Without this option only the processor is
+// used.
+func WithHardwareEncoding(on func() bool) Option {
+	return func(f *finder) { f.hardwareOn = on }
+}
+
 // finder locates the ffmpeg program and remembers where it was found.
 type finder struct {
 	log *slog.Logger
@@ -27,6 +35,8 @@ type finder struct {
 	// chosen returns the location the person set, or "". Nil when there is no
 	// such setting.
 	chosen func() string
+	// hardwareOn says whether to use the video chip; nil means no.
+	hardwareOn func() bool
 
 	mu   sync.Mutex
 	path string // the program, once found by searching

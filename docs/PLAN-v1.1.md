@@ -125,15 +125,17 @@ Goal: the household use case. Needs a design decision first (ROADMAP already say
 
 Goal: the "it just plays" promise holds for the common failures.
 
-- [ ] **17.1 hls.js for Chrome/Firefox/Edge (M).** Vendor `hls.js` into `web/` (CSP line, version pinned in the ADR). Change `canPlayHLS()` so desktop browsers get converted streams too. Biggest win per hour in this phase.
-- [ ] **17.2 Embedded subtitle extraction (M).** ffmpeg extracts text tracks (SRT/ASS) from MKV into the cache, served as WebVTT like sidecars. Image subtitles (PGS) stay unsupported and the UI says so.
-- [ ] **17.3 Audio track picker (M).** Expose the probe's stream list per item; let the player choose audio. HLS session gets an audio-stream argument.
-- [ ] **17.4 Hardware encoding (M).** macOS VideoToolbox first (`h264_videotoolbox`), then NVENC/QuickSync on Windows behind the existing `hlsArgs` plan branches, with automatic fallback to `libx264` if the encoder fails. Setting "Use hardware acceleration" (default on).
-- [ ] **17.5 Disk safety for conversions (S).** Free-space check before starting an encode; refuse with a clear message instead of filling the disk.
+- [x] **17.1 hls.js for Chrome/Firefox/Edge (M).** Vendor `hls.js` into `web/` (CSP line, version pinned in the ADR). Change `canPlayHLS()` so desktop browsers get converted streams too. Biggest win per hour in this phase.
+- [x] **17.2 Embedded subtitle extraction (M).** ffmpeg extracts text tracks (SRT/ASS) from MKV into the cache, served as WebVTT like sidecars. Image subtitles (PGS) stay unsupported and the UI says so.
+- [x] **17.3 Audio track picker (M).** Expose the probe's stream list per item; let the player choose audio. HLS session gets an audio-stream argument.
+- [x] **17.4 Hardware encoding (M).** macOS VideoToolbox first (`h264_videotoolbox`), then NVENC/QuickSync on Windows behind the existing `hlsArgs` plan branches, with automatic fallback to `libx264` if the encoder fails. Setting "Use hardware acceleration" (default on).
+- [x] **17.5 Disk safety for conversions (S).** Free-space check before starting an encode; refuse with a clear message instead of filling the disk.
 - [ ] **17.6 Conversion limits as settings (S).** Expose `DefaultOptions` (concurrent conversions, idle timeout).
 - [ ] **17.7 Fallback for TVs over DLNA (S, optional).** Document that DLNA plays original files only; point TVs that can't decode a file to the TV's browser/the player page.
 
-**Done when:** an MKV with HEVC plays with the right audio language and subtitles in Chrome on Windows, Safari on iPhone, and the TV browser, with matrix results recorded.
+**Progress note (Phase 17):** built 17.1–17.5 (ADRs 0031 and 0032; the plan's "ADR 0028" for this phase was already taken by i18n, so these two are the next free numbers). 17.6 and 17.7 are not built. Run for real: Firefox 158 and Chrome 156 on macOS, VideoToolbox on Apple silicon. Not run: Windows, Safari, iPhone, a TV browser, NVENC, QuickSync.
+
+**Done when:** an MKV with HEVC plays with the right audio language and subtitles in Chrome on Windows, Safari on iPhone, and the TV browser, with matrix results recorded. *(Not yet: the macOS half of this is checked, the rest is in [TESTING-DEVICES.md](TESTING-DEVICES.md).)*
 
 ---
 

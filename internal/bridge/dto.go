@@ -263,46 +263,49 @@ func toRemoteFieldStateDTOs(in []app.FieldState) []RemoteFieldStateDTO {
 // token is switched on; TokenPersisted is false when it could not be saved to
 // the system credential store.
 type SettingsDTO struct {
-	Port           int    `json:"port"`
-	Name           string `json:"name"`
-	RequireToken   bool   `json:"requireToken"`
-	DLNA           bool   `json:"dlna"`
-	AutoStart      bool   `json:"autoStart"`
-	KeepAwake      bool   `json:"keepAwake"`
-	OpenAtLogin    bool   `json:"openAtLogin"`
-	HideOnClose    bool   `json:"hideOnClose"`
-	FFmpegPath     string `json:"ffmpegPath"`
-	AccessToken    string `json:"accessToken"`
-	TokenPersisted bool   `json:"tokenPersisted"`
+	Port             int    `json:"port"`
+	Name             string `json:"name"`
+	RequireToken     bool   `json:"requireToken"`
+	DLNA             bool   `json:"dlna"`
+	AutoStart        bool   `json:"autoStart"`
+	KeepAwake        bool   `json:"keepAwake"`
+	OpenAtLogin      bool   `json:"openAtLogin"`
+	HideOnClose      bool   `json:"hideOnClose"`
+	FFmpegPath       string `json:"ffmpegPath"`
+	HardwareEncoding bool   `json:"hardwareEncoding"`
+	AccessToken      string `json:"accessToken"`
+	TokenPersisted   bool   `json:"tokenPersisted"`
 }
 
 func toSettingsDTO(v app.SettingsView) SettingsDTO {
 	return SettingsDTO{
-		Port:           v.Port,
-		Name:           v.Name,
-		RequireToken:   v.RequireToken,
-		DLNA:           v.DLNA,
-		AutoStart:      v.AutoStart,
-		KeepAwake:      v.KeepAwake,
-		OpenAtLogin:    v.OpenAtLogin,
-		HideOnClose:    v.HideOnClose,
-		FFmpegPath:     v.FFmpegPath,
-		AccessToken:    v.Token,
-		TokenPersisted: v.TokenPersisted,
+		Port:             v.Port,
+		Name:             v.Name,
+		RequireToken:     v.RequireToken,
+		DLNA:             v.DLNA,
+		AutoStart:        v.AutoStart,
+		KeepAwake:        v.KeepAwake,
+		OpenAtLogin:      v.OpenAtLogin,
+		HideOnClose:      v.HideOnClose,
+		FFmpegPath:       v.FFmpegPath,
+		HardwareEncoding: v.HardwareEncoding,
+		AccessToken:      v.Token,
+		TokenPersisted:   v.TokenPersisted,
 	}
 }
 
 // SettingsInputDTO is what the Settings form sends back. The library folder and
 // the token itself are not editable here.
 type SettingsInputDTO struct {
-	Port         int    `json:"port"`
-	Name         string `json:"name"`
-	RequireToken bool   `json:"requireToken"`
-	DLNA         bool   `json:"dlna"`
-	AutoStart    bool   `json:"autoStart"`
-	KeepAwake    bool   `json:"keepAwake"`
-	OpenAtLogin  bool   `json:"openAtLogin"`
-	HideOnClose  bool   `json:"hideOnClose"`
+	Port             int    `json:"port"`
+	Name             string `json:"name"`
+	RequireToken     bool   `json:"requireToken"`
+	DLNA             bool   `json:"dlna"`
+	AutoStart        bool   `json:"autoStart"`
+	KeepAwake        bool   `json:"keepAwake"`
+	OpenAtLogin      bool   `json:"openAtLogin"`
+	HideOnClose      bool   `json:"hideOnClose"`
+	HardwareEncoding bool   `json:"hardwareEncoding"`
 }
 
 // FFmpegStatusDTO says where ffmpeg is. Chosen is the location the person set,

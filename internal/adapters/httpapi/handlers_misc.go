@@ -15,6 +15,9 @@ type healthJSON struct {
 	// Transcoding tells the player page whether /hls/{id}/… can convert videos a
 	// device cannot play as they are.
 	Transcoding bool `json:"transcoding"`
+	// Tracks tells the player page whether /api/library/{id}/tracks can list the
+	// audio and subtitle tracks inside a video.
+	Tracks bool `json:"tracks"`
 }
 
 func (a *api) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -22,6 +25,7 @@ func (a *api) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Status: "ok", Version: a.version, Name: a.name,
 		Thumbnails:  a.thumbs != nil && a.thumbs.Available(),
 		Transcoding: a.hls != nil && a.hls.Available(),
+		Tracks:      a.tracks != nil && a.tracks.Available(),
 	})
 }
 

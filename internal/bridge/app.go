@@ -471,6 +471,7 @@ func (a *App) UpdateSettings(in SettingsInputDTO) error {
 	_, err := a.settings.Update(settings.Input{
 		Port: in.Port, Name: in.Name, RequireToken: in.RequireToken, DLNA: in.DLNA,
 		AutoStart: in.AutoStart, KeepAwake: in.KeepAwake, OpenAtLogin: in.OpenAtLogin, HideOnClose: in.HideOnClose,
+		HardwareEncoding: in.HardwareEncoding,
 	})
 	return err
 }

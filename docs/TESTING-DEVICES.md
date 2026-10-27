@@ -72,6 +72,13 @@ These are not device rows but belong to the same reality check.
 |---|---|---|
 | 13.4 Windows 11: install, start, firewall prompt, Free a port, Mica look, uninstall | real Windows machine | not run |
 | 16 Profiles: pick Kids on an iPad (no PIN), Adults with a PIN on a phone; confirm the kids' iPad cannot see, search, stream, get a playlist entry or HLS for adult titles, and that "Continue watching" follows a profile between phone and TV browser | iPad, phone, TV browser | not run |
+| 17 HEVC MKV with two audio languages and embedded subtitles, played from the matrix devices: the Audio and Subtitles menus list the tracks, the chosen language is heard, the chosen subtitle shows, switching audio mid-film resumes within a few seconds | Windows Chrome and Edge, Firefox, iPhone Safari, iPad Safari, a TV browser | macOS Chrome 156 and Firefox 158.0.1: **done** on a 40 s file (native, and hls.js). All others: not run |
+| 17 hls.js on a TV browser: does the page play a converted MKV at all (Media Source Extensions vary), and does the Subtitles menu work with the remote | a TV browser | not run |
+| 17 NVENC: the "video encoder failed" line is absent from the log and the conversion is faster than with Hardware acceleration off | Windows with an NVIDIA card | not run |
+| 17 QuickSync: same, on an Intel iGPU; and a Windows computer with neither confirms the fallback to `libx264` (log line, video still plays) | Windows, Intel and neither | not run |
+| 17 VideoToolbox on an Intel Mac and a long film (an hour or more): quality and speed with Hardware acceleration on and off | an Intel Mac | Apple silicon, 14 s and 40 s files: **done**; long film: not run |
+| 17 Low disk: with the cache disk nearly full, pressing play on an MKV shows the "not enough free disk space" message and no ffmpeg runs | any machine, a small volume | page message **done** (stand-in server); real full disk: not run |
+| 17 Embedded subtitle on a network share: the first read of a big MKV's subtitle (seconds to a minute) and that the picker is usable meanwhile | a NAS or SMB share | not run |
 | 16 Smart TV with profiles: a library marked "not shown to TVs" does not appear in the TV's browse list or play by a remembered ID | a real TV or VLC's UPnP list | not run |
 | 14.6 Keep awake: `pmset -g assertions` shows `caffeinate` while sharing (macOS); `powercfg /requests` shows EinCast (Windows); gone after Stop | real machines | macOS: not run on a Mac laptop; Windows: not run |
 | 14.7 Windows tray icon: Open / Quit, close-to-tray, relaunch shows the window | real Windows machine | not run |

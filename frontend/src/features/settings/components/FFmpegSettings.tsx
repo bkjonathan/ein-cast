@@ -1,19 +1,26 @@
 import { Check, CircleCheck, Clapperboard, Copy, FolderSearch, RefreshCw } from "lucide-react";
 import { useCopy } from "@/shared/hooks/useCopy";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
+import { Switch } from "@/shared/ui/Switch";
+import { inputFrom } from "../dirty";
 import { useFFmpeg } from "../hooks/useFFmpeg";
+import { useSettingsCommands } from "../hooks/useSettingsCommands";
 import { useSettingsStore } from "../store";
+import { hardwareEncodingRow } from "../conversion";
 
 /**
- * ffmpeg makes the pictures in the library and converts videos that iPhones and
- * iPads can't play (MKV, HEVC). EinCast doesn't ship it, so this says whether it
+ * ffmpeg makes the pictures in the library, converts videos that iPhones, iPads
+ * and browsers can't play (MKV, HEVC) and reads the audio and subtitle tracks
+ * inside them. EinCast doesn't ship it, so this says whether it
  * was found and, if not, what it would unlock and how to get it.
  */
 export function FFmpegSettings() {
-  const chosen = useSettingsStore((s) => s.settings?.ffmpegPath ?? null);
+  const saved = useSettingsStore((s) => s.settings);
+  const chosen = saved?.ffmpegPath ?? null;
   const { status, pending, error, recheck, locate, useAutomatic } = useFFmpeg(chosen ?? "");
   const { copied, copy } = useCopy();
-  if (chosen === null || !status) return null;
+  const settingsCommands = useSettingsCommands();
+  if (saved === null || chosen === null || !status) return null;
 
   return (
     <GlassPanel className="flex flex-col gap-4 p-6">
@@ -56,6 +63,21 @@ export function FFmpegSettings() {
         </div>
       )}
 
+      {status.available && (
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">{hardwareEncodingRow.title}</p>
+            <p className="text-xs text-muted-foreground">{hardwareEncodingRow.help}</p>
+          </div>
+          <Switch
+            checked={saved.hardwareEncoding}
+            label={hardwareEncodingRow.title}
+            disabled={settingsCommands.pending}
+            onChange={(next) => void settingsCommands.save(inputFrom(saved, { hardwareEncoding: next }))}
+          />
+        </div>
+      )}
+
       {status.chosen && (
         <p className="text-xs text-muted-foreground">
           Your choice: <span className="font-mono break-all select-text">{status.chosen}</span>
@@ -76,9 +98,9 @@ export function FFmpegSettings() {
         )}
       </div>
 
-      {error && (
+      {(error ?? settingsCommands.error) && (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {error ?? settingsCommands.error}
         </p>
       )}
     </GlassPanel>

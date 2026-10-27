@@ -22,6 +22,7 @@ type api struct {
 	remote Remote
 	thumbs Thumbnails
 	hls    Transcoding
+	tracks Tracks // nil: no audio or subtitle tracks are read from videos
 	// profiles and resume are nil when profiles are not wired in; then every
 	// request sees the whole library, as before profiles existed.
 	profiles Profiles
@@ -43,8 +44,11 @@ func (a *api) routes() http.Handler {
 	mux.HandleFunc("GET /api/library/{id}", a.handleLibraryItem)
 	mux.HandleFunc("GET /stream/{id}", a.handleStream)
 	mux.HandleFunc("GET /thumb/{id}", a.handleThumbnail)
+	mux.HandleFunc("GET /api/library/{id}/tracks", a.handleTracks)
 	mux.HandleFunc("GET /hls/{id}/{file}", a.handleHLS)
+	mux.HandleFunc("GET /hls/{id}/audio/{track}/{file}", a.handleHLS)
 	mux.HandleFunc("GET /subtitle/{id}/{track}", a.handleSubtitle)
+	mux.HandleFunc("GET /subtitle/{id}/embedded/{track}", a.handleEmbeddedSubtitle)
 	mux.HandleFunc("GET /playlist.m3u", a.handlePlaylist)
 	mux.HandleFunc("GET /api/profiles", a.handleProfiles)
 	mux.HandleFunc("POST /api/profile", a.handleChooseProfile)

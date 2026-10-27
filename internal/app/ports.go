@@ -78,12 +78,24 @@ var ErrTranscodingUnavailable = errors.New("converting video needs ffmpeg, which
 // ErrNotConvertible means ffmpeg could not turn a file into a playable stream.
 var ErrNotConvertible = errors.New("this video could not be converted")
 
+// ErrNotEnoughDiskSpace means a conversion was refused because the disk that
+// holds its temporary files is too full: a long film would fill it.
+var ErrNotEnoughDiskSpace = errors.New("there is not enough free disk space to convert this video")
+
+// DefaultAudioTrack asks for the audio stream the file itself marks as the
+// default one (the first, when none is marked).
+const DefaultAudioTrack = -1
+
 // TranscodeRequest asks for one video to be converted for streaming.
 type TranscodeRequest struct {
 	// Root is the library folder; Path must resolve inside it.
 	Root string
 	// Path is the video file on disk.
 	Path string
+	// AudioTrack is the position of the audio stream to use among the file's
+	// audio streams, or DefaultAudioTrack. Mind that the zero value is the
+	// first stream, not the default one.
+	AudioTrack int
 }
 
 // HLSStream is one video being converted into an HLS stream (a playlist plus
@@ -116,6 +128,89 @@ type Transcoder interface {
 	// background until the stream ends or is stopped. ctx governs only this call,
 	// not the conversion.
 	Start(ctx context.Context, req TranscodeRequest) (HLSStream, error)
+}
+
+// StreamProbe asks about the streams inside one video file.
+type StreamProbe struct {
+	// Root is the library folder; Path must resolve inside it.
+	Root string
+	// Path is the video file on disk.
+	Path string
+}
+
+// AudioStream is one audio track of a video.
+type AudioStream struct {
+	// Index is the track's position among the file's audio streams, which is what
+	// a conversion is asked for.
+	Index int
+	// Language is the file's own tag, usually an ISO 639-2 code such as "eng".
+	Language string
+	Title    string
+	Codec    string
+	Channels int
+	// Default marks the track a player would pick on its own.
+	Default bool
+}
+
+// SubtitleStream is one subtitle track stored inside a video.
+type SubtitleStream struct {
+	// Index is the track's position among the file's subtitle streams.
+	Index    int
+	Language string
+	Title    string
+	Codec    string
+	// Text says the track is made of text and so can be served as WebVTT. Image
+	// tracks (Blu-ray PGS, DVD) cannot be, without recognising the pictures.
+	Text    bool
+	Default bool
+}
+
+// Streams is what a video file holds besides its picture.
+type Streams struct {
+	Audio     []AudioStream
+	Subtitles []SubtitleStream
+}
+
+// StreamProber lists the audio and subtitle tracks inside a video.
+type StreamProber interface {
+	// Available reports whether Probe can work at all on this computer.
+	Available() bool
+	// Probe reads the tracks of a video.
+	Probe(ctx context.Context, req StreamProbe) (Streams, error)
+}
+
+// ErrNoSubtitleTrack means the video has no subtitle track at that position, or
+// the track is not made of text.
+var ErrNoSubtitleTrack = errors.New("no such text subtitle track")
+
+// ErrSubtitlesUnavailable means this computer cannot read subtitles out of a
+// video, because the tool that does it (ffmpeg) is not installed.
+var ErrSubtitlesUnavailable = errors.New("reading subtitles from a video needs ffmpeg, which was not found")
+
+// SubtitleExtraction asks for one subtitle track of a video as WebVTT.
+type SubtitleExtraction struct {
+	// Root is the library folder; Path must resolve inside it.
+	Root string
+	// Path is the video file on disk.
+	Path string
+	// Index is the track's position among the file's subtitle streams.
+	Index int
+}
+
+// SubtitleExtractor reads a text subtitle track out of a video.
+type SubtitleExtractor interface {
+	// Extract returns the track as WebVTT. ErrNoSubtitleTrack and
+	// ErrSubtitlesUnavailable are the expected failures.
+	Extract(ctx context.Context, req SubtitleExtraction) ([]byte, error)
+}
+
+// SubtitleCache keeps extracted subtitles between runs: finding a track means
+// reading the whole video, which should happen once.
+type SubtitleCache interface {
+	// Get returns the stored subtitle under key, if there is one.
+	Get(key string) ([]byte, bool)
+	// Put stores a subtitle. A failure only means it will be extracted again.
+	Put(key string, data []byte) error
 }
 
 // LibraryRepo holds the items of every library. It is a snapshot store: a scan
@@ -293,6 +388,10 @@ type Settings struct {
 	HideOnClose bool
 	// FFmpegPath is where the person said ffmpeg is. Empty means "look for it".
 	FFmpegPath string
+	// HardwareEncoding lets the computer's video chip do the converting when
+	// ffmpeg can use it. It is on by default and falls back to the processor by
+	// itself when the chip does not work.
+	HardwareEncoding bool
 }
 
 // PowerGuard keeps the computer from sleeping on its own while something needs

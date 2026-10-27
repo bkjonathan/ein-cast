@@ -1,4 +1,7 @@
-// Package thumbcache is a folder-backed app.ThumbnailCache.
+// Package thumbcache is a folder-backed cache of small generated files. It is
+// an app.ThumbnailCache, and with WithFiles it also keeps extracted subtitles
+// (an app.SubtitleCache): the two have the same needs, a file per key that is
+// made once and forgotten after a while.
 package thumbcache
 
 import (
@@ -11,16 +14,32 @@ import (
 	"time"
 )
 
-// Cache stores each thumbnail as a file named after its key.
+// Cache stores each item as a file named after its key.
 type Cache struct {
-	dir string
-	log *slog.Logger
+	dir  string
+	ext  string // with the dot
+	noun string // for messages
+	log  *slog.Logger
+}
+
+// Option customizes a Cache.
+type Option func(*Cache)
+
+// WithFiles says what the cache holds: what to call one in messages, and the
+// extension of its files. Without it a Cache holds thumbnails (".jpg").
+func WithFiles(noun, ext string) Option {
+	return func(c *Cache) { c.noun, c.ext = noun, ext }
 }
 
 // New returns a Cache that keeps files in dir. The folder is created on first
 // use; nothing is touched until then.
-func New(dir string, log *slog.Logger) *Cache {
-	return &Cache{dir: dir, log: log.With(slog.String("source", "thumbnails"))}
+func New(dir string, log *slog.Logger, opts ...Option) *Cache {
+	c := &Cache{dir: dir, ext: ".jpg", noun: "thumbnail"}
+	for _, opt := range opts {
+		opt(c)
+	}
+	c.log = log.With(slog.String("source", c.noun+"s"))
+	return c
 }
 
 // validKey allows only what is safe in a file name on every platform. Keys come
@@ -39,9 +58,9 @@ func validKey(key string) bool {
 	return true
 }
 
-func (c *Cache) file(key string) string { return filepath.Join(c.dir, key+".jpg") }
+func (c *Cache) file(key string) string { return filepath.Join(c.dir, key+c.ext) }
 
-// Get returns the stored thumbnail, or false for a miss or an unreadable file.
+// Get returns the stored file, or false for a miss or an unreadable file.
 func (c *Cache) Get(key string) ([]byte, bool) {
 	if !validKey(key) {
 		return nil, false
@@ -49,40 +68,40 @@ func (c *Cache) Get(key string) ([]byte, bool) {
 	data, err := os.ReadFile(c.file(key))
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			c.log.Warn("could not read a cached thumbnail", slog.String("error", err.Error()))
+			c.log.Warn("could not read a cached "+c.noun, slog.String("error", err.Error()))
 		}
 		return nil, false
 	}
 	return data, len(data) > 0
 }
 
-// Put stores a thumbnail. It writes a temporary file and renames it, so a
+// Put stores a file. It writes a temporary file and renames it, so a
 // crash or a second writer never leaves half a picture under the real name.
 func (c *Cache) Put(key string, data []byte) error {
 	if !validKey(key) {
-		return fmt.Errorf("thumbnail cache: bad key %q", key)
+		return fmt.Errorf("%s cache: bad key %q", c.noun, key)
 	}
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
-		return fmt.Errorf("create thumbnail folder: %w", err)
+		return fmt.Errorf("create %s folder: %w", c.noun, err)
 	}
 	tmp, err := os.CreateTemp(c.dir, "put-*.tmp")
 	if err != nil {
-		return fmt.Errorf("write thumbnail: %w", err)
+		return fmt.Errorf("write %s: %w", c.noun, err)
 	}
 	_, werr := tmp.Write(data)
 	cerr := tmp.Close()
 	if err := errors.Join(werr, cerr); err != nil {
 		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("write thumbnail: %w", err)
+		return fmt.Errorf("write %s: %w", c.noun, err)
 	}
 	if err := os.Rename(tmp.Name(), c.file(key)); err != nil {
 		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("store thumbnail: %w", err)
+		return fmt.Errorf("store %s: %w", c.noun, err)
 	}
 	return nil
 }
 
-// Prune deletes thumbnails not written for maxAge, and returns how many. A
+// Prune deletes files not written for maxAge, and returns how many. A
 // changed file gets a new key, so the old picture would otherwise stay forever;
 // one still in use is simply made again.
 func (c *Cache) Prune(maxAge time.Duration) int {
@@ -105,7 +124,7 @@ func (c *Cache) Prune(maxAge time.Duration) int {
 		}
 	}
 	if removed > 0 {
-		c.log.Info("removed old thumbnails", slog.Int("count", removed))
+		c.log.Info("removed old "+c.noun+"s", slog.Int("count", removed))
 	}
 	return removed
 }

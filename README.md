@@ -61,9 +61,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full route table.
 
 Thumbnails are made with `ffmpeg` if it is installed (for example `brew install ffmpeg`); without it EinCast shows icons instead. They are cached in `~/Library/Caches/EinCast/thumbs` (macOS) or `%LocalAppData%\EinCast\thumbs` (Windows) and are safe to delete. The Light/Dark/System choice is remembered by the app window itself.
 
-Subtitles: put `.srt` (or `.vtt`) files next to the video with the same name, optionally with a language, e.g. `Film.mkv` and `Film.en.srt`. Pick one in the player's menu.
+Subtitles: put `.srt` (or `.vtt`) files next to the video with the same name, optionally with a language, e.g. `Film.mkv` and `Film.en.srt`. Pick one in the player's menu. Text subtitles stored inside an MKV or MP4 are listed too (needs `ffmpeg`); picture subtitles (Blu-ray, DVD) are listed but can't be shown. A video with several audio languages gets an Audio menu on its page.
 
-Videos a device can't play as they are (MKV, AVI, HEVC…) are converted on the fly with `ffmpeg` for Safari, iPhone, iPad and TVs that play HLS. Conversions are temporary files in `~/Library/Caches/EinCast/hls` (macOS) or `%LocalAppData%\EinCast\hls` (Windows), deleted when you stop watching and when EinCast quits.
+Videos a device can't play as they are (MKV, AVI, HEVC…) are converted on the fly with `ffmpeg` for Safari, iPhone, iPad, Firefox (through the bundled hls.js) and TVs that play HLS. The computer's video chip does the work when it can (Settings → ffmpeg → Use hardware acceleration, on by default), and EinCast refuses to start a conversion that would fill the disk. Conversions are temporary files in `~/Library/Caches/EinCast/hls` (macOS) or `%LocalAppData%\EinCast\hls` (Windows), deleted when you stop watching and when EinCast quits.
 
 Smart TVs (Settings → Smart TVs) is off by default. A TV can't send the access token, so while it is on the whole library is visible, without a password, to everyone on your network; it can't be on together with the access token.
 

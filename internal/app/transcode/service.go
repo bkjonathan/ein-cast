@@ -58,7 +58,14 @@ var DefaultOptions = Options{
 	SweepEvery:   15 * time.Second,
 }
 
-// Service owns the running conversions, one per video.
+// key names one conversion: a video with one of its audio tracks. Two people
+// watching the same film in different languages need two conversions.
+type key struct {
+	id    media.ID
+	audio int // app.DefaultAudioTrack, or a position among the file's audio streams
+}
+
+// Service owns the running conversions, one per video and audio track.
 type Service struct {
 	items Items
 	tc    app.Transcoder
@@ -67,7 +74,7 @@ type Service struct {
 	now   func() time.Time // a field so tests control time
 
 	mu       sync.Mutex
-	sessions map[media.ID]*session
+	sessions map[key]*session
 }
 
 // session is one video's conversion and when it was last used.
@@ -97,7 +104,7 @@ func NewService(items Items, tc app.Transcoder, log *slog.Logger, opts Options) 
 		log:      log.With(slog.String("source", "transcode")),
 		opts:     opts,
 		now:      time.Now,
-		sessions: make(map[media.ID]*session),
+		sessions: make(map[key]*session),
 	}
 }
 
@@ -106,12 +113,14 @@ func (s *Service) Available() bool {
 	return s.tc.Available()
 }
 
-// Playlist returns the HLS playlist of a video, starting the conversion if none
-// is running and waiting until playback can begin. Errors: media.ErrNotFound,
-// app.ErrTranscodingUnavailable, ErrBusy, and app.ErrNotConvertible (wrapped,
-// with the reason) when ffmpeg could not do it.
-func (s *Service) Playlist(ctx context.Context, id media.ID) (io.ReadSeekCloser, error) {
-	sess, err := s.acquire(ctx, id)
+// Playlist returns the HLS playlist of a video with one of its audio tracks
+// (app.DefaultAudioTrack for the file's own choice), starting the conversion if
+// none is running and waiting until playback can begin. Errors:
+// media.ErrNotFound, app.ErrTranscodingUnavailable, app.ErrNotEnoughDiskSpace,
+// ErrBusy, and app.ErrNotConvertible (wrapped, with the reason) when ffmpeg
+// could not do it.
+func (s *Service) Playlist(ctx context.Context, id media.ID, audio int) (io.ReadSeekCloser, error) {
+	sess, err := s.acquire(ctx, key{id, audio})
 	if err != nil {
 		return nil, err
 	}
@@ -124,9 +133,9 @@ func (s *Service) Playlist(ctx context.Context, id media.ID) (io.ReadSeekCloser,
 // File returns one output file (a segment, or the playlist again) of a
 // conversion that is already running. It never starts one: a player asking for
 // a segment of a conversion that was cleaned up should fetch the playlist again.
-func (s *Service) File(id media.ID, name string) (io.ReadSeekCloser, error) {
+func (s *Service) File(id media.ID, audio int, name string) (io.ReadSeekCloser, error) {
 	s.mu.Lock()
-	sess, ok := s.sessions[id]
+	sess, ok := s.sessions[key{id, audio}]
 	if ok && !sess.failed() {
 		sess.lastUse = s.now()
 	}
@@ -138,18 +147,18 @@ func (s *Service) File(id media.ID, name string) (io.ReadSeekCloser, error) {
 }
 
 // acquire returns the video's running conversion, starting one if needed.
-func (s *Service) acquire(ctx context.Context, id media.ID) (*session, error) {
-	it, err := s.items.Get(id)
+func (s *Service) acquire(ctx context.Context, k key) (*session, error) {
+	it, err := s.items.Get(k.id)
 	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if sess, ok := s.sessions[id]; ok {
+	if sess, ok := s.sessions[k]; ok {
 		switch {
 		case !sess.modTime.Equal(it.ModTime):
-			s.drop(id, sess, "the file changed") // converted from an older version
+			s.drop(k, sess, "the file changed") // converted from an older version
 		case sess.failed():
 			// Handed back as it is until it is cleaned up, so a file ffmpeg cannot
 			// read costs one process, not one per request.
@@ -163,34 +172,46 @@ func (s *Service) acquire(ctx context.Context, id media.ID) (*session, error) {
 	if !s.tc.Available() {
 		return nil, app.ErrTranscodingUnavailable
 	}
-	if len(s.sessions) >= s.opts.MaxStreams && !s.makeRoom() {
+	if len(s.sessions) >= s.opts.MaxStreams && !s.makeRoom(k) {
 		return nil, ErrBusy
 	}
-	stream, err := s.tc.Start(ctx, app.TranscodeRequest{Root: it.Root, Path: it.Path})
+	stream, err := s.tc.Start(ctx, app.TranscodeRequest{Root: it.Root, Path: it.Path, AudioTrack: k.audio})
 	if err != nil {
 		return nil, fmt.Errorf("start converting %q: %w", it.Name, err)
 	}
 	now := s.now()
 	sess := &session{stream: stream, modTime: it.ModTime, lastUse: now, started: now}
-	s.sessions[id] = sess
-	s.log.Info("converting for streaming", slog.String("name", it.Name), slog.Int("running", len(s.sessions)))
+	s.sessions[k] = sess
+	s.log.Info("converting for streaming", slog.String("name", it.Name), slog.Int("audio_track", k.audio), slog.Int("running", len(s.sessions)))
 	return sess, nil
 }
 
-// makeRoom frees a slot by stopping the conversion that has been idle longest,
-// if it has been idle long enough. Failed ones go first: they serve nobody.
-// Must be called with mu held.
-func (s *Service) makeRoom() bool {
-	var victim media.ID
+// makeRoom frees a slot for the conversion wanted, by stopping the one that is
+// least likely to be missed. Failed ones go first: they serve nobody. Then
+// another audio track of the same video, however recently used: a person who
+// switches language has left the old track, and without this a film with three
+// languages would lock its own viewer out for half a minute. Last, whichever
+// conversion has been idle longest, if it has been idle long enough. Must be
+// called with mu held.
+func (s *Service) makeRoom(wanted key) bool {
+	var victim key
 	var oldest time.Time
+	rank := 0 // 1: idle long enough, 2: another track of the wanted video, 3: failed
 	found := false
-	for id, sess := range s.sessions {
-		idle := s.now().Sub(sess.lastUse)
-		if !sess.failed() && idle < s.opts.ReplaceAfter {
+	for k, sess := range s.sessions {
+		r := 0
+		switch {
+		case sess.failed():
+			r = 3
+		case k.id == wanted.id:
+			r = 2
+		case s.now().Sub(sess.lastUse) >= s.opts.ReplaceAfter:
+			r = 1
+		default:
 			continue
 		}
-		if !found || sess.lastUse.Before(oldest) {
-			victim, oldest, found = id, sess.lastUse, true
+		if !found || r > rank || (r == rank && sess.lastUse.Before(oldest)) {
+			victim, oldest, rank, found = k, sess.lastUse, r, true
 		}
 	}
 	if !found {
@@ -201,10 +222,10 @@ func (s *Service) makeRoom() bool {
 }
 
 // drop stops a conversion and forgets it. Must be called with mu held.
-func (s *Service) drop(id media.ID, sess *session, why string) {
+func (s *Service) drop(k key, sess *session, why string) {
 	sess.stream.Stop()
-	delete(s.sessions, id)
-	s.log.Info("stopped converting", slog.String("id", string(id)), slog.String("why", why))
+	delete(s.sessions, k)
+	s.log.Info("stopped converting", slog.String("id", string(k.id)), slog.Int("audio_track", k.audio), slog.String("why", why))
 }
 
 func (s *Service) waitReady(ctx context.Context, sess *session) error {
@@ -251,9 +272,9 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) sweep() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, sess := range s.sessions {
+	for k, sess := range s.sessions {
 		if s.now().Sub(sess.lastUse) >= s.opts.IdleAfter {
-			s.drop(id, sess, "idle")
+			s.drop(k, sess, "idle")
 		}
 	}
 }
@@ -263,8 +284,8 @@ func (s *Service) sweep() {
 func (s *Service) StopAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, sess := range s.sessions {
-		s.drop(id, sess, "shutting down")
+	for k, sess := range s.sessions {
+		s.drop(k, sess, "shutting down")
 	}
 }
 

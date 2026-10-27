@@ -104,3 +104,21 @@ func TestCache_PruneRemovesOnlyOldFiles(t *testing.T) {
 		t.Error("new thumbnail was removed")
 	}
 }
+
+func TestCache_WithFilesKeepsAnotherKindUnderItsOwnExtension(t *testing.T) {
+	dir := t.TempDir()
+	c := New(dir, slog.New(slog.DiscardHandler), WithFiles("subtitle", ".vtt"))
+	if err := c.Put("abc-1", []byte("WEBVTT\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := c.Get("abc-1"); !ok || string(got) != "WEBVTT\n" {
+		t.Fatalf("Get() = %q, %v", got, ok)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "abc-1.vtt")); err != nil {
+		t.Errorf("file not stored as .vtt: %v", err)
+	}
+	// A thumbnail cache on the same folder does not see it.
+	if _, ok := New(dir, slog.New(slog.DiscardHandler)).Get("abc-1"); ok {
+		t.Error("a thumbnail cache read a subtitle")
+	}
+}

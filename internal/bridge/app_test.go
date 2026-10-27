@@ -1308,11 +1308,11 @@ func TestUpdateSettings_PassesTheStartupAndPowerChoices(t *testing.T) {
 	a := newTestApp(&fakeLibrary{})
 	fs := &fakeSettings{}
 	a.settings = fs
-	err := a.UpdateSettings(SettingsInputDTO{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true})
+	err := a.UpdateSettings(SettingsInputDTO{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, HardwareEncoding: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := settings.Input{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true}
+	want := settings.Input{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, HardwareEncoding: true}
 	if fs.gotInput != want {
 		t.Errorf("input = %+v, want %+v", fs.gotInput, want)
 	}

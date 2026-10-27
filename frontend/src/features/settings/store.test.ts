@@ -12,6 +12,7 @@ const settings = (over: Partial<Settings> = {}): Settings => ({
   openAtLogin: false,
   hideOnClose: false,
   ffmpegPath: "",
+  hardwareEncoding: true,
   accessToken: "",
   tokenPersisted: false,
   ...over,

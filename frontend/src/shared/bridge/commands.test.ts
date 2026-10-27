@@ -247,18 +247,18 @@ describe("settings", () => {
   it("getSettings maps the DTO", async () => {
     go.GetSettings.mockResolvedValue({
       port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: true, keepAwake: true,
-      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", accessToken: "tok", tokenPersisted: true, junk: 1,
+      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", hardwareEncoding: true, accessToken: "tok", tokenPersisted: true, junk: 1,
     });
     await expect(getSettings()).resolves.toStrictEqual({
       port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: true, keepAwake: true,
-      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", accessToken: "tok", tokenPersisted: true,
+      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", hardwareEncoding: true, accessToken: "tok", tokenPersisted: true,
     });
   });
 
   it("updateSettings sends the editable fields and surfaces Go's validation message", async () => {
     const input = {
       port: 9100, name: "Den", requireToken: false, dlna: false,
-      autoStart: true, keepAwake: true, openAtLogin: false, hideOnClose: false,
+      autoStart: true, keepAwake: true, openAtLogin: false, hideOnClose: false, hardwareEncoding: true,
     };
     go.UpdateSettings.mockResolvedValueOnce(undefined);
     await updateSettings(input);

@@ -52,6 +52,7 @@ import (
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/app/thumbnails"
+	"eincast/internal/app/tracks"
 	"eincast/internal/app/transcode"
 	"eincast/internal/bridge"
 )
@@ -148,8 +149,19 @@ func main() {
 	// Videos a device cannot play as they are are converted to HLS by the same
 	// ffmpeg, into temporary folders that are emptied at every start and stopped
 	// with the app.
+	// The video chip is used when the person allows it (Settings, on by default);
+	// a chip that does not work is given up on for that video by itself.
+	hardwareEncoding := ffmpeg.WithHardwareEncoding(func() bool { return settingsService.Get().HardwareEncoding })
 	conversions := transcode.NewService(libraryService,
-		ffmpeg.NewTranscoder(cacheDir(log, "hls"), log, chosenFFmpeg), log, transcode.DefaultOptions)
+		ffmpeg.NewTranscoder(cacheDir(log, "hls"), log, chosenFFmpeg, hardwareEncoding), log, transcode.DefaultOptions)
+
+	// The audio and subtitle tracks inside a video are read with the same
+	// programs. An extracted subtitle is kept like a thumbnail, since finding it
+	// means reading the whole file.
+	subtitleCache := thumbcache.New(cacheDir(log, "subtitles"), log, thumbcache.WithFiles("subtitle", ".vtt"))
+	subtitleCache.Prune(thumbnailMaxAge)
+	trackService := tracks.NewService(libraryService, ffmpeg.NewProber(log, chosenFFmpeg),
+		ffmpeg.NewExtractor(log, chosenFFmpeg), subtitleCache, log, tracks.DefaultOptions)
 
 	// Smart TVs identify a server by a UUID; deriving it from the computer's name
 	// keeps it the same on every run without storing anything.
@@ -160,7 +172,7 @@ func main() {
 	deviceID := dlna.DeviceUUID(hostname)
 
 	webServer := httpapi.New(libraryService, settingsService, remoteService, version, log,
-		httpapi.WithThumbnails(thumbnailService), httpapi.WithTranscoding(conversions),
+		httpapi.WithThumbnails(thumbnailService), httpapi.WithTranscoding(conversions), httpapi.WithTracks(trackService),
 		httpapi.WithDLNA(deviceID),
 		httpapi.WithProfiles(profileService), httpapi.WithResume(resumeService))
 	// The server withdraws public access before it stops, so a tunnel never

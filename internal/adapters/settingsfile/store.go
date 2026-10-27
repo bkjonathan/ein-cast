@@ -61,6 +61,9 @@ type file struct {
 	OpenAtLogin bool   `json:"openAtLogin"`
 	HideOnClose bool   `json:"hideOnClose"`
 	FFmpegPath  string `json:"ffmpegPath,omitempty"`
+	// HardwareEncoding is a pointer for the same reason as KeepAwake: absent from
+	// files written before it existed, which means "on".
+	HardwareEncoding *bool `json:"hardwareEncoding,omitempty"`
 }
 
 // libraryFile is one remembered library. The ID is not stored: it is derived from
@@ -108,13 +111,15 @@ func (s *Store) Load() (app.Settings, error) {
 		OpenAtLogin:  f.OpenAtLogin,
 		HideOnClose:  f.HideOnClose,
 		FFmpegPath:   f.FFmpegPath,
+
+		HardwareEncoding: f.HardwareEncoding == nil || *f.HardwareEncoding,
 	}, nil
 }
 
 // Save writes the settings atomically and readable by the owner only (see
 // atomicfile).
 func (s *Store) Save(in app.Settings) error {
-	keepAwake := in.KeepAwake
+	keepAwake, hardware := in.KeepAwake, in.HardwareEncoding
 	data, err := json.MarshalIndent(file{
 		Version:      schemaVersion,
 		Port:         in.Port,
@@ -127,6 +132,8 @@ func (s *Store) Save(in app.Settings) error {
 		OpenAtLogin:  in.OpenAtLogin,
 		HideOnClose:  in.HideOnClose,
 		FFmpegPath:   in.FFmpegPath,
+
+		HardwareEncoding: &hardware,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode settings: %w", err)

@@ -366,6 +366,7 @@ export namespace bridge {
 	    openAtLogin: boolean;
 	    hideOnClose: boolean;
 	    ffmpegPath: string;
+	    hardwareEncoding: boolean;
 	    accessToken: string;
 	    tokenPersisted: boolean;
 	
@@ -384,6 +385,7 @@ export namespace bridge {
 	        this.openAtLogin = source["openAtLogin"];
 	        this.hideOnClose = source["hideOnClose"];
 	        this.ffmpegPath = source["ffmpegPath"];
+	        this.hardwareEncoding = source["hardwareEncoding"];
 	        this.accessToken = source["accessToken"];
 	        this.tokenPersisted = source["tokenPersisted"];
 	    }
@@ -397,6 +399,7 @@ export namespace bridge {
 	    keepAwake: boolean;
 	    openAtLogin: boolean;
 	    hideOnClose: boolean;
+	    hardwareEncoding: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsInputDTO(source);
@@ -412,6 +415,7 @@ export namespace bridge {
 	        this.keepAwake = source["keepAwake"];
 	        this.openAtLogin = source["openAtLogin"];
 	        this.hideOnClose = source["hideOnClose"];
+	        this.hardwareEncoding = source["hardwareEncoding"];
 	    }
 	}
 

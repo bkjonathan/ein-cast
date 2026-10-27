@@ -141,6 +141,7 @@ export async function getSettings(): Promise<Settings> {
     openAtLogin: dto.openAtLogin,
     hideOnClose: dto.hideOnClose,
     ffmpegPath: dto.ffmpegPath,
+    hardwareEncoding: dto.hardwareEncoding,
     accessToken: dto.accessToken,
     tokenPersisted: dto.tokenPersisted,
   };

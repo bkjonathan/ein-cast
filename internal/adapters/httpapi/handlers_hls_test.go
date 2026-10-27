@@ -36,20 +36,20 @@ type fakeHLS struct {
 
 func (f *fakeHLS) Available() bool { return f.available }
 
-func (f *fakeHLS) Playlist(_ context.Context, id media.ID) (io.ReadSeekCloser, error) {
+func (f *fakeHLS) Playlist(_ context.Context, id media.ID, audio int) (io.ReadSeekCloser, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.asked = append(f.asked, "playlist:"+string(id))
+	f.asked = append(f.asked, fmt.Sprintf("playlist:%s@%d", id, audio))
 	if f.err != nil {
 		return nil, f.err
 	}
 	return rsc(f.playlist), nil
 }
 
-func (f *fakeHLS) File(id media.ID, name string) (io.ReadSeekCloser, error) {
+func (f *fakeHLS) File(id media.ID, audio int, name string) (io.ReadSeekCloser, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.asked = append(f.asked, "file:"+string(id)+"/"+name)
+	f.asked = append(f.asked, fmt.Sprintf("file:%s@%d/%s", id, audio, name))
 	if f.fileErr != nil {
 		return nil, f.fileErr
 	}
@@ -121,6 +121,7 @@ func TestHLS_ErrorsMapToStatuses(t *testing.T) {
 		{"unknown video", fmt.Errorf("x: %w", media.ErrNotFound), http.StatusNotFound, codeNotFound},
 		{"no ffmpeg", app.ErrTranscodingUnavailable, http.StatusNotFound, codeNotFound},
 		{"all slots busy", transcode.ErrBusy, http.StatusServiceUnavailable, codeBusy},
+		{"disk too full", fmt.Errorf("start converting %q: %w", "/secret/path", app.ErrNotEnoughDiskSpace), http.StatusInsufficientStorage, codeDiskFull},
 		{"cannot convert", fmt.Errorf("%w: Invalid data at /secret/path", app.ErrNotConvertible), http.StatusUnprocessableEntity, codeNotConvert},
 		{"something else", errors.New("disk exploded at /secret/path"), http.StatusInternalServerError, codeInternal},
 	}
@@ -194,5 +195,52 @@ func TestHealth_SaysWhetherConversionWorks(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("health = %s, want %s", body, want)
 		}
+	}
+}
+
+func TestHLS_AnAudioTrackHasItsOwnURLs(t *testing.T) {
+	h := &fakeHLS{available: true, playlist: "#EXTM3U\n", segments: map[string]string{"seg00000.ts": "ts"}}
+	f, srv := newHLSFixture(t, &fakeAccess{}, h)
+	id := string(f.movie.ID)
+
+	if got := getFrom(t, srv, "/hls/"+id+"/audio/2/index.m3u8").StatusCode; got != http.StatusOK {
+		t.Fatalf("playlist of track 2: status = %d", got)
+	}
+	if got := getFrom(t, srv, "/hls/"+id+"/audio/2/seg00000.ts").StatusCode; got != http.StatusOK {
+		t.Fatalf("segment of track 2: status = %d", got)
+	}
+	getFrom(t, srv, "/hls/"+id+"/index.m3u8")
+
+	want := []string{
+		"playlist:" + id + "@2",
+		"file:" + id + "@2/seg00000.ts",
+		fmt.Sprintf("playlist:%s@%d", id, app.DefaultAudioTrack),
+	}
+	if fmt.Sprint(h.asked) != fmt.Sprint(want) {
+		t.Errorf("asked = %v, want %v", h.asked, want)
+	}
+}
+
+func TestHLS_ABadTrackNumberIsANotFound(t *testing.T) {
+	h := &fakeHLS{available: true, playlist: "#EXTM3U\n"}
+	f, srv := newHLSFixture(t, &fakeAccess{}, h)
+	for _, n := range []string{"-1", "x", "64", "1.5", "99999999999999999999"} {
+		assertErrorShape(t, getFrom(t, srv, "/hls/"+string(f.movie.ID)+"/audio/"+n+"/index.m3u8"), http.StatusNotFound, codeNotFound)
+	}
+	if len(h.asked) != 0 {
+		t.Errorf("asked = %v: a bad track must not start anything", h.asked)
+	}
+}
+
+func TestHLS_AnAudioTrackStillSitsBehindAccessControl(t *testing.T) {
+	access := &fakeAccess{}
+	access.set(true, "secret")
+	h := &fakeHLS{available: true, playlist: "#EXTM3U\n"}
+	f, srv := newHLSFixture(t, access, h)
+	if got := getFrom(t, srv, "/hls/"+string(f.movie.ID)+"/audio/1/index.m3u8").StatusCode; got != http.StatusUnauthorized {
+		t.Errorf("without the token: status = %d, want 401", got)
+	}
+	if len(h.asked) != 0 {
+		t.Error("a conversion was started without the token")
 	}
 }
