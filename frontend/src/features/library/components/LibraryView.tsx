@@ -1,8 +1,10 @@
 import { LoaderCircle, RefreshCw } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { useT } from "@/shared/i18n";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 import { effectiveLibrary, nameById } from "../derive";
 import { browseItems } from "../filter";
+import { listRows } from "../group";
 import { useLibraryActions } from "../hooks/useLibraryActions";
 import { useThumbnailSupport } from "../hooks/useThumbnail";
 import { useLibraryStore } from "../store";
@@ -18,6 +20,7 @@ export function LibraryView() {
   const query = useLibraryStore((s) => s.query);
   const sort = useLibraryStore((s) => s.sort);
   const { rescanAll, busy } = useLibraryActions();
+  const { t } = useT();
 
   const thumbnailSupport = useThumbnailSupport();
   const library = effectiveLibrary(chosen, libraries);
@@ -31,6 +34,16 @@ export function LibraryView() {
     () => browseItems(items, kind, query, sort, library),
     [items, kind, query, sort, library],
   );
+  // Series that are open. View state, like the filters: Go knows nothing of it.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const toggleShow = (key: string) =>
+    setOpened((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  // A search opens every series, so its matches are not hidden behind closed headers.
+  const rows = useMemo(() => listRows(visible, opened, query.trim() !== ""), [visible, opened, query]);
   const names = useMemo(() => nameById(libraries), [libraries]);
   const problems = libraries.filter((l) => l.error);
   const scanning = libraries.some((l) => l.scanning);
@@ -42,15 +55,15 @@ export function LibraryView() {
         <GlassPanel className="flex flex-col gap-2 p-4">
           {libraries.length > 1 && (
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-muted-foreground">{libraries.length} libraries</p>
+              <p className="text-sm text-muted-foreground">{t("library.view.count", { count: libraries.length })}</p>
               <GlassButton size="sm" onClick={() => void rescanAll()} disabled={busy}>
-                {scanning ? <LoaderCircle className="animate-spin" /> : <RefreshCw />} Rescan all
+                {scanning ? <LoaderCircle className="animate-spin" /> : <RefreshCw />} {t("library.rescanAll")}
               </GlassButton>
             </div>
           )}
           {problems.map((l) => (
             <p key={l.id} role="alert" className="text-sm text-destructive">
-              {l.name}: {l.error} {l.total > 0 && "Showing the last successful scan."}
+              {l.name}: {l.error} {l.total > 0 && t("library.card.lastScan")}
             </p>
           ))}
         </GlassPanel>
@@ -58,17 +71,18 @@ export function LibraryView() {
       <LibraryToolbar libraries={libraries} items={inLibrary} shown={visible.length} />
       {thumbnailSupport === false && (
         <p className="px-1 text-xs text-muted-foreground">
-          Install ffmpeg (for example “brew install ffmpeg”) to see thumbnails here and on your devices.
+          {t("library.view.installFfmpeg")}
         </p>
       )}
       <GlassPanel className="min-h-0 flex-1 overflow-hidden">
         <LibraryList
-          items={visible}
+          rows={rows}
+          onToggleShow={toggleShow}
           libraryNames={libraries.length > 1 ? names : undefined}
           emptyHint={
             items.length === 0
-              ? "No supported media found yet."
-              : "Nothing matches the filters."
+              ? t("library.view.empty")
+              : t("library.view.noMatch")
           }
         />
       </GlassPanel>

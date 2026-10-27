@@ -23,9 +23,15 @@ func webFS() fs.FS {
 
 // pageCSP locks the player page down to its own origin. The page never needs
 // inline script or third-party content, so refusing both turns any future
-// injection bug into a harmless no-op instead of script execution.
+// injection bug into a harmless no-op instead of script execution. blob: is for
+// media only: hls.js feeds the video element through a MediaSource, which the
+// browser exposes as a blob: URL (ADR 0031).
 const pageCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
-	"media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+	"media-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// hlsScript is the vendored hls.js (ADR 0031), loaded only by browsers that cannot
+// play HLS by themselves.
+const hlsScript = "hls.min.js"
 
 // handleIndex serves the player page.
 func (a *api) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -46,5 +52,10 @@ func (a *api) handleStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-cache")
+	if name == hlsScript {
+		// A big file that changes only when EinCast is upgraded: not worth fetching
+		// again on every video. A day's staleness after an upgrade costs nothing.
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	}
 	http.ServeFileFS(w, r, files, name)
 }

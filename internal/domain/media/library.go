@@ -28,6 +28,10 @@ type Library struct {
 	Name string
 	// Root is the absolute folder. Like Item.Path it never leaves the server.
 	Root string
+	// HiddenFromTVs keeps the library off smart TVs: a TV cannot say who is
+	// watching, so what it may list is chosen per library (ADR 0027). The zero
+	// value is visible, which is what every library was before the setting existed.
+	HiddenFromTVs bool
 }
 
 // NewLibrary builds the Library for a folder, named after it.

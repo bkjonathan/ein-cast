@@ -1,15 +1,18 @@
+import type { MessageKey } from "@/shared/i18n";
 import type { LibraryItem, MediaKind } from "@/shared/bridge";
 
 export type KindFilter = "all" | MediaKind;
 export type SortKey = "name" | "newest" | "largest";
 
-export const sortLabels: Record<SortKey, string> = {
-  name: "Name",
-  newest: "Newest",
-  largest: "Largest",
+export const sortLabelKeys: Record<SortKey, MessageKey> = {
+  name: "library.sort.name",
+  newest: "library.sort.newest",
+  largest: "library.sort.largest",
 };
 
+// By the title a person sees, falling back to the file name for ties.
 const byName = (a: LibraryItem, b: LibraryItem) =>
+  a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }) ||
   a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
 
 const comparators: Record<SortKey, (a: LibraryItem, b: LibraryItem) => number> = {
@@ -28,8 +31,9 @@ export function countByKind(items: readonly LibraryItem[]): Record<KindFilter, n
 /**
  * Applies the library and kind choices, the search box and the sort order. Search is a
  * case-insensitive substring match on the path inside the library (so a folder
- * name finds everything in it); every word must match somewhere, in any order.
- * The input array is never reordered.
+ * name finds everything in it), the title, the series and the year; every word
+ * must match somewhere, in any order. There is no fuzzy matching. The input array
+ * is never reordered.
  */
 export function browseItems(
   items: readonly LibraryItem[],
@@ -38,12 +42,12 @@ export function browseItems(
   sort: SortKey,
   library = "all",
 ): LibraryItem[] {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const words = query.normalize("NFC").toLowerCase().split(/\s+/).filter(Boolean);
   const shown = items.filter((it) => {
     if (library !== "all" && it.libraryId !== library) return false;
     if (kind !== "all" && it.kind !== kind) return false;
     if (words.length === 0) return true;
-    const haystack = it.relPath.toLowerCase();
+    const haystack = `${it.relPath} ${it.title} ${it.show} ${it.year > 0 ? it.year : ""}`.normalize("NFC").toLowerCase();
     return words.every((w) => haystack.includes(w));
   });
   return shown.sort(comparators[sort]);

@@ -1,5 +1,10 @@
 # 0018 — Videos a device cannot play are converted to HLS, once, on demand
 
+> Extended in Phase 17: browsers without HLS get hls.js, the audio track can be chosen
+> (the file's own default is now used, not always the first), and hardware encoders and a
+> free-space check were added. See [0031](0031-playback-gaps-hlsjs-and-embedded-tracks.md)
+> and [0032](0032-hardware-encoding-and-disk-safety.md).
+
 ## Context
 An iPhone or iPad opening `/stream/{id}` for an MKV, an AVI, or an HEVC file in
 MP4 gets an error. The files are fine; the device does not support the container

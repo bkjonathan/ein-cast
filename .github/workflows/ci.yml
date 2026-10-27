@@ -59,6 +59,9 @@ jobs:
       - name: Dependency rules
         run: scripts/check-deps.sh
 
+      - name: Network rules (docs/PRIVACY.md stays true)
+        run: scripts/check-network.sh
+
       # The race detector needs cgo; macOS has it, and it is the platform where
       # the concurrency code is exercised hardest. Windows runs the same tests
       # without it.

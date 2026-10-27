@@ -3,6 +3,7 @@ import { WifiOff } from "lucide-react";
 import { describeProvider, useRemoteStore } from "@/features/remote";
 import { useServerStore } from "@/features/server";
 import { useSettingsStore } from "@/features/settings";
+import { useT, type MessageKey } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import { GlassPanel } from "@/shared/ui/glass";
 import { connectSources, type ConnectSource, type SourceKind } from "../sources";
@@ -30,13 +31,14 @@ export function ConnectCard() {
 
 const sourceKey = (s: ConnectSource) => `${s.kind}|${s.base}`;
 
-const intro: Record<SourceKind, string> = {
-  lan: "On a TV, iPad or phone on the same Wi-Fi, scan the code or open this address.",
-  private: "On a device signed in to your account there, scan the code or open this address. It works from anywhere.",
-  public: "From any browser, open this address and enter your PIN. The code opens the sign-in page; it does not contain the PIN.",
+const intro: Record<SourceKind, MessageKey> = {
+  lan: "connect.intro.lan",
+  private: "connect.intro.private",
+  public: "connect.intro.public",
 };
 
 function ConnectBody({ sources }: { sources: ConnectSource[] }) {
+  const { t } = useT();
   // Chosen by identity, not position: a tunnel appearing or going away must not
   // silently switch which address is shown.
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -49,12 +51,12 @@ function ConnectBody({ sources }: { sources: ConnectSource[] }) {
     <GlassPanel className="flex flex-col gap-6 p-6 sm:flex-row">
       <div className="flex min-w-0 flex-1 flex-col gap-4">
         <header>
-          <h2 className="text-lg font-semibold">Connect a device</h2>
-          <p className="text-sm text-muted-foreground">{intro[source.kind]}</p>
+          <h2 className="text-lg font-semibold">{t("connect.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t(intro[source.kind])}</p>
         </header>
 
         {sources.length > 1 && (
-          <div role="group" aria-label="Where from" className="flex flex-wrap gap-1">
+          <div role="group" aria-label={t("connect.whereFrom")} className="flex flex-wrap gap-1">
             {sources.map((s) => (
               <button
                 key={sourceKey(s)}
@@ -77,16 +79,15 @@ function ConnectBody({ sources }: { sources: ConnectSource[] }) {
 
         {source.token && (
           <p className="text-xs text-muted-foreground">
-            These links include your access token. Share them only with people you trust.
+            {t("connect.tokenWarning")}
           </p>
         )}
-        <UrlRow label="Web player" url={url} />
+        <UrlRow label={t("connect.webPlayer")} url={url} />
         {source.playlist ? (
-          <UrlRow label="Playlist for VLC / Infuse" url={withToken(playlistUrl(source.base), source.token)} />
+          <UrlRow label={t("connect.playlist")} url={withToken(playlistUrl(source.base), source.token)} />
         ) : (
           <p className="text-xs text-muted-foreground">
-            To play in VLC or Infuse, sign in on the player page first, then use “Playlist for VLC / Infuse”
-            there. Its links stay valid for a few hours.
+            {t("connect.playlistNeedsSignIn")}
           </p>
         )}
       </div>
@@ -96,17 +97,17 @@ function ConnectBody({ sources }: { sources: ConnectSource[] }) {
 }
 
 function NoNetwork({ localUrl }: { localUrl: string }) {
+  const { t } = useT();
   return (
     <GlassPanel className="flex flex-col gap-3 p-6">
       <header className="flex items-center gap-2">
         <WifiOff className="size-5 text-warning" aria-hidden />
-        <h2 className="text-lg font-semibold">No local network found</h2>
+        <h2 className="text-lg font-semibold">{t("connect.noNetwork.title")}</h2>
       </header>
       <p className="text-sm text-muted-foreground">
-        Connect this computer to Wi-Fi or Ethernet, then stop and start the server so it can pick
-        up the new address. Until then it can only be opened from this computer.
+        {t("connect.noNetwork.body")}
       </p>
-      <UrlRow label="This computer only" url={localUrl} />
+      <UrlRow label={t("connect.thisComputerOnly")} url={localUrl} />
     </GlassPanel>
   );
 }

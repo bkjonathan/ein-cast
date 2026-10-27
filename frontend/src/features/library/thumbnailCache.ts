@@ -14,9 +14,11 @@ export interface ThumbnailLoader {
 /**
  * A picture belongs to one version of a file: if the file changes, the old
  * picture must not be shown, so size and modification time are part of the key.
+ * So is whether a poster has been found: adding one next to a video must replace
+ * the frame that was shown before.
  */
 export function thumbnailKey(item: LibraryItem): string {
-  return `${item.id}:${item.size}:${item.modTime}`;
+  return `${item.id}:${item.size}:${item.modTime}:${item.poster ? "poster" : "frame"}`;
 }
 
 /**

@@ -1,30 +1,32 @@
 import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
+import { useT, type MessageKey } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import { GlassPanel } from "@/shared/ui/glass";
 import { useAppearanceStore } from "../store";
 import type { ThemeMode } from "../theme";
 
-const options: readonly { mode: ThemeMode; label: string; icon: LucideIcon }[] = [
-  { mode: "system", label: "System", icon: Monitor },
-  { mode: "light", label: "Light", icon: Sun },
-  { mode: "dark", label: "Dark", icon: Moon },
+const options: readonly { mode: ThemeMode; labelKey: MessageKey; icon: LucideIcon }[] = [
+  { mode: "system", labelKey: "appearance.system", icon: Monitor },
+  { mode: "light", labelKey: "appearance.light", icon: Sun },
+  { mode: "dark", labelKey: "appearance.dark", icon: Moon },
 ];
 
 /** Light, dark, or whatever the OS is using. */
 export function AppearanceSettings() {
   const mode = useAppearanceStore((s) => s.mode);
   const setMode = useAppearanceStore((s) => s.setMode);
+  const { t } = useT();
 
   return (
     <GlassPanel className="flex flex-col gap-4 p-6">
       <header>
-        <h2 className="text-lg font-semibold">Appearance</h2>
+        <h2 className="text-lg font-semibold">{t("appearance.title")}</h2>
         <p className="text-sm text-muted-foreground">
-          “System” follows your computer’s setting. This choice applies to this window only.
+          {t("appearance.help")}
         </p>
       </header>
-      <div role="radiogroup" aria-label="Theme" className="flex flex-wrap gap-2">
-        {options.map(({ mode: value, label, icon: Icon }) => (
+      <div role="radiogroup" aria-label={t("appearance.theme")} className="flex flex-wrap gap-2">
+        {options.map(({ mode: value, labelKey, icon: Icon }) => (
           <button
             key={value}
             type="button"
@@ -39,7 +41,7 @@ export function AppearanceSettings() {
             )}
           >
             <Icon className="size-4" aria-hidden />
-            {label}
+            {t(labelKey)}
           </button>
         ))}
       </div>

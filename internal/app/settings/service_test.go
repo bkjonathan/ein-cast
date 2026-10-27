@@ -104,13 +104,54 @@ func newTestService(store *fakeStore, secrets *fakeSecrets) (*Service, *fakeEven
 	return s, ev
 }
 
-func TestLoad_FirstRunUsesDefaults(t *testing.T) {
-	s, _ := newTestService(&fakeStore{}, newSecrets())
+// existingInstall is a store holding the settings an install of v1.0 would have
+// saved: everything as shipped then, nothing chosen.
+func existingInstall() *fakeStore {
+	saved := app.Settings{Port: 8765, Name: "EinCast", KeepAwake: true}
+	return &fakeStore{data: &saved}
+}
+
+func TestLoad_FirstRunTurnsTheProtectionsOn(t *testing.T) {
+	secrets := newSecrets()
+	s, _ := newTestService(&fakeStore{}, secrets)
 	s.Load()
 
 	got := s.Get()
-	if !reflect.DeepEqual(got.Settings, Default()) || got.Token != "" || s.Required() {
-		t.Fatalf("Get() = %+v, want the defaults with no token", got)
+	if !got.RequireToken || got.Token != "t1" || !got.TokenPersisted || secrets.m[tokenKey] != "t1" {
+		t.Errorf("Get() = %+v: a new install must have a saved access token (ADR 0024)", got)
+	}
+	if !got.AutoStart || !got.KeepAwake {
+		t.Errorf("Get() = %+v: a new install starts sharing by itself and keeps the computer awake", got)
+	}
+	if got.DLNA || got.OpenAtLogin {
+		t.Errorf("Get() = %+v: Smart TV discovery and open-at-login are opt-in", got)
+	}
+	if s.Verify("") || s.Verify("wrong") || !s.Verify("t1") {
+		t.Error("a new install must only let the token in")
+	}
+}
+
+func TestLoad_ExistingInstallKeepsItsChoices(t *testing.T) {
+	s, _ := newTestService(existingInstall(), newSecrets())
+	s.Load()
+
+	got := s.Get()
+	if got.RequireToken || got.Token != "" || s.Required() || got.AutoStart || got.HideOnClose {
+		t.Fatalf("Get() = %+v: an upgrade must not switch on anything the person did not choose", got)
+	}
+	if !s.Verify("") {
+		t.Error("an install that had no token must stay open to the home network")
+	}
+}
+
+func TestLoad_FirstRunHideOnCloseFollowsThePlatformChoice(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		ev := &fakeEvents{}
+		s := NewService(&fakeStore{}, newSecrets(), ev, slog.New(slog.DiscardHandler), WithHideOnCloseByDefault(on))
+		s.Load()
+		if got := s.Get().HideOnClose; got != on {
+			t.Errorf("WithHideOnCloseByDefault(%v): HideOnClose = %v", on, got)
+		}
 	}
 }
 
@@ -161,7 +202,7 @@ func TestLoad_ResetsOnlyTheInvalidFields(t *testing.T) {
 }
 
 func TestUpdate_SavesAndPublishes(t *testing.T) {
-	store := &fakeStore{}
+	store := existingInstall()
 	s, ev := newTestService(store, newSecrets())
 	s.Load()
 
@@ -181,7 +222,7 @@ func TestUpdate_SavesAndPublishes(t *testing.T) {
 }
 
 func TestUpdate_SmartTVDiscoveryIsSavedAndPublished(t *testing.T) {
-	store := &fakeStore{}
+	store := existingInstall()
 	s, ev := newTestService(store, newSecrets())
 	s.Load()
 	if s.Get().DLNA {
@@ -198,7 +239,7 @@ func TestUpdate_SmartTVDiscoveryIsSavedAndPublished(t *testing.T) {
 }
 
 func TestUpdate_TokenAndSmartTVDiscoveryCannotBothBeOn(t *testing.T) {
-	store := &fakeStore{}
+	store := existingInstall()
 	s, ev := newTestService(store, newSecrets())
 	s.Load()
 
@@ -236,7 +277,7 @@ func TestUpdate_ValidationFailuresChangeNothing(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeStore{}
+			store := existingInstall()
 			s, ev := newTestService(store, newSecrets())
 			s.Load()
 			before := s.Get()
@@ -253,7 +294,8 @@ func TestUpdate_ValidationFailuresChangeNothing(t *testing.T) {
 
 func TestUpdate_SaveFailureChangesNothing(t *testing.T) {
 	boom := errors.New("disk full")
-	store := &fakeStore{saveErr: boom}
+	store := existingInstall()
+	store.saveErr = boom
 	s, ev := newTestService(store, newSecrets())
 	s.Load()
 
@@ -267,7 +309,7 @@ func TestUpdate_SaveFailureChangesNothing(t *testing.T) {
 
 func TestToken_EnableDisableLifecycle(t *testing.T) {
 	secrets := newSecrets()
-	s, ev := newTestService(&fakeStore{}, secrets)
+	s, ev := newTestService(existingInstall(), secrets)
 	s.Load()
 	if !s.Verify("") || !s.Verify("anything") {
 		t.Fatal("with the token off every request must be allowed")
@@ -308,7 +350,7 @@ func TestToken_EnableDisableLifecycle(t *testing.T) {
 }
 
 func TestToken_UpdateWithoutTogglingKeepsTheToken(t *testing.T) {
-	s, _ := newTestService(&fakeStore{}, newSecrets())
+	s, _ := newTestService(existingInstall(), newSecrets())
 	s.Load()
 	_, _ = s.Update(Input{Port: 8765, Name: "EinCast", RequireToken: true})
 
@@ -372,7 +414,7 @@ func TestToken_UnavailableCredentialStoreFailsSafe(t *testing.T) {
 func TestToken_UnsavableTokenIsReportedAsNotPersisted(t *testing.T) {
 	secrets := newSecrets()
 	secrets.setErr = errors.New("denied")
-	s, _ := newTestService(&fakeStore{}, secrets)
+	s, _ := newTestService(existingInstall(), secrets)
 	s.Load()
 
 	view, err := s.Update(Input{Port: 8765, Name: "EinCast", RequireToken: true})
@@ -388,7 +430,7 @@ func TestToken_UnsavableTokenIsReportedAsNotPersisted(t *testing.T) {
 }
 
 func TestVerify_FailsClosedWithoutAToken(t *testing.T) {
-	s, _ := newTestService(&fakeStore{}, newSecrets())
+	s, _ := newTestService(existingInstall(), newSecrets())
 	s.newToken = func() (string, error) { return "", errors.New("no entropy") }
 	s.Load()
 	_, _ = s.Update(Input{Port: 8765, Name: "EinCast", RequireToken: true})
@@ -405,7 +447,7 @@ func TestVerify_FailsClosedWithoutAToken(t *testing.T) {
 
 func TestRotateToken(t *testing.T) {
 	secrets := newSecrets()
-	s, ev := newTestService(&fakeStore{}, secrets)
+	s, ev := newTestService(existingInstall(), secrets)
 	s.Load()
 
 	if _, err := s.RotateToken(); !errors.Is(err, ErrTokenOff) {
@@ -429,7 +471,7 @@ func TestRotateToken(t *testing.T) {
 }
 
 func TestSaveLibraries(t *testing.T) {
-	store := &fakeStore{}
+	store := existingInstall()
 	s, _ := newTestService(store, newSecrets())
 	s.Load()
 	films, music := media.NewLibrary("/media/films"), media.NewLibrary("/media/music")
@@ -449,7 +491,7 @@ func TestSaveLibraries(t *testing.T) {
 }
 
 func TestSaveLibraries_ReturnsACopy(t *testing.T) {
-	s, _ := newTestService(&fakeStore{}, newSecrets())
+	s, _ := newTestService(existingInstall(), newSecrets())
 	s.Load()
 	in := []media.Library{media.NewLibrary("/a")}
 	_ = s.SaveLibraries(in)
@@ -462,7 +504,7 @@ func TestSaveLibraries_ReturnsACopy(t *testing.T) {
 }
 
 func TestSaveLibraries_PreservesOtherSettings(t *testing.T) {
-	store := &fakeStore{}
+	store := existingInstall()
 	s, _ := newTestService(store, newSecrets())
 	s.Load()
 	_, _ = s.Update(Input{Port: 9100, Name: "Den", DLNA: true})
@@ -493,7 +535,7 @@ func TestGenerateToken(t *testing.T) {
 
 // Run with -race.
 func TestConcurrentUse(t *testing.T) {
-	s, _ := newTestService(&fakeStore{}, newSecrets())
+	s, _ := newTestService(existingInstall(), newSecrets())
 	s.Load()
 	_, _ = s.Update(Input{Port: 8765, Name: "EinCast", RequireToken: true})
 
@@ -522,4 +564,146 @@ func TestConcurrentUse(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// fakeLoginItem records what the settings asked the computer to do.
+type fakeLoginItem struct {
+	calls []bool
+	err   error
+}
+
+func (f *fakeLoginItem) Set(on bool) error {
+	f.calls = append(f.calls, on)
+	return f.err
+}
+
+func newServiceWithLoginItem(store *fakeStore, li *fakeLoginItem) *Service {
+	s := NewService(store, newSecrets(), &fakeEvents{}, slog.New(slog.DiscardHandler), WithLoginItem(li))
+	s.Load()
+	return s
+}
+
+func TestUpdate_OpenAtLoginReachesTheComputerOnlyWhenItChanges(t *testing.T) {
+	li := &fakeLoginItem{}
+	s := newServiceWithLoginItem(existingInstall(), li)
+
+	in := Input{Port: 8765, Name: "EinCast", KeepAwake: true}
+	if _, err := s.Update(in); err != nil {
+		t.Fatal(err)
+	}
+	if len(li.calls) != 0 {
+		t.Fatalf("login item touched with no change: %v", li.calls)
+	}
+
+	in.OpenAtLogin = true
+	if _, err := s.Update(in); err != nil {
+		t.Fatal(err)
+	}
+	in.Name = "Den" // an unrelated change must not rewrite the entry again
+	if _, err := s.Update(in); err != nil {
+		t.Fatal(err)
+	}
+	in.OpenAtLogin = false
+	if _, err := s.Update(in); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := fmt.Sprint(li.calls), "[true false]"; got != want {
+		t.Errorf("login item calls = %s, want %s", got, want)
+	}
+}
+
+func TestUpdate_OpenAtLoginFailureChangesNothing(t *testing.T) {
+	li := &fakeLoginItem{err: errors.New("permission denied")}
+	store := existingInstall()
+	s := newServiceWithLoginItem(store, li)
+
+	_, err := s.Update(Input{Port: 8765, Name: "EinCast", OpenAtLogin: true})
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("error = %v, want the system's reason", err)
+	}
+	if s.Get().OpenAtLogin || len(store.saves) != 0 {
+		t.Errorf("a refused login entry was saved: %+v saves=%d", s.Get(), len(store.saves))
+	}
+}
+
+func TestUpdate_FailedSaveRestoresTheLoginEntry(t *testing.T) {
+	li := &fakeLoginItem{}
+	store := existingInstall()
+	store.saveErr = errors.New("disk full")
+	s := newServiceWithLoginItem(store, li)
+
+	if _, err := s.Update(Input{Port: 8765, Name: "EinCast", OpenAtLogin: true}); err == nil {
+		t.Fatal("want the save error")
+	}
+	if got, want := fmt.Sprint(li.calls), "[true false]"; got != want {
+		t.Errorf("login item calls = %s, want %s (turned on, then put back)", got, want)
+	}
+}
+
+func TestLoad_RefreshesTheLoginEntryWhenItIsOn(t *testing.T) {
+	li := &fakeLoginItem{}
+	saved := app.Settings{Port: 8765, Name: "EinCast", OpenAtLogin: true}
+	newServiceWithLoginItem(&fakeStore{data: &saved}, li)
+	if got, want := fmt.Sprint(li.calls), "[true]"; got != want {
+		t.Errorf("login item calls = %s, want %s so the entry follows a moved app", got, want)
+	}
+}
+
+func TestSetFFmpegPath(t *testing.T) {
+	store := existingInstall()
+	s, ev := newTestService(store, newSecrets())
+	s.Load()
+
+	if err := s.SetFFmpegPath("/opt/tools/ffmpeg"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Get().FFmpegPath; got != "/opt/tools/ffmpeg" {
+		t.Errorf("FFmpegPath = %q", got)
+	}
+	if len(store.saves) != 1 || store.saves[0].FFmpegPath != "/opt/tools/ffmpeg" || len(ev.got) != 1 {
+		t.Errorf("saves=%+v events=%d", store.saves, len(ev.got))
+	}
+
+	store.saveErr = errors.New("disk full")
+	if err := s.SetFFmpegPath(""); err == nil || s.Get().FFmpegPath == "" {
+		t.Errorf("a failed save must change nothing: err=%v path=%q", err, s.Get().FFmpegPath)
+	}
+}
+
+func TestHardwareEncoding_IsOnByDefaultAndTheChoiceIsKept(t *testing.T) {
+	if !Default().HardwareEncoding {
+		t.Fatal("Default().HardwareEncoding = false: the chip is safe to use, because a failing one falls back")
+	}
+	s := newServiceWithLoginItem(existingInstall(), &fakeLoginItem{})
+	in := Input{Port: 8765, Name: "EinCast", KeepAwake: true, HardwareEncoding: false}
+	view, err := s.Update(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.HardwareEncoding || s.Get().HardwareEncoding {
+		t.Error("turning it off did not stick")
+	}
+	in.HardwareEncoding = true
+	if view, err = s.Update(in); err != nil || !view.HardwareEncoding {
+		t.Errorf("turning it on: view = %+v, err = %v", view, err)
+	}
+}
+
+func TestCheckForUpdates_IsOnByDefaultAndTheChoiceIsKept(t *testing.T) {
+	if !Default().CheckForUpdates {
+		t.Fatal("Default().CheckForUpdates = false: an install that is never told about a fix keeps its bugs")
+	}
+	s := newServiceWithLoginItem(existingInstall(), &fakeLoginItem{})
+	in := Input{Port: 8765, Name: "EinCast", KeepAwake: true, CheckForUpdates: false}
+	view, err := s.Update(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.CheckForUpdates || s.Get().CheckForUpdates {
+		t.Error("turning it off did not stick")
+	}
+	in.CheckForUpdates = true
+	if view, err = s.Update(in); err != nil || !view.CheckForUpdates {
+		t.Errorf("turning it on: view = %+v, err = %v", view, err)
+	}
 }

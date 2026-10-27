@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"eincast/internal/adapters/atomicfile"
 	"eincast/internal/app"
 	"eincast/internal/domain/media"
 )
@@ -51,6 +52,21 @@ type file struct {
 	RequireToken bool          `json:"requireToken"`
 	// DLNA is absent from files written before v0.5, which reads as false: off.
 	DLNA bool `json:"dlna"`
+	// The next four are absent from files written before v1.1, which keeps what
+	// those installs always did: nothing starts by itself, the window closes the
+	// app. KeepAwake is a pointer because absent means "on" there: an old install
+	// gets the benign default, not a silent off.
+	AutoStart   bool   `json:"autoStart"`
+	KeepAwake   *bool  `json:"keepAwake,omitempty"`
+	OpenAtLogin bool   `json:"openAtLogin"`
+	HideOnClose bool   `json:"hideOnClose"`
+	FFmpegPath  string `json:"ffmpegPath,omitempty"`
+	// HardwareEncoding is a pointer for the same reason as KeepAwake: absent from
+	// files written before it existed, which means "on".
+	HardwareEncoding *bool `json:"hardwareEncoding,omitempty"`
+	// CheckForUpdates is a pointer for the same reason: absent from files written
+	// before it existed, which means "on".
+	CheckForUpdates *bool `json:"checkForUpdates,omitempty"`
 }
 
 // libraryFile is one remembered library. The ID is not stored: it is derived from
@@ -58,6 +74,8 @@ type file struct {
 type libraryFile struct {
 	Name string `json:"name"`
 	Root string `json:"root"`
+	// HiddenFromTVs is absent from older files, which reads as false: visible.
+	HiddenFromTVs bool `json:"hiddenFromTVs,omitempty"`
 }
 
 func (s *Store) path() string { return filepath.Join(s.dir, fileName) }
@@ -91,14 +109,21 @@ func (s *Store) Load() (app.Settings, error) {
 		Libraries:    librariesFrom(f),
 		RequireToken: f.RequireToken,
 		DLNA:         f.DLNA,
+		AutoStart:    f.AutoStart,
+		KeepAwake:    f.KeepAwake == nil || *f.KeepAwake,
+		OpenAtLogin:  f.OpenAtLogin,
+		HideOnClose:  f.HideOnClose,
+		FFmpegPath:   f.FFmpegPath,
+
+		HardwareEncoding: f.HardwareEncoding == nil || *f.HardwareEncoding,
+		CheckForUpdates:  f.CheckForUpdates == nil || *f.CheckForUpdates,
 	}, nil
 }
 
-// Save writes the settings atomically: the data goes to a temporary file in the
-// same directory and is renamed over the real one, so a crash or full disk
-// leaves either the old file or the new one, never half of one. The file is
-// readable by the owner only.
+// Save writes the settings atomically and readable by the owner only (see
+// atomicfile).
 func (s *Store) Save(in app.Settings) error {
+	keepAwake, hardware, updates := in.KeepAwake, in.HardwareEncoding, in.CheckForUpdates
 	data, err := json.MarshalIndent(file{
 		Version:      schemaVersion,
 		Port:         in.Port,
@@ -106,52 +131,24 @@ func (s *Store) Save(in app.Settings) error {
 		Libraries:    librariesTo(in.Libraries),
 		RequireToken: in.RequireToken,
 		DLNA:         in.DLNA,
+		AutoStart:    in.AutoStart,
+		KeepAwake:    &keepAwake,
+		OpenAtLogin:  in.OpenAtLogin,
+		HideOnClose:  in.HideOnClose,
+		FFmpegPath:   in.FFmpegPath,
+
+		HardwareEncoding: &hardware,
+		CheckForUpdates:  &updates,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode settings: %w", err)
 	}
 	data = append(data, '\n')
 
-	if err := os.MkdirAll(s.dir, 0o700); err != nil {
-		return fmt.Errorf("create settings directory: %w", err)
-	}
-	tmp, err := os.CreateTemp(s.dir, fileName+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temporary settings file: %w", err)
-	}
-	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
-
-	if err := tmp.Chmod(0o600); err != nil && !isChmodUnsupported(err) {
-		tmp.Close()
-		cleanup()
-		return fmt.Errorf("restrict settings file permissions: %w", err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		cleanup()
+	if err := atomicfile.Write(s.dir, fileName, data); err != nil {
 		return fmt.Errorf("write settings: %w", err)
 	}
-	if err := tmp.Sync(); err != nil { // reach the disk before the rename makes it the real file
-		tmp.Close()
-		cleanup()
-		return fmt.Errorf("flush settings: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close settings: %w", err)
-	}
-	if err := os.Rename(tmpName, s.path()); err != nil {
-		cleanup()
-		return fmt.Errorf("replace settings file: %w", err)
-	}
 	return nil
-}
-
-// isChmodUnsupported tolerates filesystems (and Windows) where Chmod is a no-op
-// or refused; the per-user config directory is already private there.
-func isChmodUnsupported(err error) bool {
-	return errors.Is(err, errors.ErrUnsupported)
 }
 
 // librariesFrom reads the list of libraries, turning the single folder of an
@@ -168,6 +165,7 @@ func librariesFrom(f file) []media.Library {
 		if l.Name != "" {
 			lib.Name = l.Name
 		}
+		lib.HiddenFromTVs = l.HiddenFromTVs
 		out = append(out, lib)
 	}
 	if len(out) == 0 && f.LibraryRoot != "" {
@@ -179,7 +177,7 @@ func librariesFrom(f file) []media.Library {
 func librariesTo(libs []media.Library) []libraryFile {
 	out := make([]libraryFile, len(libs))
 	for i, l := range libs {
-		out[i] = libraryFile{Name: l.Name, Root: l.Root}
+		out[i] = libraryFile{Name: l.Name, Root: l.Root, HiddenFromTVs: l.HiddenFromTVs}
 	}
 	return out
 }

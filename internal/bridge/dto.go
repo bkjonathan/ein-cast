@@ -2,10 +2,12 @@ package bridge
 
 import (
 	"log/slog"
+	"time"
 
 	"eincast/internal/app"
 	"eincast/internal/app/portfree"
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/profile"
 )
 
 // AppInfoDTO is what the frontend sees about the running app.
@@ -42,6 +44,8 @@ type LibraryStateDTO struct {
 	Error string `json:"error"`
 	// Watching is true while the folder is watched for changes.
 	Watching bool `json:"watching"`
+	// HiddenFromTVs keeps the library off smart TVs.
+	HiddenFromTVs bool `json:"hiddenFromTVs"`
 }
 
 func toLibraryStateDTO(s app.LibraryState) LibraryStateDTO {
@@ -56,9 +60,10 @@ func toLibraryStateDTO(s app.LibraryState) LibraryStateDTO {
 			Audio: s.Stats.Counts[media.KindAudio],
 			Image: s.Stats.Counts[media.KindImage],
 		},
-		Scanning: s.Scanning,
-		Error:    s.Error,
-		Watching: s.Watching,
+		Scanning:      s.Scanning,
+		Error:         s.Error,
+		Watching:      s.Watching,
+		HiddenFromTVs: s.Library.HiddenFromTVs,
 	}
 }
 
@@ -82,6 +87,16 @@ type LibraryItemDTO struct {
 	Kind      string `json:"kind"`
 	Size      int64  `json:"size"`
 	ModTime   int64  `json:"modTime"`
+	// Title is what to show: read from the name or a .nfo, else the file name.
+	Title string `json:"title"`
+	// Year is 0 when unknown. Show, Season and Episode are set for an episode of
+	// a series, empty and 0 otherwise.
+	Year    int    `json:"year"`
+	Show    string `json:"show"`
+	Season  int    `json:"season"`
+	Episode int    `json:"episode"`
+	// Poster says the thumbnail is a poster found next to the file.
+	Poster bool `json:"poster"`
 }
 
 func toLibraryItemDTOs(items []media.Item) []LibraryItemDTO {
@@ -95,6 +110,12 @@ func toLibraryItemDTOs(items []media.Item) []LibraryItemDTO {
 			Kind:      string(it.Kind),
 			Size:      it.Size,
 			ModTime:   it.ModTime.UnixMilli(),
+			Title:     it.DisplayName(),
+			Year:      it.Meta.Year,
+			Poster:    it.Artwork.Present(),
+		}
+		if it.Meta.IsEpisode() {
+			out[i].Show, out[i].Season, out[i].Episode = it.Meta.Show, it.Meta.Season, it.Meta.Episode
 		}
 	}
 	return out
@@ -243,32 +264,61 @@ func toRemoteFieldStateDTOs(in []app.FieldState) []RemoteFieldStateDTO {
 // token is switched on; TokenPersisted is false when it could not be saved to
 // the system credential store.
 type SettingsDTO struct {
-	Port           int    `json:"port"`
-	Name           string `json:"name"`
-	RequireToken   bool   `json:"requireToken"`
-	DLNA           bool   `json:"dlna"`
-	AccessToken    string `json:"accessToken"`
-	TokenPersisted bool   `json:"tokenPersisted"`
+	Port             int    `json:"port"`
+	Name             string `json:"name"`
+	RequireToken     bool   `json:"requireToken"`
+	DLNA             bool   `json:"dlna"`
+	AutoStart        bool   `json:"autoStart"`
+	KeepAwake        bool   `json:"keepAwake"`
+	OpenAtLogin      bool   `json:"openAtLogin"`
+	HideOnClose      bool   `json:"hideOnClose"`
+	FFmpegPath       string `json:"ffmpegPath"`
+	HardwareEncoding bool   `json:"hardwareEncoding"`
+	CheckForUpdates  bool   `json:"checkForUpdates"`
+	AccessToken      string `json:"accessToken"`
+	TokenPersisted   bool   `json:"tokenPersisted"`
 }
 
 func toSettingsDTO(v app.SettingsView) SettingsDTO {
 	return SettingsDTO{
-		Port:           v.Port,
-		Name:           v.Name,
-		RequireToken:   v.RequireToken,
-		DLNA:           v.DLNA,
-		AccessToken:    v.Token,
-		TokenPersisted: v.TokenPersisted,
+		Port:             v.Port,
+		Name:             v.Name,
+		RequireToken:     v.RequireToken,
+		DLNA:             v.DLNA,
+		AutoStart:        v.AutoStart,
+		KeepAwake:        v.KeepAwake,
+		OpenAtLogin:      v.OpenAtLogin,
+		HideOnClose:      v.HideOnClose,
+		FFmpegPath:       v.FFmpegPath,
+		HardwareEncoding: v.HardwareEncoding,
+		CheckForUpdates:  v.CheckForUpdates,
+		AccessToken:      v.Token,
+		TokenPersisted:   v.TokenPersisted,
 	}
 }
 
 // SettingsInputDTO is what the Settings form sends back. The library folder and
 // the token itself are not editable here.
 type SettingsInputDTO struct {
-	Port         int    `json:"port"`
-	Name         string `json:"name"`
-	RequireToken bool   `json:"requireToken"`
-	DLNA         bool   `json:"dlna"`
+	Port             int    `json:"port"`
+	Name             string `json:"name"`
+	RequireToken     bool   `json:"requireToken"`
+	DLNA             bool   `json:"dlna"`
+	AutoStart        bool   `json:"autoStart"`
+	KeepAwake        bool   `json:"keepAwake"`
+	OpenAtLogin      bool   `json:"openAtLogin"`
+	HideOnClose      bool   `json:"hideOnClose"`
+	HardwareEncoding bool   `json:"hardwareEncoding"`
+	CheckForUpdates  bool   `json:"checkForUpdates"`
+}
+
+// FFmpegStatusDTO says where ffmpeg is. Chosen is the location the person set,
+// which can be set and broken, so it is shown even when Available is false.
+type FFmpegStatusDTO struct {
+	Available      bool   `json:"available"`
+	Path           string `json:"path"`
+	Chosen         string `json:"chosen"`
+	InstallCommand string `json:"installCommand"`
 }
 
 // PortHolderDTO is a program using a port. Self marks EinCast's own process,
@@ -339,4 +389,114 @@ func nonNil(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// ProfileDTO is one profile as the Settings screen edits it. It never carries a PIN
+// or a hash, only whether a PIN is set. Libraries and Kinds are what the profile
+// may see (empty Kinds means all); AllLibraries says "every library, even ones
+// added later".
+type ProfileDTO struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Color         string   `json:"color"`
+	AllLibraries  bool     `json:"allLibraries"`
+	Libraries     []string `json:"libraries"`
+	Kinds         []string `json:"kinds"`
+	HiddenFolders []string `json:"hiddenFolders"`
+	HasPIN        bool     `json:"hasPin"`
+}
+
+func toProfileDTO(e app.ProfileEntry) ProfileDTO {
+	p := e.Profile
+	out := ProfileDTO{
+		ID: string(p.ID), Name: p.Name, Color: p.Color, AllLibraries: p.AllLibraries, HasPIN: e.HasPIN,
+		// Non-nil: JSON [] rather than null.
+		Libraries: []string{}, Kinds: []string{}, HiddenFolders: append([]string{}, p.HiddenFolders...),
+	}
+	for _, l := range p.Libraries {
+		out.Libraries = append(out.Libraries, string(l))
+	}
+	for _, k := range p.Kinds {
+		out.Kinds = append(out.Kinds, string(k))
+	}
+	return out
+}
+
+func toProfileDTOs(in []app.ProfileEntry) []ProfileDTO {
+	out := make([]ProfileDTO, len(in))
+	for i, e := range in {
+		out[i] = toProfileDTO(e)
+	}
+	return out
+}
+
+// toProfile reads what the form sent. An empty ID means a new profile.
+func (d ProfileDTO) toProfile() profile.Profile {
+	p := profile.Profile{
+		ID: profile.ID(d.ID), Name: d.Name, Color: d.Color, AllLibraries: d.AllLibraries,
+		HiddenFolders: d.HiddenFolders,
+	}
+	for _, l := range d.Libraries {
+		p.Libraries = append(p.Libraries, media.LibraryID(l))
+	}
+	for _, k := range d.Kinds {
+		p.Kinds = append(p.Kinds, media.Kind(k))
+	}
+	return p
+}
+
+// UpdateAssetDTO is one file of a release. SHA256 is empty when the release
+// published no checksum for it.
+type UpdateAssetDTO struct {
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+// UpdateReleaseDTO is the newest release. Notes are plain text from the network:
+// the UI shows them as text, never as markup.
+type UpdateReleaseDTO struct {
+	Version     string           `json:"version"`
+	Name        string           `json:"name"`
+	Notes       string           `json:"notes"`
+	PublishedAt int64            `json:"publishedAt"` // Unix milliseconds; 0 when unknown
+	Assets      []UpdateAssetDTO `json:"assets"`
+}
+
+// UpdateStatusDTO says whether a newer version is out. The release's address
+// is not here: the UI asks Go to open it (OpenUpdatePage) and cannot supply one.
+type UpdateStatusDTO struct {
+	Current   string            `json:"current"`
+	Checking  bool              `json:"checking"`
+	Available bool              `json:"available"`
+	Latest    *UpdateReleaseDTO `json:"latest"`
+	CheckedAt int64             `json:"checkedAt"` // Unix milliseconds; 0 until a check succeeds
+	Error     string            `json:"error"`
+}
+
+func toUpdateStatusDTO(st app.UpdateStatus) UpdateStatusDTO {
+	out := UpdateStatusDTO{
+		Current: st.Current, Checking: st.Checking, Available: st.Available,
+		CheckedAt: millis(st.CheckedAt), Error: st.Error,
+	}
+	if st.Latest != nil {
+		l := UpdateReleaseDTO{
+			Version: st.Latest.Version, Name: st.Latest.Name, Notes: st.Latest.Notes,
+			PublishedAt: millis(st.Latest.PublishedAt),
+			Assets:      make([]UpdateAssetDTO, len(st.Latest.Assets)), // non-nil: JSON [] rather than null
+		}
+		for i, a := range st.Latest.Assets {
+			l.Assets[i] = UpdateAssetDTO{Name: a.Name, Size: a.Size, SHA256: a.SHA256}
+		}
+		out.Latest = &l
+	}
+	return out
+}
+
+// millis is a time as Unix milliseconds, 0 for the zero time.
+func millis(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixMilli()
 }

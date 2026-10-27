@@ -81,7 +81,7 @@ describe("onEvent", () => {
   });
 
   it.each([
-    ["settings:changed", { port: 9000, name: "Den", requireToken: true, dlna: false, accessToken: "t", tokenPersisted: true }],
+    ["settings:changed", { port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: false, keepAwake: true, openAtLogin: false, hideOnClose: false, ffmpegPath: "", accessToken: "t", tokenPersisted: true }],
   ] as const)("delivers %s payloads", (name, payload) => {
     let deliver: (payload: unknown) => void = () => undefined;
     runtime.EventsOn.mockImplementation((_n: string, cb: (p: unknown) => void) => {
@@ -105,13 +105,30 @@ describe("onEvent", () => {
     onEvent(name, handler);
     const wire = {
       id: "f1", name: "Films", root: "/m", total: 1, totalSize: 7,
-      counts: { video: 1, audio: 0, image: 0 }, scanning: true, error: "", watching: false,
+      counts: { video: 1, audio: 0, image: 0 }, scanning: true, error: "", watching: false, hiddenFromTVs: false,
     };
     deliver([wire]);
     expect(runtime.EventsOn).toHaveBeenLastCalledWith(name, expect.any(Function));
     expect(handler).toHaveBeenCalledWith([wire]);
     deliver([]);
     expect(handler).toHaveBeenLastCalledWith([]);
+  });
+
+  it("decodes profiles:changed into a list of profiles and rejects an unknown kind", () => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_n: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+    const handler = vi.fn();
+    onEvent("profiles:changed", handler);
+    const wire = {
+      id: "k", name: "Kids", color: "green", allLibraries: true, libraries: [], kinds: ["video"], hiddenFolders: [], hasPin: false,
+    };
+    deliver([wire]);
+    expect(runtime.EventsOn).toHaveBeenLastCalledWith("profiles:changed", expect.any(Function));
+    expect(handler).toHaveBeenCalledWith([wire]);
+    expect(() => deliver([{ ...wire, kinds: ["book"] }])).toThrow(/unknown media kind/);
   });
 
   it("decodes remote:status payloads and rejects unknown states", () => {
@@ -134,5 +151,21 @@ describe("onEvent", () => {
     expect(() => deliver({ ...payload, state: "paused" })).toThrow();
     expect(() => deliver({ ...payload, live: "paused" })).toThrow();
     expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("decodes update:status payloads, with a null release", () => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_name: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+
+    const handler = vi.fn();
+    onEvent("update:status", handler);
+    deliver({ current: "1.1.1", checking: true, available: false, latest: null, checkedAt: 0, error: "" });
+
+    expect(handler).toHaveBeenCalledWith({
+      current: "1.1.1", checking: true, available: false, latest: null, checkedAt: 0, error: "",
+    });
   });
 });

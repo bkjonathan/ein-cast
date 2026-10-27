@@ -7,7 +7,8 @@ interface PortTools {
   /** The port the list above is about; the text field may have moved on since. */
   checkedPort: number | null;
   /** Set after a program was ended and the port is free again. */
-  freedNote: string | null;
+  /** Who was ended and which port that freed, to be put into words by the screen. */
+  freed: { who: string | number; port: number } | null;
   pending: boolean;
   /** Go's reason the last command was refused. */
   error: string | null;
@@ -24,7 +25,7 @@ interface PortTools {
 export function usePortTools(): PortTools {
   const [holders, setHolders] = useState<PortHolder[] | null>(null);
   const [checkedPort, setCheckedPort] = useState<number | null>(null);
-  const [freedNote, setFreedNote] = useState<string | null>(null);
+  const [freed, setFreed] = useState<{ who: string | number; port: number } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +44,7 @@ export function usePortTools(): PortTools {
   const check = useCallback(
     (port: number) =>
       run(async () => {
-        setFreedNote(null);
+        setFreed(null);
         setHolders(await checkPort(port));
         setCheckedPort(port);
       }),
@@ -54,7 +55,7 @@ export function usePortTools(): PortTools {
     (port: number, holder: PortHolder) =>
       run(async () => {
         await freePort(port, holder.pid);
-        setFreedNote(`${holder.name || `Process ${holder.pid}`} was ended. Port ${port} is free.`);
+        setFreed({ who: holder.name || holder.pid, port });
         setHolders(await checkPort(port));
         setCheckedPort(port);
       }),
@@ -64,9 +65,9 @@ export function usePortTools(): PortTools {
   const reset = useCallback(() => {
     setHolders(null);
     setCheckedPort(null);
-    setFreedNote(null);
+    setFreed(null);
     setError(null);
   }, []);
 
-  return { holders, checkedPort, freedNote, pending, error, check, free, reset };
+  return { holders, checkedPort, freed, pending, error, check, free, reset };
 }

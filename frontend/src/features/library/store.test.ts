@@ -12,6 +12,7 @@ const lib = (id: string, over: Partial<LibraryState> = {}): LibraryState => ({
   scanning: false,
   error: "",
   watching: false,
+  hiddenFromTVs: false,
   ...over,
 });
 
@@ -69,7 +70,7 @@ describe("library store", () => {
   });
 
   it("keeps the file list and the browsing choices apart from Go's libraries", () => {
-    const item = { id: "a", libraryId: "a", name: "a.mp4", relPath: "a.mp4", kind: "video" as const, size: 1, modTime: 1 };
+    const item = { id: "a", libraryId: "a", name: "a.mp4", relPath: "a.mp4", title: "a.mp4", year: 0, show: "", season: 0, episode: 0, poster: false, kind: "video" as const, size: 1, modTime: 1 };
     useLibraryStore.getState().setItems([item]);
     useLibraryStore.getState().setKind("audio");
     useLibraryStore.getState().setLibrary("a");

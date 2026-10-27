@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -231,17 +232,19 @@ func TestLibrary_ListHidesInternalFields(t *testing.T) {
 		t.Fatalf("got %d items, want 3", len(items))
 	}
 	for _, it := range items {
-		keys := make([]string, 0, len(it))
-		for k := range it {
-			keys = append(keys, k)
-		}
-		for _, want := range []string{"id", "name", "kind", "size", "modTime", "subtitles"} {
+		// An exact list: a new field must be added here on purpose, so a path or
+		// anything else internal cannot leak by accident.
+		allowed := []string{"id", "name", "kind", "size", "modTime", "subtitles",
+			"title", "year", "show", "season", "episode", "plot", "poster", "legacyId"}
+		for _, want := range allowed {
 			if _, ok := it[want]; !ok {
 				t.Errorf("item missing %q: %v", want, it)
 			}
 		}
-		if len(keys) != 6 {
-			t.Errorf("item has keys %v; only id, name, kind, size, modTime, subtitles may be exposed", keys)
+		for k := range it {
+			if !slices.Contains(allowed, k) {
+				t.Errorf("item exposes %q; only %v may be exposed", k, allowed)
+			}
 		}
 	}
 	if strings.Contains(fmt.Sprint(items), f.root) {
@@ -610,5 +613,37 @@ func TestPlayerPage_SendsTheHeaderThatSkipsNgroksWarningPage(t *testing.T) {
 	body := string(readBody(t, f.get("/static/app.js")))
 	if !strings.Contains(body, "'ngrok-skip-browser-warning': '1'") {
 		t.Error("the player page's requests do not carry ngrok-skip-browser-warning: behind a free ngrok address the library would not load")
+	}
+}
+
+func TestLibrary_ItemsCarryTheirMetadata(t *testing.T) {
+	f := newFixture(t)
+	f.lib.items = []media.Item{
+		{ID: "m1", Name: "Heat.1995.1080p.mkv", Kind: media.KindVideo, Path: "/secret/Heat.mkv",
+			Meta: media.Meta{Title: "Heat", Year: 1995, Plot: "A thief and a cop."}, Artwork: media.Artwork{Path: "/secret/poster.jpg"}},
+		{ID: "e1", Name: "S01E02.mkv", Kind: media.KindVideo,
+			Meta: media.Meta{Title: "The Pilot", Show: "Show", Season: 1, Episode: 2}},
+		{ID: "n1", Name: "numbered.mkv", Kind: media.KindVideo, Meta: media.Meta{Title: "numbered", Episode: 4}}, // no series: not an episode
+		{ID: "a1", Name: "song.mp3", Kind: media.KindAudio},
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(readBody(t, f.get("/api/library")), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []map[string]any{
+		{"title": "Heat", "year": 1995.0, "show": "", "season": 0.0, "episode": 0.0, "plot": "A thief and a cop.", "poster": true, "name": "Heat.1995.1080p.mkv"},
+		{"title": "The Pilot", "year": 0.0, "show": "Show", "season": 1.0, "episode": 2.0, "plot": "", "poster": false, "name": "S01E02.mkv"},
+		{"title": "numbered", "year": 0.0, "show": "", "season": 0.0, "episode": 0.0, "plot": "", "poster": false, "name": "numbered.mkv"},
+		{"title": "song.mp3", "year": 0.0, "show": "", "season": 0.0, "episode": 0.0, "plot": "", "poster": false, "name": "song.mp3"},
+	}
+	for i, w := range want {
+		for k, v := range w {
+			if got[i][k] != v {
+				t.Errorf("item %d %q = %v, want %v", i, k, got[i][k], v)
+			}
+		}
+	}
+	if strings.Contains(fmt.Sprint(got), "/secret") {
+		t.Error("response leaks a path")
 	}
 }

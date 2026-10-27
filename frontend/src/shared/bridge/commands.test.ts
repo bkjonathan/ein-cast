@@ -31,14 +31,46 @@ const go = vi.hoisted(() => ({
   ThumbnailsAvailable: vi.fn(),
   SetRemotePIN: vi.fn(),
   ClearRemotePIN: vi.fn(),
+  GetFFmpegStatus: vi.fn(),
+  ChooseFFmpeg: vi.fn(),
+  ClearFFmpegPath: vi.fn(),
+  RefreshAddresses: vi.fn(),
+  ListProfiles: vi.fn(),
+  SaveProfile: vi.fn(),
+  DeleteProfile: vi.fn(),
+  SetProfilePIN: vi.fn(),
+  ClearProfilePIN: vi.fn(),
+  SetLibraryHiddenFromTVs: vi.fn(),
+  GetUpdateStatus: vi.fn(),
+  CheckForUpdatesNow: vi.fn(),
+  OpenUpdatePage: vi.fn(),
+  ResetApp: vi.fn(),
+  GetDiagnostics: vi.fn(),
+  OpenHelpPage: vi.fn(),
 }));
 vi.mock("../../../wailsjs/go/bridge/App", () => go);
 
 import {
+  checkForUpdatesNow,
+  getUpdateStatus,
+  openUpdatePage,
+  resetApp,
+  getDiagnostics,
+  openHelpPage,
   checkPort,
   freePort,
+  chooseFFmpeg,
+  clearProfilePin,
+  deleteProfile,
+  listProfiles,
+  saveProfile,
+  setLibraryHiddenFromTVs,
+  setProfilePin,
   chooseFile,
   chooseFolder,
+  clearFFmpegPath,
+  getFFmpegStatus,
+  refreshAddresses,
   clearRemotePin,
   clearRemoteProviderField,
   getRemoteProviderConfig,
@@ -89,14 +121,14 @@ describe("listLibraries", () => {
   it("maps every library and copies the counts", async () => {
     const dto = {
       id: "f1", name: "Films", root: "/m/films", total: 3, totalSize: 99,
-      counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true, extra: 1,
+      counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true, hiddenFromTVs: true, extra: 1,
     };
     go.ListLibraries.mockResolvedValue([dto]);
     const got = await listLibraries();
     expect(got).toStrictEqual([
       {
         id: "f1", name: "Films", root: "/m/films", total: 3, totalSize: 99,
-        counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true,
+        counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true, hiddenFromTVs: true,
       },
     ]);
     expect(got[0]?.counts).not.toBe(dto.counts);
@@ -174,10 +206,16 @@ describe("getLogHistory", () => {
 describe("listLibrary", () => {
   it("maps every item and narrows the kind", async () => {
     go.ListLibrary.mockResolvedValue([
-      { id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9, extra: 1 },
+      {
+        id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9,
+        title: "Pilot", year: 2014, show: "Fargo", season: 1, episode: 1, poster: true, extra: 1,
+      },
     ]);
     await expect(listLibrary()).resolves.toStrictEqual([
-      { id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9 },
+      {
+        id: "a1", libraryId: "L1", name: "a.mkv", relPath: "tv/a.mkv", kind: "video", size: 5, modTime: 9,
+        title: "Pilot", year: 2014, show: "Fargo", season: 1, episode: 1, poster: true,
+      },
     ]);
   });
 
@@ -220,20 +258,26 @@ describe("library commands", () => {
 describe("settings", () => {
   it("getSettings maps the DTO", async () => {
     go.GetSettings.mockResolvedValue({
-      port: 9000, name: "Den", requireToken: true, dlna: false, accessToken: "tok", tokenPersisted: true, junk: 1,
+      port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: true, keepAwake: true,
+      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", hardwareEncoding: true, checkForUpdates: true, accessToken: "tok", tokenPersisted: true, junk: 1,
     });
     await expect(getSettings()).resolves.toStrictEqual({
-      port: 9000, name: "Den", requireToken: true, dlna: false, accessToken: "tok", tokenPersisted: true,
+      port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: true, keepAwake: true,
+      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", hardwareEncoding: true, checkForUpdates: true, accessToken: "tok", tokenPersisted: true,
     });
   });
 
-  it("updateSettings sends the three editable fields and surfaces Go's validation message", async () => {
+  it("updateSettings sends the editable fields and surfaces Go's validation message", async () => {
+    const input = {
+      port: 9100, name: "Den", requireToken: false, dlna: false,
+      autoStart: true, keepAwake: true, openAtLogin: false, hideOnClose: false, hardwareEncoding: true, checkForUpdates: true,
+    };
     go.UpdateSettings.mockResolvedValueOnce(undefined);
-    await updateSettings({ port: 9100, name: "Den", requireToken: false, dlna: false });
-    expect(go.UpdateSettings).toHaveBeenCalledWith({ port: 9100, name: "Den", requireToken: false, dlna: false });
+    await updateSettings(input);
+    expect(go.UpdateSettings).toHaveBeenCalledWith(input);
 
     go.UpdateSettings.mockRejectedValueOnce("port must be between 1024 and 65535");
-    await expect(updateSettings({ port: 80, name: "Den", requireToken: false, dlna: false })).rejects.toMatch(/between 1024/);
+    await expect(updateSettings({ ...input, port: 80 })).rejects.toMatch(/between 1024/);
   });
 
   it("rotateAccessToken resolves with nothing", async () => {
@@ -386,5 +430,144 @@ describe("port commands", () => {
   it("freePort propagates Go's reason", async () => {
     go.FreePort.mockRejectedValue("Not allowed: that program belongs to another user");
     await expect(freePort(8765, 300)).rejects.toMatch(/Not allowed/);
+  });
+});
+
+describe("ffmpeg and addresses", () => {
+  it("getFFmpegStatus maps the DTO", async () => {
+    go.GetFFmpegStatus.mockResolvedValue({
+      available: false, path: "", chosen: "/old/ffmpeg", installCommand: "brew install ffmpeg", junk: 1,
+    });
+    await expect(getFFmpegStatus()).resolves.toStrictEqual({
+      available: false, path: "", chosen: "/old/ffmpeg", installCommand: "brew install ffmpeg",
+    });
+  });
+
+  it("chooseFFmpeg resolves when cancelled and rejects with Go's reason for a file that cannot run", async () => {
+    go.ChooseFFmpeg.mockResolvedValueOnce(undefined);
+    await expect(chooseFFmpeg()).resolves.toBeUndefined();
+    go.ChooseFFmpeg.mockRejectedValueOnce("/tmp/x is not executable");
+    await expect(chooseFFmpeg()).rejects.toMatch(/not executable/);
+  });
+
+  it("clearFFmpegPath and refreshAddresses just ask Go", async () => {
+    go.ClearFFmpegPath.mockResolvedValue(undefined);
+    go.RefreshAddresses.mockResolvedValue(undefined);
+    await clearFFmpegPath();
+    await refreshAddresses();
+    expect(go.ClearFFmpegPath).toHaveBeenCalledOnce();
+    expect(go.RefreshAddresses).toHaveBeenCalledOnce();
+  });
+});
+
+describe("profiles", () => {
+  const dto = {
+    id: "k1", name: "Kids", color: "green", allLibraries: false, libraries: ["a"], kinds: ["video"],
+    hiddenFolders: ["18*"], hasPin: true, extra: 1,
+  };
+  const profile = {
+    id: "k1", name: "Kids", color: "green", allLibraries: false, libraries: ["a"], kinds: ["video"] as const,
+    hiddenFolders: ["18*"], hasPin: true,
+  };
+
+  it("listProfiles maps every profile and narrows the kinds", async () => {
+    go.ListProfiles.mockResolvedValue([dto]);
+    await expect(listProfiles()).resolves.toStrictEqual([{ ...profile, kinds: ["video"] }]);
+  });
+
+  it("saveProfile sends the profile and resolves with what Go stored", async () => {
+    go.SaveProfile.mockResolvedValue({ ...dto, id: "new1" });
+    const saved = await saveProfile({ ...profile, id: "", kinds: ["video"] });
+    expect(go.SaveProfile).toHaveBeenCalledWith({ ...profile, id: "", kinds: ["video"] });
+    expect(saved.id).toBe("new1");
+  });
+
+  it("saveProfile surfaces Go's reason in words", async () => {
+    go.SaveProfile.mockRejectedValueOnce("the name must be 1 to 32 characters");
+    await expect(saveProfile({ ...profile, name: "", kinds: ["video"] })).rejects.toMatch(/the name must be/);
+  });
+
+  it("the PIN commands pass the id and the PIN, and nothing else", async () => {
+    go.SetProfilePIN.mockResolvedValue(undefined);
+    go.ClearProfilePIN.mockResolvedValue(undefined);
+    go.DeleteProfile.mockResolvedValue(undefined);
+    go.SetLibraryHiddenFromTVs.mockResolvedValue(undefined);
+    await setProfilePin("k1", "1234");
+    await clearProfilePin("k1");
+    await deleteProfile("k1");
+    await setLibraryHiddenFromTVs("L1", true);
+    expect(go.SetProfilePIN).toHaveBeenCalledWith("k1", "1234");
+    expect(go.ClearProfilePIN).toHaveBeenCalledWith("k1");
+    expect(go.DeleteProfile).toHaveBeenCalledWith("k1");
+    expect(go.SetLibraryHiddenFromTVs).toHaveBeenCalledWith("L1", true);
+  });
+});
+
+describe("updates", () => {
+  const dto = {
+    current: "1.1.1", checking: false, available: true, checkedAt: 1_700_000_000_000, error: "", junk: 1,
+    latest: {
+      version: "1.1.2", name: "EinCast 1.1.2", notes: "- fixes", publishedAt: 1_700_000_100_000,
+      assets: [{ name: "a.zip", size: 5, sha256: "ab", extra: 1 }],
+    },
+  };
+  const status = {
+    current: "1.1.1", checking: false, available: true, checkedAt: 1_700_000_000_000, error: "",
+    latest: {
+      version: "1.1.2", name: "EinCast 1.1.2", notes: "- fixes", publishedAt: 1_700_000_100_000,
+      assets: [{ name: "a.zip", size: 5, sha256: "ab" }],
+    },
+  };
+
+  it("getUpdateStatus maps the DTO and drops unknown fields", async () => {
+    go.GetUpdateStatus.mockResolvedValue(dto);
+    await expect(getUpdateStatus()).resolves.toStrictEqual(status);
+  });
+
+  it("a status with no release has latest null, whether Go sent null or left it out", async () => {
+    go.GetUpdateStatus.mockResolvedValueOnce({ ...dto, latest: null, available: false });
+    await expect(getUpdateStatus()).resolves.toMatchObject({ latest: null });
+    go.GetUpdateStatus.mockResolvedValueOnce({ ...dto, latest: undefined, available: false });
+    await expect(getUpdateStatus()).resolves.toMatchObject({ latest: null });
+  });
+
+  it("checkForUpdatesNow resolves with the status, failures included", async () => {
+    go.CheckForUpdatesNow.mockResolvedValue({ ...dto, latest: null, available: false, error: "offline" });
+    await expect(checkForUpdatesNow()).resolves.toMatchObject({ error: "offline", latest: null });
+  });
+
+  it("openUpdatePage sends no address: Go knows which page to open", async () => {
+    go.OpenUpdatePage.mockResolvedValueOnce(undefined);
+    await openUpdatePage();
+    expect(go.OpenUpdatePage).toHaveBeenCalledWith();
+
+    go.OpenUpdatePage.mockRejectedValueOnce("there is no newer version to download");
+    await expect(openUpdatePage()).rejects.toMatch(/no newer version/);
+  });
+});
+
+describe("resetApp", () => {
+  it("asks Go to erase everything, with no arguments: what to erase is not the window's choice", async () => {
+    go.ResetApp.mockResolvedValueOnce(undefined);
+    await resetApp();
+    expect(go.ResetApp).toHaveBeenCalledWith();
+  });
+
+  it("rejects with Go's reason when only part was erased", async () => {
+    go.ResetApp.mockRejectedValueOnce("Could not erase everything: remove /x: permission denied");
+    await expect(resetApp()).rejects.toMatch(/permission denied/);
+  });
+});
+
+describe("help", () => {
+  it("getDiagnostics returns Go's text unchanged", async () => {
+    go.GetDiagnostics.mockResolvedValueOnce("EinCast diagnostics\nVersion: 1");
+    await expect(getDiagnostics()).resolves.toBe("EinCast diagnostics\nVersion: 1");
+  });
+
+  it("openHelpPage sends a topic, never an address", async () => {
+    go.OpenHelpPage.mockResolvedValueOnce(undefined);
+    await openHelpPage("bug");
+    expect(go.OpenHelpPage).toHaveBeenCalledWith("bug");
   });
 });

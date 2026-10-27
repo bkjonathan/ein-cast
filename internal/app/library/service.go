@@ -207,6 +207,22 @@ func (s *Service) Rename(id media.LibraryID, name string) error {
 	return nil
 }
 
+// SetHiddenFromTVs keeps a library off smart TVs, or shows it to them again. A TV
+// cannot say who is watching, so this is the only choice it gets (ADR 0027).
+func (s *Service) SetHiddenFromTVs(id media.LibraryID, hidden bool) error {
+	s.mu.Lock()
+	i := slices.IndexFunc(s.libs, func(l media.Library) bool { return l.ID == id })
+	if i < 0 {
+		s.mu.Unlock()
+		return ErrNoSuchLibrary
+	}
+	s.libs[i].HiddenFromTVs = hidden
+	s.remember()
+	s.mu.Unlock()
+	s.publishStatus()
+	return nil
+}
+
 // remember saves the list. A failure is logged and not returned: the library
 // works for this run, and the person just adds the folder again next launch.
 // Must be called with mu held.
@@ -315,13 +331,15 @@ func (s *Service) scan(ctx context.Context, lib media.Library, trigger scanTrigg
 	return st, nil
 }
 
-// sameFiles reports whether two scans found the same files, unchanged. Subtitles
-// count: adding or removing one changes what a player offers. Paths need no
+// sameFiles reports whether two scans found the same files, unchanged. Subtitles,
+// the title and series read from the name or a .nfo, and the poster all count:
+// changing one changes what a player shows. Paths need no
 // comparing: both scans walked the same root, and the ID is derived from the path.
 func sameFiles(a, b []media.Item) bool {
 	return slices.EqualFunc(a, b, func(x, y media.Item) bool {
 		return x.ID == y.ID && x.Size == y.Size && x.ModTime.Equal(y.ModTime) &&
-			slices.Equal(subtitlePaths(x), subtitlePaths(y))
+			slices.Equal(subtitlePaths(x), subtitlePaths(y)) &&
+			x.Meta == y.Meta && x.Artwork == y.Artwork
 	})
 }
 

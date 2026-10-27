@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Globe, Info, LoaderCircle, Power, PowerOff, ShieldAlert } from "lucide-react";
 import { useServerStore } from "@/features/server";
 import { useSettingsStore } from "@/features/settings";
+import { useT } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import { GlassButton, GlassPanel, GlassPill } from "@/shared/ui/glass";
 import { enableBlocker, remoteActions, summarize } from "../describe";
@@ -21,15 +22,17 @@ export function ProviderPanel() {
   const { enable, disable, busy, error } = useRemoteCommands();
   const selectedId = defaultProvider(providers, status?.provider ?? "", picked);
   const notice = useNotice(selectedId);
+  const { t } = useT();
 
   if (!status) return null;
 
   const { canEnable, canDisable } = remoteActions(status);
   const selected = providers.find((p) => p.id === selectedId);
-  const noticeText = selected ? describeProvider(selected).notice : null;
+  const noticeKey = selected ? describeProvider(selected).noticeKey : null;
+  const noticeText = noticeKey ? t(noticeKey) : null;
   const noticePending = noticeText !== null && !notice.acknowledged;
-  const blocker = canEnable ? enableBlocker(selected, status, serverRunning, noticePending) : null;
-  const { label, tone } = summarize(status);
+  const blockerKey = canEnable ? enableBlocker(selected, status, serverRunning, noticePending) : null;
+  const { labelKey, tone } = summarize(status);
   const shownError = status.error || error;
 
   return (
@@ -37,23 +40,23 @@ export function ProviderPanel() {
       <header className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <Globe className="size-5" aria-hidden /> Remote access
+            <Globe className="size-5" aria-hidden /> {t("remote.title")}
           </h2>
           <p className="text-sm text-muted-foreground">
-            Watch your library away from home. Pick how devices outside this network connect.
+            {t("remote.intro")}
           </p>
         </div>
         <GlassPill tone={tone} role="status" aria-live="polite">
-          {label}
+          {t(labelKey)}
         </GlassPill>
       </header>
 
       {providers.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No remote access options are available in this version of EinCast.
+          {t("remote.noProviders")}
         </p>
       ) : (
-        <div role="radiogroup" aria-label="How to connect" className="flex flex-col gap-2">
+        <div role="radiogroup" aria-label={t("remote.howToConnect")} className="flex flex-col gap-2">
           {providers.map((p) => {
             const copy = describeProvider(p);
             const checked = p.id === selectedId;
@@ -80,20 +83,20 @@ export function ProviderPanel() {
                       p.public ? "bg-warning/20 text-warning" : "bg-success/20 text-success",
                     )}
                   >
-                    {p.public ? "Public" : "Private"}
+                    {p.public ? t("remote.public") : t("remote.private")}
                   </span>
                   {status.needsSetup.includes(p.id) && (
                     <span className="rounded-full bg-(--glass-surface-hover) px-2 py-0.5 text-xs text-muted-foreground">
-                      Needs setup
+                      {t("remote.needsSetup")}
                     </span>
                   )}
                   {copy.recommended && (
                     <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs text-primary">
-                      Recommended
+                      {t("remote.recommended")}
                     </span>
                   )}
                 </span>
-                <span className="mt-1 block text-sm text-muted-foreground">{copy.summary}</span>
+                <span className="mt-1 block text-sm text-muted-foreground">{t(copy.summaryKey)}</span>
               </button>
             );
           })}
@@ -113,8 +116,7 @@ export function ProviderPanel() {
       {canEnable && selected?.public && (
         <p className="flex items-start gap-2 text-sm text-warning">
           <ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-          Anyone on the Internet who learns the address can reach its sign-in page. Only your PIN
-          stands between them and your library.
+          {t("remote.publicWarning")}
         </p>
       )}
 
@@ -125,25 +127,24 @@ export function ProviderPanel() {
             {noticeText}
           </p>
           <GlassButton size="sm" className="self-start" onClick={notice.acknowledge}>
-            I understand
+            {t("remote.understand")}
           </GlassButton>
         </div>
       )}
 
       <p className="text-xs text-muted-foreground">
-        Playing away from home is limited by your home internet's upload speed. A film needs a few
-        megabits per second to your viewer, all the time it plays.
+        {t("remote.uploadNote")}
       </p>
 
       {status.state === "running" && status.url && (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Address</p>
+          <p className="text-xs font-medium text-muted-foreground">{t("remote.address")}</p>
           <code className="glass block truncate rounded-glass-sm px-3 py-2 font-mono text-sm select-text">
             {status.url}
           </code>
           <p className="text-xs text-muted-foreground">
-            The Dashboard shows a QR code for it under “Connect a device”.
-            {status.public && status.sessions > 0 && ` ${status.sessions} signed in.`}
+            {t("remote.qrNote")}
+            {status.public && status.sessions > 0 && ` ${t("remote.signedIn", { count: status.sessions })}`}
           </p>
         </div>
       )}
@@ -162,18 +163,18 @@ export function ProviderPanel() {
             ) : (
               <PowerOff />
             )}
-            {status.state === "starting" ? "Cancel" : status.state === "failed" ? "Try turning off again" : "Turn off"}
+            {status.state === "starting" ? t("remote.cancel") : status.state === "failed" ? t("remote.tryOffAgain") : t("remote.turnOff")}
           </GlassButton>
         ) : (
           <GlassButton
             onClick={() => void enable(selectedId)}
-            disabled={!canEnable || blocker !== null || busy.enable}
+            disabled={!canEnable || blockerKey !== null || busy.enable}
           >
             {busy.enable || status.state === "starting" ? <LoaderCircle className="animate-spin" /> : <Power />}
-            {status.state === "failed" ? "Try again" : "Turn on"}
+            {status.state === "failed" ? t("server.retry") : t("remote.turnOn")}
           </GlassButton>
         )}
-        {blocker && <p className="text-sm text-muted-foreground">{blocker}</p>}
+        {blockerKey && <p className="text-sm text-muted-foreground">{t(blockerKey)}</p>}
       </div>
     </GlassPanel>
   );

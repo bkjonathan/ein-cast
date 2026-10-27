@@ -12,6 +12,7 @@ const lib = (id: string, over: Partial<LibraryState> = {}): LibraryState => ({
   scanning: false,
   error: "",
   watching: false,
+  hiddenFromTVs: false,
   ...over,
 });
 

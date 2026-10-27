@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -278,6 +279,7 @@ func TestLogin_CookieIsSecureBehindHTTPSTunnel(t *testing.T) {
 }
 
 func TestLogin_RefusalsSetNoCookie(t *testing.T) {
+	wrong := html.EscapeString(english(t, "signin.wrong")) // the page escapes what it prints
 	cases := map[string]struct {
 		form   url.Values
 		query  string
@@ -285,9 +287,9 @@ func TestLogin_RefusalsSetNoCookie(t *testing.T) {
 		status int
 		body   string
 	}{
-		"wrong PIN":        {form: url.Values{"pin": {"nope"}}, status: 401, body: msgWrong},
-		"no PIN":           {form: url.Values{}, status: 401, body: msgWrong},
-		"PIN in the query": {form: url.Values{}, query: "?pin=" + url.QueryEscape(goodPIN), status: 401, body: msgWrong},
+		"wrong PIN":        {form: url.Values{"pin": {"nope"}}, status: 401, body: wrong},
+		"no PIN":           {form: url.Values{}, status: 401, body: wrong},
+		"PIN in the query": {form: url.Values{}, query: "?pin=" + url.QueryEscape(goodPIN), status: 401, body: wrong},
 		"locked out":       {form: url.Values{"pin": {goodPIN}}, locked: 90 * time.Second, status: 429, body: "Try again in about 2 minute"},
 	}
 	for name, c := range cases {

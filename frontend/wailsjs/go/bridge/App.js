@@ -6,8 +6,16 @@ export function AppInfo() {
   return window['go']['bridge']['App']['AppInfo']();
 }
 
+export function CheckForUpdatesNow() {
+  return window['go']['bridge']['App']['CheckForUpdatesNow']();
+}
+
 export function CheckPort(arg1) {
   return window['go']['bridge']['App']['CheckPort'](arg1);
+}
+
+export function ChooseFFmpeg() {
+  return window['go']['bridge']['App']['ChooseFFmpeg']();
 }
 
 export function ChooseFile(arg1) {
@@ -18,12 +26,24 @@ export function ChooseFolder() {
   return window['go']['bridge']['App']['ChooseFolder']();
 }
 
+export function ClearFFmpegPath() {
+  return window['go']['bridge']['App']['ClearFFmpegPath']();
+}
+
+export function ClearProfilePIN(arg1) {
+  return window['go']['bridge']['App']['ClearProfilePIN'](arg1);
+}
+
 export function ClearRemotePIN() {
   return window['go']['bridge']['App']['ClearRemotePIN']();
 }
 
 export function ClearRemoteProviderField(arg1, arg2) {
   return window['go']['bridge']['App']['ClearRemoteProviderField'](arg1, arg2);
+}
+
+export function DeleteProfile(arg1) {
+  return window['go']['bridge']['App']['DeleteProfile'](arg1);
 }
 
 export function DisableRemote() {
@@ -36,6 +56,14 @@ export function EnableRemote(arg1) {
 
 export function FreePort(arg1, arg2) {
   return window['go']['bridge']['App']['FreePort'](arg1, arg2);
+}
+
+export function GetDiagnostics() {
+  return window['go']['bridge']['App']['GetDiagnostics']();
+}
+
+export function GetFFmpegStatus() {
+  return window['go']['bridge']['App']['GetFFmpegStatus']();
 }
 
 export function GetLogHistory() {
@@ -62,6 +90,10 @@ export function GetThumbnail(arg1) {
   return window['go']['bridge']['App']['GetThumbnail'](arg1);
 }
 
+export function GetUpdateStatus() {
+  return window['go']['bridge']['App']['GetUpdateStatus']();
+}
+
 export function ListLibraries() {
   return window['go']['bridge']['App']['ListLibraries']();
 }
@@ -70,8 +102,24 @@ export function ListLibrary() {
   return window['go']['bridge']['App']['ListLibrary']();
 }
 
+export function ListProfiles() {
+  return window['go']['bridge']['App']['ListProfiles']();
+}
+
 export function ListRemoteProviders() {
   return window['go']['bridge']['App']['ListRemoteProviders']();
+}
+
+export function OpenHelpPage(arg1) {
+  return window['go']['bridge']['App']['OpenHelpPage'](arg1);
+}
+
+export function OpenUpdatePage() {
+  return window['go']['bridge']['App']['OpenUpdatePage']();
+}
+
+export function RefreshAddresses() {
+  return window['go']['bridge']['App']['RefreshAddresses']();
 }
 
 export function RemoveLibrary(arg1) {
@@ -90,8 +138,24 @@ export function RescanLibrary(arg1) {
   return window['go']['bridge']['App']['RescanLibrary'](arg1);
 }
 
+export function ResetApp() {
+  return window['go']['bridge']['App']['ResetApp']();
+}
+
 export function RotateAccessToken() {
   return window['go']['bridge']['App']['RotateAccessToken']();
+}
+
+export function SaveProfile(arg1) {
+  return window['go']['bridge']['App']['SaveProfile'](arg1);
+}
+
+export function SetLibraryHiddenFromTVs(arg1, arg2) {
+  return window['go']['bridge']['App']['SetLibraryHiddenFromTVs'](arg1, arg2);
+}
+
+export function SetProfilePIN(arg1, arg2) {
+  return window['go']['bridge']['App']['SetProfilePIN'](arg1, arg2);
 }
 
 export function SetRemotePIN(arg1) {

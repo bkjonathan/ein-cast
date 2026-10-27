@@ -107,7 +107,7 @@ func (s *Service) Get(ctx context.Context, id media.ID) (Thumbnail, error) {
 	if data, ok := s.cache.Get(key); ok {
 		return Thumbnail{JPEG: data, ModTime: it.ModTime}, nil
 	}
-	if !s.grab.Available() {
+	if !s.grab.Available() && !it.Artwork.Present() {
 		return Thumbnail{}, app.ErrThumbnailsUnavailable
 	}
 
@@ -153,7 +153,7 @@ func (s *Service) run(key string, it media.Item, j *job) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.opts.Timeout)
 	defer cancel()
 
-	data, err := s.grab.Grab(ctx, app.GrabRequest{Root: it.Root, Path: it.Path, Kind: it.Kind, Width: Width})
+	data, err := s.grab.Grab(ctx, grabRequest(it))
 	if err == nil {
 		if putErr := s.cache.Put(key, data); putErr != nil {
 			s.log.Warn("could not remember a thumbnail", slog.String("error", putErr.Error()))
@@ -176,9 +176,24 @@ func (s *Service) run(key string, it media.Item, j *job) {
 	close(j.done)
 }
 
+// grabRequest says what to make the picture from: the poster when the item has
+// one, otherwise the item itself (a frame of the video, the cover of a song, the
+// photo).
+func grabRequest(it media.Item) app.GrabRequest {
+	if it.Artwork.Present() {
+		return app.GrabRequest{Root: it.Root, Path: it.Artwork.Path, Kind: media.KindImage, Width: Width}
+	}
+	return app.GrabRequest{Root: it.Root, Path: it.Path, Kind: it.Kind, Width: Width}
+}
+
 // cacheKey names a thumbnail by the item and the exact file it was made from,
-// so an edited or replaced file gets a new thumbnail. Every part is safe in a
-// file name.
+// so an edited or replaced file (or poster) gets a new thumbnail. Every part is
+// safe in a file name. A poster has its own marker, so adding one next to a video
+// that already had a frame thumbnail makes a new picture instead of reusing the
+// old.
 func cacheKey(it media.Item) string {
+	if it.Artwork.Present() {
+		return fmt.Sprintf("%s-art-%d-%d-v%d", it.ID, it.Artwork.Size, it.Artwork.ModTime.UnixNano(), version)
+	}
 	return fmt.Sprintf("%s-%d-%d-v%d", it.ID, it.Size, it.ModTime.UnixNano(), version)
 }

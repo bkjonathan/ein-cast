@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"math"
 	"net/http"
@@ -133,7 +134,7 @@ func (a *api) hasSignedLink(r *http.Request) bool {
 func (a *api) denyTunnel(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == http.MethodGet && r.URL.Path == "/" && strings.Contains(r.Header.Get("Accept"), "text/html") {
-		writeLoginPage(w, http.StatusUnauthorized, msgPrompt)
+		a.writeLoginPage(w, r, http.StatusUnauthorized, func(lang string) string { return a.text.text(lang, keySignInPrompt, nil) })
 		return
 	}
 	writeError(w, http.StatusUnauthorized, codeUnauthorized, "sign in required")
@@ -180,11 +181,13 @@ func (a *api) handleLogin(w http.ResponseWriter, r *http.Request) {
 			slog.String("client_ip", ip), slog.Duration("retry_after", locked.RetryAfter))
 		secs := int(math.Ceil(locked.RetryAfter.Seconds()))
 		w.Header().Set("Retry-After", strconv.Itoa(secs))
-		writeLoginPage(w, http.StatusTooManyRequests,
-			fmt.Sprintf(msgLocked, int(math.Ceil(float64(secs)/60))))
+		minutes := int(math.Ceil(float64(secs) / 60))
+		a.writeLoginPage(w, r, http.StatusTooManyRequests, func(lang string) string {
+			return a.text.plural(lang, keySignInLocked, minutes, nil)
+		})
 	case errors.Is(err, app.ErrWrongPIN):
 		a.log.WarnContext(r.Context(), "remote sign-in failed", slog.String("client_ip", ip))
-		writeLoginPage(w, http.StatusUnauthorized, msgWrong)
+		a.writeLoginPage(w, r, http.StatusUnauthorized, func(lang string) string { return a.text.text(lang, keySignInWrong, nil) })
 	case errors.Is(err, app.ErrNotPublic):
 		a.handleNotFound(w, r)
 	default:
@@ -212,15 +215,18 @@ func (a *api) sameSite(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host) || a.remote.HostAllowed(u.Host)
 }
 
-// Messages on the sign-in page. They are fixed text: nothing a client sent is
-// ever echoed into the page.
+// Keys of the words on the sign-in page (web/locales). They are fixed text:
+// nothing a client sent is ever echoed into the page.
 const (
-	msgPrompt = "Enter your EinCast PIN to continue."
-	msgWrong  = "That PIN didn't work. Try again."
-	msgLocked = "Too many attempts. Try again in about %d minute(s)."
+	keySignInPrompt = "signin.prompt"
+	keySignInWrong  = "signin.wrong"
+	keySignInLocked = "signin.locked" // a plural: .one and .other
+	keySignInButton = "signin.button"
 )
 
+// loginPage takes, in order: the language, the message, the button's text.
 const loginPage = `<!doctype html>
+<html lang="%s">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EinCast</title>
@@ -230,7 +236,7 @@ const loginPage = `<!doctype html>
 <form method="post" action="/login">
 <input type="password" name="pin" autocomplete="current-password" autofocus required maxlength="64"
  style="width:100%%;padding:.6rem;font-size:1rem;box-sizing:border-box">
-<button type="submit" style="margin-top:.8rem;padding:.6rem 1.2rem;font-size:1rem">Sign in</button>
+<button type="submit" style="margin-top:.8rem;padding:.6rem 1.2rem;font-size:1rem">%s</button>
 </form>
 `
 
@@ -238,10 +244,17 @@ const loginPage = `<!doctype html>
 // nothing else: no script, no images, no framing.
 const loginCSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
 
-func writeLoginPage(w http.ResponseWriter, status int, message string) {
+// writeLoginPage answers in the visitor's language. The words come from our own
+// embedded files, but are escaped anyway: the page's safety should not depend on
+// what a translator typed.
+func (a *api) writeLoginPage(w http.ResponseWriter, r *http.Request, status int, message func(lang string) string) {
+	lang := a.langOf(r)
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Content-Security-Policy", loginCSP)
+	h.Set("Content-Language", lang)
+	h.Add("Vary", "Accept-Language")
 	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, loginPage, message)
+	_, _ = fmt.Fprintf(w, loginPage, lang, html.EscapeString(message(lang)),
+		html.EscapeString(a.text.text(lang, keySignInButton, nil)))
 }

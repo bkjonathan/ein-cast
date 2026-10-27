@@ -116,7 +116,8 @@ func TestThumbnail_NothingToShowIsANotFound(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			th := &fakeThumbs{available: true, err: err}
-			_, srv := newThumbFixture(t, &fakeAccess{}, th)
+			f, srv := newThumbFixture(t, &fakeAccess{}, th)
+			assertErrorShape(t, getFrom(t, srv, "/thumb/"+string(f.movie.ID)), http.StatusNotFound, codeNotFound)
 			assertErrorShape(t, getFrom(t, srv, "/thumb/whatever"), http.StatusNotFound, codeNotFound)
 		})
 	}
@@ -124,9 +125,9 @@ func TestThumbnail_NothingToShowIsANotFound(t *testing.T) {
 
 func TestThumbnail_AnUnexpectedFailureIsA500WithoutDetails(t *testing.T) {
 	th := &fakeThumbs{available: true, err: errors.New("disk exploded at /secret/path")}
-	_, srv := newThumbFixture(t, &fakeAccess{}, th)
+	f, srv := newThumbFixture(t, &fakeAccess{}, th)
 
-	resp := getFrom(t, srv, "/thumb/x")
+	resp := getFrom(t, srv, "/thumb/"+string(f.movie.ID)) // a real item: the request gets as far as the thumbnail service
 	body := string(readBody(t, resp))
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d", resp.StatusCode)

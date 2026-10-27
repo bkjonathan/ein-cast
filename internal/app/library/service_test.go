@@ -477,3 +477,32 @@ func TestState_CountsPerLibrary(t *testing.T) {
 	}
 	var _ []app.LibraryState = got
 }
+
+func TestSetHiddenFromTVs(t *testing.T) {
+	lib := media.NewLibrary(p("/media/films"))
+	r := newRig(lib)
+
+	if err := r.svc.SetHiddenFromTVs(lib.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := r.stateOf(lib.ID)
+	if !st.Library.HiddenFromTVs || st.Library.Name != lib.Name {
+		t.Errorf("state = %+v: only the TV flag changes", st.Library)
+	}
+	if got := r.mem.lastSave(); len(got) != 1 || !got[0].HiddenFromTVs {
+		t.Errorf("remembered %+v: the choice must survive a restart", got)
+	}
+	if len(r.ev.statuses()) == 0 {
+		t.Error("the UI was not told")
+	}
+
+	if err := r.svc.SetHiddenFromTVs(lib.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := r.stateOf(lib.ID); st.Library.HiddenFromTVs {
+		t.Error("the library is still hidden")
+	}
+	if err := r.svc.SetHiddenFromTVs("nope", true); !errors.Is(err, ErrNoSuchLibrary) {
+		t.Errorf("unknown library: %v", err)
+	}
+}

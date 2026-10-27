@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/profile"
 )
 
 // Scanner walks a library's folder and reports the media files in it.
@@ -77,12 +78,24 @@ var ErrTranscodingUnavailable = errors.New("converting video needs ffmpeg, which
 // ErrNotConvertible means ffmpeg could not turn a file into a playable stream.
 var ErrNotConvertible = errors.New("this video could not be converted")
 
+// ErrNotEnoughDiskSpace means a conversion was refused because the disk that
+// holds its temporary files is too full: a long film would fill it.
+var ErrNotEnoughDiskSpace = errors.New("there is not enough free disk space to convert this video")
+
+// DefaultAudioTrack asks for the audio stream the file itself marks as the
+// default one (the first, when none is marked).
+const DefaultAudioTrack = -1
+
 // TranscodeRequest asks for one video to be converted for streaming.
 type TranscodeRequest struct {
 	// Root is the library folder; Path must resolve inside it.
 	Root string
 	// Path is the video file on disk.
 	Path string
+	// AudioTrack is the position of the audio stream to use among the file's
+	// audio streams, or DefaultAudioTrack. Mind that the zero value is the
+	// first stream, not the default one.
+	AudioTrack int
 }
 
 // HLSStream is one video being converted into an HLS stream (a playlist plus
@@ -115,6 +128,89 @@ type Transcoder interface {
 	// background until the stream ends or is stopped. ctx governs only this call,
 	// not the conversion.
 	Start(ctx context.Context, req TranscodeRequest) (HLSStream, error)
+}
+
+// StreamProbe asks about the streams inside one video file.
+type StreamProbe struct {
+	// Root is the library folder; Path must resolve inside it.
+	Root string
+	// Path is the video file on disk.
+	Path string
+}
+
+// AudioStream is one audio track of a video.
+type AudioStream struct {
+	// Index is the track's position among the file's audio streams, which is what
+	// a conversion is asked for.
+	Index int
+	// Language is the file's own tag, usually an ISO 639-2 code such as "eng".
+	Language string
+	Title    string
+	Codec    string
+	Channels int
+	// Default marks the track a player would pick on its own.
+	Default bool
+}
+
+// SubtitleStream is one subtitle track stored inside a video.
+type SubtitleStream struct {
+	// Index is the track's position among the file's subtitle streams.
+	Index    int
+	Language string
+	Title    string
+	Codec    string
+	// Text says the track is made of text and so can be served as WebVTT. Image
+	// tracks (Blu-ray PGS, DVD) cannot be, without recognising the pictures.
+	Text    bool
+	Default bool
+}
+
+// Streams is what a video file holds besides its picture.
+type Streams struct {
+	Audio     []AudioStream
+	Subtitles []SubtitleStream
+}
+
+// StreamProber lists the audio and subtitle tracks inside a video.
+type StreamProber interface {
+	// Available reports whether Probe can work at all on this computer.
+	Available() bool
+	// Probe reads the tracks of a video.
+	Probe(ctx context.Context, req StreamProbe) (Streams, error)
+}
+
+// ErrNoSubtitleTrack means the video has no subtitle track at that position, or
+// the track is not made of text.
+var ErrNoSubtitleTrack = errors.New("no such text subtitle track")
+
+// ErrSubtitlesUnavailable means this computer cannot read subtitles out of a
+// video, because the tool that does it (ffmpeg) is not installed.
+var ErrSubtitlesUnavailable = errors.New("reading subtitles from a video needs ffmpeg, which was not found")
+
+// SubtitleExtraction asks for one subtitle track of a video as WebVTT.
+type SubtitleExtraction struct {
+	// Root is the library folder; Path must resolve inside it.
+	Root string
+	// Path is the video file on disk.
+	Path string
+	// Index is the track's position among the file's subtitle streams.
+	Index int
+}
+
+// SubtitleExtractor reads a text subtitle track out of a video.
+type SubtitleExtractor interface {
+	// Extract returns the track as WebVTT. ErrNoSubtitleTrack and
+	// ErrSubtitlesUnavailable are the expected failures.
+	Extract(ctx context.Context, req SubtitleExtraction) ([]byte, error)
+}
+
+// SubtitleCache keeps extracted subtitles between runs: finding a track means
+// reading the whole video, which should happen once.
+type SubtitleCache interface {
+	// Get returns the stored subtitle under key, if there is one.
+	Get(key string) ([]byte, bool)
+	// Put stores a subtitle. A failure only means it will be extracted again.
+	Put(key string, data []byte) error
 }
 
 // LibraryRepo holds the items of every library. It is a snapshot store: a scan
@@ -279,6 +375,64 @@ type Settings struct {
 	// together with RequireToken: a TV cannot present a token, so the server
 	// would either lock it out or show the library to the whole network.
 	DLNA bool
+	// AutoStart starts the server when EinCast opens, and right after the first
+	// folder is added, so sharing needs no extra click.
+	AutoStart bool
+	// KeepAwake stops the computer sleeping while the server runs: a sleeping
+	// laptop is a server nobody can reach.
+	KeepAwake bool
+	// OpenAtLogin starts EinCast when the person signs in to the computer.
+	OpenAtLogin bool
+	// HideOnClose keeps EinCast sharing when its window is closed. The window
+	// comes back from the Dock or the tray, and Quit really stops it.
+	HideOnClose bool
+	// FFmpegPath is where the person said ffmpeg is. Empty means "look for it".
+	FFmpegPath string
+	// HardwareEncoding lets the computer's video chip do the converting when
+	// ffmpeg can use it. It is on by default and falls back to the processor by
+	// itself when the chip does not work.
+	HardwareEncoding bool
+	// CheckForUpdates lets EinCast ask GitHub, now and then, whether a newer
+	// release exists. It is on by default and is the one network call EinCast
+	// makes by itself (ADR 0029); turning it off stops those calls.
+	CheckForUpdates bool
+}
+
+// PowerGuard keeps the computer from sleeping on its own while something needs
+// it awake.
+type PowerGuard interface {
+	// Hold asks the system to stay awake. reason is shown to the person by the
+	// system where it lists such requests. The returned release gives the request
+	// back; it is safe to call more than once.
+	Hold(reason string) (release func(), err error)
+}
+
+// LoginItem starts the app when the person signs in to the computer.
+type LoginItem interface {
+	// Set turns the login entry on or off. Turning off what is not on is not an
+	// error.
+	Set(enabled bool) error
+}
+
+// DataEraser deletes the files EinCast keeps between runs: settings, profiles,
+// resume positions and the caches. It never touches the media folders.
+type DataEraser interface {
+	// Erase removes everything, and succeeds when there was nothing to remove.
+	Erase() error
+}
+
+// SecretEraser removes every secret EinCast filed in the credential store (the
+// access token, the PINs, the tunnel tokens), without needing to know their names.
+type SecretEraser interface {
+	// EraseAll succeeds when there was nothing to remove.
+	EraseAll() error
+}
+
+// Relauncher starts EinCast again after the running one has exited.
+type Relauncher interface {
+	// Relaunch arranges for a new EinCast to open once this process is gone. It
+	// returns at once; the caller then quits.
+	Relaunch() error
 }
 
 // ErrNoSettings means nothing has been saved yet (first run). It is not a failure.
@@ -339,4 +493,90 @@ type PortInspector interface {
 	Terminate(pid int) error
 	// Kill ends a process at once, without cleanup. Same errors as Terminate.
 	Kill(pid int) error
+}
+
+// ProfileRecord is a profile as stored: the profile, and what is needed to check
+// its PIN without keeping the PIN.
+type ProfileRecord struct {
+	Profile profile.Profile
+	// PINHash and PINSalt are empty when the profile has no PIN.
+	PINHash []byte
+	PINSalt []byte
+	// Version rises whenever the PIN changes, which ends every sign-in made with the
+	// old one.
+	Version int
+}
+
+// ProfileEntry is a profile as the desktop app edits it: no hash, only whether a
+// PIN is set.
+type ProfileEntry struct {
+	Profile profile.Profile
+	HasPIN  bool
+}
+
+// ErrNoProfiles means nothing has been saved yet (first run, or an install from
+// before profiles). It is not a failure.
+var ErrNoProfiles = errors.New("no saved profiles")
+
+// ProfileStore persists profiles between runs.
+type ProfileStore interface {
+	// Load returns ErrNoProfiles (possibly wrapped) when nothing is saved.
+	Load() ([]ProfileRecord, error)
+	Save([]ProfileRecord) error
+}
+
+// ResumePosition is where a person stopped in one video or song.
+type ResumePosition struct {
+	// T is the position and D the length, in seconds.
+	T, D int
+	// M is the file's modification time in milliseconds when it was saved: a file
+	// that changed since is a different film as far as a position goes.
+	M int64
+	// S is when it was saved, in milliseconds, so "Continue watching" can put the
+	// latest first.
+	S int64
+}
+
+// ResumeStore persists resume positions: profile → item → position.
+type ResumeStore interface {
+	// Load returns an empty map when nothing is saved.
+	Load() (map[profile.ID]map[media.ID]ResumePosition, error)
+	Save(map[profile.ID]map[media.ID]ResumePosition) error
+}
+
+// ErrNoRelease means the project has published no release to compare with. It is
+// not a failure of the check.
+var ErrNoRelease = errors.New("no release has been published")
+
+// ReleaseAsset is one downloadable file of a release.
+type ReleaseAsset struct {
+	Name string
+	// Size is in bytes.
+	Size int64
+	// SHA256 is the file's checksum as lowercase hex, or "" when the release
+	// published none for it.
+	SHA256 string
+}
+
+// Release is a published version of EinCast.
+type Release struct {
+	// Tag is the release's git tag, such as "v1.1.2".
+	Tag  string
+	Name string
+	// Notes is the release description as plain text. It is untrusted: show it as
+	// text, never as markup.
+	Notes string
+	// URL is the release's page, where the downloads are.
+	URL         string
+	PublishedAt time.Time
+	Assets      []ReleaseAsset
+}
+
+// ReleaseSource tells which release is the newest. It only reads; installing a
+// new version stays with the person (ADR 0029).
+type ReleaseSource interface {
+	// Latest returns the newest final release (not a pre-release or a draft), or
+	// ErrNoRelease (possibly wrapped). It sends nothing that identifies the
+	// person or the installed version.
+	Latest(ctx context.Context) (Release, error)
 }

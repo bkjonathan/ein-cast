@@ -4,12 +4,15 @@ import type {
   LogLevel,
   LogLine,
   MediaKind,
+  Profile,
   RemoteField,
   RemoteFieldKind,
   RemoteProvider,
   RemoteStatus,
   ServerState,
   ServerStatus,
+  UpdateAsset,
+  UpdateStatus,
 } from "./types";
 
 const serverStates: readonly ServerState[] = [
@@ -156,6 +159,12 @@ export interface RawLibraryItem {
   kind: string;
   size: number;
   modTime: number;
+  title: string;
+  year: number;
+  show: string;
+  season: number;
+  episode: number;
+  poster: boolean;
 }
 
 /**
@@ -173,6 +182,12 @@ export function toLibraryItem(raw: RawLibraryItem): LibraryItem {
     kind,
     size: raw.size,
     modTime: raw.modTime,
+    title: raw.title,
+    year: raw.year,
+    show: raw.show,
+    season: raw.season,
+    episode: raw.episode,
+    poster: raw.poster,
   };
 }
 
@@ -187,6 +202,7 @@ export interface RawLibraryState {
   scanning: boolean;
   error: string;
   watching: boolean;
+  hiddenFromTVs: boolean;
 }
 
 export function toLibraryState(raw: RawLibraryState): LibraryState {
@@ -200,5 +216,67 @@ export function toLibraryState(raw: RawLibraryState): LibraryState {
     scanning: raw.scanning,
     error: raw.error,
     watching: raw.watching,
+    hiddenFromTVs: raw.hiddenFromTVs,
+  };
+}
+
+/** The wire shape of a profile, before `kinds` is narrowed. */
+export interface RawProfile {
+  id: string;
+  name: string;
+  color: string;
+  allLibraries: boolean;
+  libraries: string[];
+  kinds: string[];
+  hiddenFolders: string[];
+  hasPin: boolean;
+}
+
+/** Lists are copied so a caller cannot change Go's object; an unknown kind is a protocol mismatch and fails loudly, like items. */
+export function toProfile(raw: RawProfile): Profile {
+  return {
+    id: raw.id,
+    name: raw.name,
+    color: raw.color,
+    allLibraries: raw.allLibraries,
+    libraries: [...raw.libraries],
+    kinds: raw.kinds.map((k) => {
+      const kind = mediaKinds.find((m) => m === k);
+      if (!kind) throw new Error(`unknown media kind from Go: "${k}"`);
+      return kind;
+    }),
+    hiddenFolders: [...raw.hiddenFolders],
+    hasPin: raw.hasPin,
+  };
+}
+
+/** The wire shape of the update status. */
+export interface RawUpdateStatus {
+  current: string;
+  checking: boolean;
+  available: boolean;
+  /** A Go pointer: null on the wire, typed as optional by the generated bindings. */
+  latest?: { version: string; name: string; notes: string; publishedAt: number; assets: UpdateAsset[] } | null;
+  checkedAt: number;
+  error: string;
+}
+
+/** Copies the lists so a caller cannot change Go's object. */
+export function toUpdateStatus(raw: RawUpdateStatus): UpdateStatus {
+  return {
+    current: raw.current,
+    checking: raw.checking,
+    available: raw.available,
+    latest: raw.latest
+      ? {
+          version: raw.latest.version,
+          name: raw.latest.name,
+          notes: raw.latest.notes,
+          publishedAt: raw.latest.publishedAt,
+          assets: raw.latest.assets.map((a) => ({ name: a.name, size: a.size, sha256: a.sha256 })),
+        }
+      : null,
+    checkedAt: raw.checkedAt,
+    error: raw.error,
   };
 }

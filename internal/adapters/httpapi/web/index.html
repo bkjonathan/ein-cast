@@ -14,27 +14,45 @@
       <img class="logo" src="/static/icon.png" alt="" width="48" height="48">
       <div>
         <h1 id="server-name">EinCast</h1>
-        <p class="tagline">Your home media, on every screen.</p>
+        <p class="tagline" data-i18n="page.tagline">Your home media, on every screen.</p>
       </div>
     </div>
-    <a class="button" id="playlist-link" href="/playlist.m3u" download="eincast.m3u">Playlist for VLC / Infuse</a>
+    <div class="actions">
+      <button type="button" id="profile-button" class="button" hidden></button>
+      <a class="button" id="playlist-link" href="/playlist.m3u" download="eincast.m3u" data-i18n="page.playlist">Playlist for VLC / Infuse</a>
+    </div>
   </header>
 
+  <section id="picker" class="picker-page" hidden>
+    <h2 data-i18n="profile.title">Who's watching?</h2>
+    <div id="picker-list" class="cards people"></div>
+    <form id="pin-form" class="pin-form" hidden>
+      <p id="pin-for" class="hint"></p>
+      <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" maxlength="6" aria-label="PIN" data-i18n-label="profile.pin">
+      <button type="submit" class="button primary" data-i18n="profile.continue">Continue</button>
+      <button type="button" id="pin-cancel" class="linkbutton" data-i18n="profile.back">Back</button>
+      <p id="pin-error" class="hint error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="library-view">
   <section id="stage" class="stage" hidden>
     <p id="now-playing" class="now-playing"></p>
     <video id="video" controls playsinline hidden></video>
     <audio id="audio" controls hidden></audio>
     <img id="image" alt="" hidden>
-    <p id="resume" class="hint" hidden><span id="resume-text"></span> <button type="button" id="restart" class="linkbutton">Start over</button></p>
+    <p id="resume" class="hint" hidden><span id="resume-text"></span> <button type="button" id="restart" class="linkbutton" data-i18n="page.startOver">Start over</button></p>
     <p id="hint" class="hint" hidden></p>
-    <p><a id="direct-link" class="link" href="#" hidden>Open the file directly</a></p>
+    <p><a id="direct-link" class="link" href="#" data-i18n="page.directLink" hidden>Open the file directly</a></p>
   </section>
 
   <main>
-    <input id="search" type="search" placeholder="Search" aria-label="Search library" autocomplete="off">
-    <p id="status" class="status" role="status">Loading…</p>
+    <input id="search" type="search" placeholder="Search" aria-label="Search library" autocomplete="off"
+      data-i18n-placeholder="page.search" data-i18n-label="page.searchLabel">
+    <p id="status" class="status" role="status" data-i18n="page.loading">Loading…</p>
     <div id="groups"></div>
   </main>
+  </div>
 
   <script src="/static/app.js" defer></script>
 </body>

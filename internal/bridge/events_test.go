@@ -9,6 +9,7 @@ import (
 
 	"eincast/internal/app"
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/profile"
 	"eincast/internal/domain/server"
 )
 
@@ -145,6 +146,40 @@ func TestEmitter_RemoteStatusChanged(t *testing.T) {
 	}
 	want := RemoteStatusDTO{State: "running", Provider: "tailscale", URL: "http://den.ts.net:8765", Live: "running", PinSet: true, NeedsSetup: []string{}}
 	if dto, ok := got[0].data[0].(RemoteStatusDTO); !ok || !reflect.DeepEqual(dto, want) {
+		t.Fatalf("payload = %#v, want %#v", got[0].data[0], want)
+	}
+}
+
+func TestEmitter_ProfilesChangedCarriesNoPIN(t *testing.T) {
+	var got []emitted
+	e := newTestEmitter(&got)
+	e.bind(context.Background())
+
+	e.Publish(app.ProfilesChanged{Profiles: []app.ProfileEntry{
+		{Profile: profile.Profile{ID: "k", Name: "Kids", Color: "green", AllLibraries: true}, HasPIN: true},
+	}})
+
+	if len(got) != 1 || got[0].name != "profiles:changed" {
+		t.Fatalf("emitted = %+v", got)
+	}
+	dto, ok := got[0].data[0].([]ProfileDTO)
+	if !ok || len(dto) != 1 || dto[0].ID != "k" || !dto[0].HasPIN || !dto[0].AllLibraries {
+		t.Fatalf("payload = %#v", got[0].data[0])
+	}
+}
+
+func TestEmitter_UpdateChanged(t *testing.T) {
+	var got []emitted
+	e := newTestEmitter(&got)
+	e.bind(context.Background())
+
+	e.Publish(app.UpdateChanged{Status: app.UpdateStatus{Current: "1.1.1", Checking: true}})
+
+	if len(got) != 1 || got[0].name != "update:status" {
+		t.Fatalf("emitted = %+v", got)
+	}
+	want := UpdateStatusDTO{Current: "1.1.1", Checking: true}
+	if dto, ok := got[0].data[0].(UpdateStatusDTO); !ok || !reflect.DeepEqual(dto, want) {
 		t.Fatalf("payload = %#v, want %#v", got[0].data[0], want)
 	}
 }

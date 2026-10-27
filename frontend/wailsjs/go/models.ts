@@ -16,6 +16,24 @@ export namespace bridge {
 	        this.platform = source["platform"];
 	    }
 	}
+	export class FFmpegStatusDTO {
+	    available: boolean;
+	    path: string;
+	    chosen: string;
+	    installCommand: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FFmpegStatusDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.path = source["path"];
+	        this.chosen = source["chosen"];
+	        this.installCommand = source["installCommand"];
+	    }
+	}
 	export class KindCountsDTO {
 	    video: number;
 	    audio: number;
@@ -40,6 +58,12 @@ export namespace bridge {
 	    kind: string;
 	    size: number;
 	    modTime: number;
+	    title: string;
+	    year: number;
+	    show: string;
+	    season: number;
+	    episode: number;
+	    poster: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new LibraryItemDTO(source);
@@ -54,6 +78,12 @@ export namespace bridge {
 	        this.kind = source["kind"];
 	        this.size = source["size"];
 	        this.modTime = source["modTime"];
+	        this.title = source["title"];
+	        this.year = source["year"];
+	        this.show = source["show"];
+	        this.season = source["season"];
+	        this.episode = source["episode"];
+	        this.poster = source["poster"];
 	    }
 	}
 	export class LibraryStateDTO {
@@ -66,6 +96,7 @@ export namespace bridge {
 	    scanning: boolean;
 	    error: string;
 	    watching: boolean;
+	    hiddenFromTVs: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new LibraryStateDTO(source);
@@ -82,6 +113,7 @@ export namespace bridge {
 	        this.scanning = source["scanning"];
 	        this.error = source["error"];
 	        this.watching = source["watching"];
+	        this.hiddenFromTVs = source["hiddenFromTVs"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -170,6 +202,32 @@ export namespace bridge {
 	        this.pid = source["pid"];
 	        this.name = source["name"];
 	        this.self = source["self"];
+	    }
+	}
+	export class ProfileDTO {
+	    id: string;
+	    name: string;
+	    color: string;
+	    allLibraries: boolean;
+	    libraries: string[];
+	    kinds: string[];
+	    hiddenFolders: string[];
+	    hasPin: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProfileDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.color = source["color"];
+	        this.allLibraries = source["allLibraries"];
+	        this.libraries = source["libraries"];
+	        this.kinds = source["kinds"];
+	        this.hiddenFolders = source["hiddenFolders"];
+	        this.hasPin = source["hasPin"];
 	    }
 	}
 	export class RemoteFieldDTO {
@@ -303,6 +361,13 @@ export namespace bridge {
 	    name: string;
 	    requireToken: boolean;
 	    dlna: boolean;
+	    autoStart: boolean;
+	    keepAwake: boolean;
+	    openAtLogin: boolean;
+	    hideOnClose: boolean;
+	    ffmpegPath: string;
+	    hardwareEncoding: boolean;
+	    checkForUpdates: boolean;
 	    accessToken: string;
 	    tokenPersisted: boolean;
 	
@@ -316,6 +381,13 @@ export namespace bridge {
 	        this.name = source["name"];
 	        this.requireToken = source["requireToken"];
 	        this.dlna = source["dlna"];
+	        this.autoStart = source["autoStart"];
+	        this.keepAwake = source["keepAwake"];
+	        this.openAtLogin = source["openAtLogin"];
+	        this.hideOnClose = source["hideOnClose"];
+	        this.ffmpegPath = source["ffmpegPath"];
+	        this.hardwareEncoding = source["hardwareEncoding"];
+	        this.checkForUpdates = source["checkForUpdates"];
 	        this.accessToken = source["accessToken"];
 	        this.tokenPersisted = source["tokenPersisted"];
 	    }
@@ -325,6 +397,12 @@ export namespace bridge {
 	    name: string;
 	    requireToken: boolean;
 	    dlna: boolean;
+	    autoStart: boolean;
+	    keepAwake: boolean;
+	    openAtLogin: boolean;
+	    hideOnClose: boolean;
+	    hardwareEncoding: boolean;
+	    checkForUpdates: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SettingsInputDTO(source);
@@ -336,7 +414,107 @@ export namespace bridge {
 	        this.name = source["name"];
 	        this.requireToken = source["requireToken"];
 	        this.dlna = source["dlna"];
+	        this.autoStart = source["autoStart"];
+	        this.keepAwake = source["keepAwake"];
+	        this.openAtLogin = source["openAtLogin"];
+	        this.hideOnClose = source["hideOnClose"];
+	        this.hardwareEncoding = source["hardwareEncoding"];
+	        this.checkForUpdates = source["checkForUpdates"];
 	    }
+	}
+	export class UpdateAssetDTO {
+	    name: string;
+	    size: number;
+	    sha256: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateAssetDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.sha256 = source["sha256"];
+	    }
+	}
+	export class UpdateReleaseDTO {
+	    version: string;
+	    name: string;
+	    notes: string;
+	    publishedAt: number;
+	    assets: UpdateAssetDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateReleaseDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.name = source["name"];
+	        this.notes = source["notes"];
+	        this.publishedAt = source["publishedAt"];
+	        this.assets = this.convertValues(source["assets"], UpdateAssetDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class UpdateStatusDTO {
+	    current: string;
+	    checking: boolean;
+	    available: boolean;
+	    latest?: UpdateReleaseDTO;
+	    checkedAt: number;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateStatusDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current = source["current"];
+	        this.checking = source["checking"];
+	        this.available = source["available"];
+	        this.latest = this.convertValues(source["latest"], UpdateReleaseDTO);
+	        this.checkedAt = source["checkedAt"];
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

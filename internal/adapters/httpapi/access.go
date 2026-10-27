@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
+	"html"
 	"log/slog"
 	"net"
 	"net/http"
@@ -115,16 +117,24 @@ func (a *api) requireToken(next http.Handler) http.Handler {
 	})
 }
 
+// Keys of the words on the page shown to someone who opens the address without
+// the token (web/locales).
+const (
+	keyTokenTitle = "token.title"
+	keyTokenBody  = "token.body"
+)
+
 // unauthorizedPage is what a person sees when they open the address without the
-// token. It has no dynamic content.
+// token. It takes the language, the heading and the paragraph, and has no other
+// dynamic content.
 const unauthorizedPage = `<!doctype html>
+<html lang="%s">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EinCast</title>
 <body style="font-family:system-ui,sans-serif;max-width:30rem;margin:4rem auto;padding:0 1rem;line-height:1.5">
-<h1>Access token needed</h1>
-<p>This EinCast server is protected. Open the link or scan the QR code shown in
-the EinCast app on the computer that runs it.</p>
+<h1>%s</h1>
+<p>%s</p>
 `
 
 // unauthorizedCSP allows only the inline style the page above uses; it has no
@@ -147,8 +157,12 @@ func (a *api) deny(w http.ResponseWriter, r *http.Request, offered bool) {
 	if r.Method == http.MethodGet && r.URL.Path == "/" && strings.Contains(r.Header.Get("Accept"), "text/html") {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", unauthorizedCSP)
+		lang := a.langOf(r)
+		w.Header().Set("Content-Language", lang)
+		w.Header().Add("Vary", "Accept-Language")
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(unauthorizedPage))
+		_, _ = fmt.Fprintf(w, unauthorizedPage, lang,
+			html.EscapeString(a.text.text(lang, keyTokenTitle, nil)), html.EscapeString(a.text.text(lang, keyTokenBody, nil)))
 		return
 	}
 	// The same message whether the token was missing or wrong: do not help a guesser.

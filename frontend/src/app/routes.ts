@@ -1,3 +1,4 @@
+import type { MessageKey } from "@/shared/i18n";
 import {
   Film,
   Globe,
@@ -12,14 +13,14 @@ export type View = "dashboard" | "library" | "remote" | "logs" | "settings";
 
 export interface ViewMeta {
   id: View;
-  label: string;
+  labelKey: MessageKey;
   icon: LucideIcon;
 }
 
 export const views: readonly ViewMeta[] = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "library", label: "Library", icon: Film },
-  { id: "remote", label: "Remote", icon: Globe },
-  { id: "logs", label: "Logs", icon: ScrollText },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
+  { id: "library", labelKey: "nav.library", icon: Film },
+  { id: "remote", labelKey: "nav.remote", icon: Globe },
+  { id: "logs", labelKey: "nav.logs", icon: ScrollText },
+  { id: "settings", labelKey: "nav.settings", icon: Settings },
 ];

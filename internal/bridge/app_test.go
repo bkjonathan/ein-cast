@@ -2,22 +2,26 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"eincast/internal/app"
 	"eincast/internal/app/portfree"
+	"eincast/internal/app/profiles"
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/app/thumbnails"
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/profile"
 	"eincast/internal/domain/server"
 )
 
@@ -29,6 +33,8 @@ type fakeLibrary struct {
 	added      []string
 	removeErr  error
 	removed    []media.LibraryID
+	hidden     []string
+	hideErr    error
 	renameErr  error
 	renamed    [][2]string
 	rescanErr  error
@@ -47,6 +53,11 @@ func (f *fakeLibrary) Add(_ context.Context, root string) (app.LibraryState, err
 func (f *fakeLibrary) Remove(id media.LibraryID) error {
 	f.removed = append(f.removed, id)
 	return f.removeErr
+}
+
+func (f *fakeLibrary) SetHiddenFromTVs(id media.LibraryID, hidden bool) error {
+	f.hidden = append(f.hidden, fmt.Sprintf("%s=%v", id, hidden))
+	return f.hideErr
 }
 
 func (f *fakeLibrary) Rename(id media.LibraryID, name string) error {
@@ -87,6 +98,26 @@ type fakeSettings struct {
 	gotInput  settings.Input
 	updates   int
 	rotations int
+	ffmpegSet []string
+	ffmpegErr error
+}
+
+func (f *fakeSettings) SetFFmpegPath(path string) error {
+	f.ffmpegSet = append(f.ffmpegSet, path)
+	return f.ffmpegErr
+}
+
+// fakeFFmpeg answers for the ffmpeg adapter.
+type fakeFFmpeg struct {
+	path     string
+	checkErr error
+	checked  []string
+}
+
+func (f *fakeFFmpeg) Path() string { return f.path }
+func (f *fakeFFmpeg) Check(path string) error {
+	f.checked = append(f.checked, path)
+	return f.checkErr
 }
 
 func (f *fakeSettings) Get() app.SettingsView { return f.view }
@@ -202,9 +233,29 @@ func TestListLibrary(t *testing.T) {
 		got := newTestApp(lib).ListLibrary()
 		want := []LibraryItemDTO{{
 			ID: "abc", LibraryID: "lib1", Name: "a.mkv", RelPath: "shows/a.mkv", Kind: "video", Size: 42, ModTime: mod.UnixMilli(),
+			Title: "a.mkv", // no title read from the name: the file name stands in
 		}}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("ListLibrary() = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("carries titles, years and the series an episode belongs to", func(t *testing.T) {
+		lib := &fakeLibrary{items: []media.Item{
+			{ID: "m", Name: "Heat.1995.mkv", Kind: media.KindVideo, Meta: media.Meta{Title: "Heat", Year: 1995},
+				Artwork: media.Artwork{Path: "/secret/poster.jpg"}},
+			{ID: "e", Name: "S01E02.mkv", Kind: media.KindVideo, Meta: media.Meta{Title: "Pilot", Show: "Show", Season: 1, Episode: 2}},
+			{ID: "n", Name: "x.mkv", Kind: media.KindVideo, Meta: media.Meta{Title: "x", Episode: 3}}, // numbered but no series
+		}}
+		got := newTestApp(lib).ListLibrary()
+		if got[0].Title != "Heat" || got[0].Year != 1995 || !got[0].Poster || got[0].Show != "" {
+			t.Errorf("movie = %+v", got[0])
+		}
+		if got[1].Show != "Show" || got[1].Season != 1 || got[1].Episode != 2 || got[1].Title != "Pilot" {
+			t.Errorf("episode = %+v", got[1])
+		}
+		if got[2].Show != "" || got[2].Episode != 0 {
+			t.Errorf("an item with no series was filed as an episode: %+v", got[2])
 		}
 	})
 
@@ -1137,6 +1188,634 @@ func TestFreePort(t *testing.T) {
 			}
 			if !reflect.DeepEqual(ports.freed, [][2]int{{8765, 300}}) {
 				t.Fatalf("freed = %v", ports.freed)
+			}
+		})
+	}
+}
+
+func TestStartServer_KeepAwakeFollowsTheSetting(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		a, st := newTestAppWithStreaming(&fakeLibrary{})
+		a.settings = &fakeSettings{view: app.SettingsView{Settings: app.Settings{Port: 9000, Name: "Den", KeepAwake: on}}}
+		if err := a.StartServer(); err != nil {
+			t.Fatal(err)
+		}
+		if st.startCfg.KeepAwake != on {
+			t.Errorf("KeepAwake = %v, want %v", st.startCfg.KeepAwake, on)
+		}
+	}
+}
+
+func autoStartApp(autoStart bool, libraries int, state server.State) (*App, *fakeStreaming, *fakeLibrary) {
+	lib := &fakeLibrary{state: make([]app.LibraryState, libraries)}
+	a, st := newTestAppWithStreaming(lib)
+	a.settings = &fakeSettings{view: app.SettingsView{Settings: app.Settings{Port: 9000, Name: "Den", AutoStart: autoStart}}}
+	st.status = app.ServerStatus{State: state}
+	return a, st, lib
+}
+
+func TestAutoStart(t *testing.T) {
+	tests := []struct {
+		name      string
+		autoStart bool
+		libraries int
+		state     server.State
+		wantStart int
+	}{
+		{"on, with a library, idle", true, 1, server.Idle, 1},
+		{"off", false, 1, server.Idle, 0},
+		{"nothing to share yet", true, 0, server.Idle, 0},
+		{"already running", true, 1, server.Running, 0},
+		{"on its way up", true, 1, server.Starting, 0},
+		{"failed: the person decides", true, 1, server.Failed, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, st, _ := autoStartApp(tt.autoStart, tt.libraries, tt.state)
+			a.autoStart()
+			if st.starts != tt.wantStart {
+				t.Errorf("starts = %d, want %d", st.starts, tt.wantStart)
+			}
+		})
+	}
+}
+
+func TestAutoStart_FollowsRestoringTheLibrary(t *testing.T) {
+	a, st, lib := autoStartApp(true, 1, server.Idle)
+	a.restoreLibrary(context.Background())
+	if lib.restores != 1 || st.starts != 1 {
+		t.Errorf("restores=%d starts=%d, want the server started after the folders are back", lib.restores, st.starts)
+	}
+}
+
+func TestAutoStart_FollowsChoosingTheFirstFolder(t *testing.T) {
+	a, st, _ := autoStartApp(true, 1, server.Idle)
+	a.pickFolder = func(context.Context) (string, error) { return "/media", nil }
+	if err := a.ChooseFolder(); err != nil {
+		t.Fatal(err)
+	}
+	if st.starts != 1 {
+		t.Errorf("starts = %d, want sharing to begin right after the folder is chosen", st.starts)
+	}
+}
+
+func TestAutoStart_NotAfterAFolderThatFailed(t *testing.T) {
+	a, st, lib := autoStartApp(true, 1, server.Idle)
+	lib.addErr = errors.New("boom")
+	a.pickFolder = func(context.Context) (string, error) { return "/media", nil }
+	if err := a.ChooseFolder(); err == nil {
+		t.Fatal("want the error")
+	}
+	if st.starts != 0 {
+		t.Errorf("starts = %d after a folder that failed", st.starts)
+	}
+}
+
+func TestAutoStart_AFailedStartIsOnlyLogged(t *testing.T) {
+	a, st, _ := autoStartApp(true, 1, server.Idle)
+	st.startErr = errors.New("address already in use")
+	a.autoStart() // must not panic or surface: the server:state event carries it
+	if st.starts != 1 {
+		t.Errorf("starts = %d, want 1", st.starts)
+	}
+}
+
+func TestRefreshAddresses(t *testing.T) {
+	t.Run("restarts a running server with the saved settings", func(t *testing.T) {
+		a, st, _ := autoStartApp(false, 1, server.Running)
+		if err := a.RefreshAddresses(); err != nil {
+			t.Fatal(err)
+		}
+		if st.stops != 1 || st.starts != 1 || st.startCfg.Port != 9000 {
+			t.Errorf("stops=%d starts=%d cfg=%+v", st.stops, st.starts, st.startCfg)
+		}
+	})
+	t.Run("does nothing when the server is not running", func(t *testing.T) {
+		a, st, _ := autoStartApp(false, 1, server.Idle)
+		if err := a.RefreshAddresses(); err != nil || st.stops+st.starts != 0 {
+			t.Errorf("err=%v stops=%d starts=%d", err, st.stops, st.starts)
+		}
+	})
+	t.Run("a stop that fails does not start a second server", func(t *testing.T) {
+		a, st, _ := autoStartApp(false, 1, server.Running)
+		st.stopErr = errors.New("stuck")
+		if err := a.RefreshAddresses(); err == nil || st.starts != 0 {
+			t.Errorf("err=%v starts=%d", err, st.starts)
+		}
+	})
+}
+
+func TestUpdateSettings_PassesTheStartupAndPowerChoices(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fs := &fakeSettings{}
+	a.settings = fs
+	err := a.UpdateSettings(SettingsInputDTO{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, HardwareEncoding: true, CheckForUpdates: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := settings.Input{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, HardwareEncoding: true, CheckForUpdates: true}
+	if fs.gotInput != want {
+		t.Errorf("input = %+v, want %+v", fs.gotInput, want)
+	}
+}
+
+func TestGetFFmpegStatus(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	a.settings = &fakeSettings{view: app.SettingsView{Settings: app.Settings{FFmpegPath: "/old/ffmpeg"}}}
+	a.ffmpeg = &fakeFFmpeg{path: "/opt/homebrew/bin/ffmpeg"}
+	got := a.GetFFmpegStatus()
+	if !got.Available || got.Path != "/opt/homebrew/bin/ffmpeg" || got.Chosen != "/old/ffmpeg" || got.InstallCommand != ffmpegInstallCommand(runtime.GOOS) {
+		t.Errorf("status = %+v", got)
+	}
+
+	a.ffmpeg = &fakeFFmpeg{}
+	if got := a.GetFFmpegStatus(); got.Available || got.Path != "" {
+		t.Errorf("status with no ffmpeg = %+v", got)
+	}
+	a.ffmpeg = nil
+	if got := a.GetFFmpegStatus(); got.Available {
+		t.Errorf("status with no adapter = %+v", got)
+	}
+}
+
+func TestFFmpegInstallCommand(t *testing.T) {
+	for goos, want := range map[string]string{"darwin": "brew install ffmpeg", "windows": "winget install ffmpeg", "linux": ""} {
+		if got := ffmpegInstallCommand(goos); got != want {
+			t.Errorf("ffmpegInstallCommand(%q) = %q, want %q", goos, got, want)
+		}
+	}
+}
+
+func TestChooseFFmpeg(t *testing.T) {
+	tests := []struct {
+		name     string
+		picked   string
+		pickErr  error
+		checkErr error
+		wantErr  bool
+		wantSet  []string
+	}{
+		{name: "a usable program is remembered", picked: "/opt/ffmpeg", wantSet: []string{"/opt/ffmpeg"}},
+		{name: "cancelling is not an error", picked: ""},
+		{name: "a file that cannot run is refused and not remembered", picked: "/opt/notes.txt", checkErr: errors.New("not executable"), wantErr: true},
+		{name: "the dialog failing is an error", pickErr: errors.New("no window"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newTestApp(&fakeLibrary{})
+			fs := &fakeSettings{}
+			a.settings = fs
+			a.ffmpeg = &fakeFFmpeg{checkErr: tt.checkErr}
+			a.pickFile = func(context.Context, string) (string, error) { return tt.picked, tt.pickErr }
+
+			if err := a.ChooseFFmpeg(); (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(fs.ffmpegSet, tt.wantSet) {
+				t.Errorf("remembered = %v, want %v", fs.ffmpegSet, tt.wantSet)
+			}
+		})
+	}
+}
+
+func TestClearFFmpegPath(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fs := &fakeSettings{}
+	a.settings = fs
+	if err := a.ClearFFmpegPath(); err != nil || !reflect.DeepEqual(fs.ffmpegSet, []string{""}) {
+		t.Errorf("err=%v remembered=%v", err, fs.ffmpegSet)
+	}
+}
+
+// ---- profiles ---------------------------------------------------------------------
+
+type fakeProfiles struct {
+	entries []app.ProfileEntry
+	saveErr error
+	saved   []profile.Profile
+	deleted []profile.ID
+	pins    map[profile.ID]string
+	err     error
+}
+
+func (f *fakeProfiles) Entries() []app.ProfileEntry { return f.entries }
+func (f *fakeProfiles) Save(p profile.Profile) (profile.Profile, error) {
+	f.saved = append(f.saved, p)
+	if f.saveErr != nil {
+		return profile.Profile{}, f.saveErr
+	}
+	if p.ID == "" {
+		p.ID = "new1"
+	}
+	return p, nil
+}
+func (f *fakeProfiles) Delete(id profile.ID) error { f.deleted = append(f.deleted, id); return f.err }
+func (f *fakeProfiles) SetPIN(id profile.ID, pin string) error {
+	if f.pins == nil {
+		f.pins = map[profile.ID]string{}
+	}
+	f.pins[id] = pin
+	return f.err
+}
+func (f *fakeProfiles) ClearPIN(id profile.ID) error { delete(f.pins, id); return f.err }
+
+func appWithProfiles(fp *fakeProfiles) *App {
+	a := newTestApp(&fakeLibrary{})
+	a.profiles = fp
+	return a
+}
+
+func TestListProfiles_NeverCarriesAPINAndIsNeverNull(t *testing.T) {
+	fp := &fakeProfiles{entries: []app.ProfileEntry{
+		{Profile: profile.Profile{ID: "k", Name: "Kids", Color: "green", Libraries: []media.LibraryID{"a"}, Kinds: []media.Kind{media.KindVideo}, HiddenFolders: []string{"18*"}}, HasPIN: true},
+		{Profile: profile.Everyone()},
+	}}
+	got := appWithProfiles(fp).ListProfiles()
+	if len(got) != 2 || got[0].ID != "k" || !got[0].HasPIN || got[0].Libraries[0] != "a" || got[0].Kinds[0] != "video" || got[0].HiddenFolders[0] != "18*" {
+		t.Fatalf("ListProfiles() = %+v", got)
+	}
+	if got[1].Libraries == nil || got[1].Kinds == nil || got[1].HiddenFolders == nil {
+		t.Errorf("an empty list must be [] not null: %+v", got[1])
+	}
+	if out := newTestApp(&fakeLibrary{}).ListProfiles(); out == nil || len(out) != 0 {
+		t.Errorf("without profiles: %#v", out)
+	}
+}
+
+func TestSaveProfile_PassesTheFormAndReturnsWhatWasStored(t *testing.T) {
+	fp := &fakeProfiles{}
+	a := appWithProfiles(fp)
+	got, err := a.SaveProfile(ProfileDTO{Name: "Kids", Color: "green", Libraries: []string{"a"}, Kinds: []string{"video"}, HiddenFolders: []string{"x"}})
+	if err != nil || got.ID != "new1" {
+		t.Fatalf("SaveProfile() = %+v, %v", got, err)
+	}
+	want := profile.Profile{Name: "Kids", Color: "green", Libraries: []media.LibraryID{"a"}, Kinds: []media.Kind{media.KindVideo}, HiddenFolders: []string{"x"}}
+	if len(fp.saved) != 1 || !reflect.DeepEqual(fp.saved[0], want) {
+		t.Errorf("saved %+v, want %+v", fp.saved, want)
+	}
+}
+
+func TestProfileErrors_AreAdviceInPlainWords(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want string
+	}{
+		"last":     {profiles.ErrLastProfile, "at least one profile"},
+		"too many": {profiles.ErrTooMany, "at most"},
+		"unknown":  {profiles.ErrUnknownProfile, "no longer exists"},
+		"invalid":  {fmt.Errorf("%w: the name must be 1 to 32 characters", profile.ErrInvalid), "the name must be 1 to 32 characters"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			fp := &fakeProfiles{saveErr: c.err, err: c.err}
+			a := appWithProfiles(fp)
+			for label, err := range map[string]error{
+				"save":   func() error { _, e := a.SaveProfile(ProfileDTO{}); return e }(),
+				"delete": a.DeleteProfile("x"),
+				"pin":    a.SetProfilePIN("x", "1234"),
+				"clear":  a.ClearProfilePIN("x"),
+			} {
+				if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), "invalid profile") {
+					t.Errorf("%s: error = %v, want advice containing %q", label, err, c.want)
+				}
+			}
+		})
+	}
+}
+
+func TestProfileCommands_GoToTheService(t *testing.T) {
+	fp := &fakeProfiles{}
+	a := appWithProfiles(fp)
+	if err := a.DeleteProfile("k"); err != nil || len(fp.deleted) != 1 || fp.deleted[0] != "k" {
+		t.Errorf("delete: %v %v", err, fp.deleted)
+	}
+	if err := a.SetProfilePIN("k", "1234"); err != nil || fp.pins["k"] != "1234" {
+		t.Errorf("set pin: %v %v", err, fp.pins)
+	}
+	if err := a.ClearProfilePIN("k"); err != nil || fp.pins["k"] != "" {
+		t.Errorf("clear pin: %v %v", err, fp.pins)
+	}
+}
+
+func TestProfileCommands_RefuseWithoutTheFeature(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	if _, err := a.SaveProfile(ProfileDTO{}); err == nil {
+		t.Error("SaveProfile worked with no service")
+	}
+	if a.DeleteProfile("x") == nil || a.SetProfilePIN("x", "1234") == nil || a.ClearProfilePIN("x") == nil {
+		t.Error("a command worked with no service")
+	}
+}
+
+func TestSetLibraryHiddenFromTVs(t *testing.T) {
+	lib := &fakeLibrary{}
+	a := newTestApp(lib)
+	if err := a.SetLibraryHiddenFromTVs("L1", true); err != nil || len(lib.hidden) != 1 || lib.hidden[0] != "L1=true" {
+		t.Errorf("hidden = %v, %v", lib.hidden, err)
+	}
+	lib.hideErr = errors.New("nope")
+	if err := a.SetLibraryHiddenFromTVs("L1", false); err == nil {
+		t.Error("the library's refusal was swallowed")
+	}
+}
+
+func TestLibraryState_CarriesTheTVFlag(t *testing.T) {
+	lib := media.NewLibrary("/m")
+	lib.HiddenFromTVs = true
+	got := toLibraryStateDTO(app.LibraryState{Library: lib})
+	if !got.HiddenFromTVs {
+		t.Error("the Settings screen cannot show that the library is kept off TVs")
+	}
+}
+
+func TestShutdown_RunsTheClosersAfterTheServerStops(t *testing.T) {
+	a, st := newTestAppWithStreaming(&fakeLibrary{})
+	var order []string
+	a.closers = []func(){func() { order = append(order, fmt.Sprintf("closed after %d stops", st.stops)) }}
+	a.shutdown(context.Background())
+	if len(order) != 1 || order[0] != "closed after 1 stops" {
+		t.Errorf("order = %v, want the closer to run once the server has stopped", order)
+	}
+}
+
+// fakeUpdates answers for the update service and records what the bridge asked.
+type fakeUpdates struct {
+	status  app.UpdateStatus
+	pageURL string
+	checks  int
+	ran     chan struct{}
+}
+
+func (f *fakeUpdates) Status() app.UpdateStatus { return f.status }
+func (f *fakeUpdates) PageURL() string          { return f.pageURL }
+func (f *fakeUpdates) Check(context.Context) app.UpdateStatus {
+	f.checks++
+	return f.status
+}
+func (f *fakeUpdates) Run(ctx context.Context) {
+	close(f.ran)
+	<-ctx.Done()
+}
+
+func TestUpdates_WithoutAServiceTheCommandsAreHarmless(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+
+	if got := a.GetUpdateStatus(); got.Current != "1.2.3" || got.Available {
+		t.Errorf("GetUpdateStatus() = %+v", got)
+	}
+	if got := a.CheckForUpdatesNow(); got.Current != "1.2.3" || got.Available {
+		t.Errorf("CheckForUpdatesNow() = %+v", got)
+	}
+	if err := a.OpenUpdatePage(); err == nil {
+		t.Error("OpenUpdatePage() with no update service must say so")
+	}
+}
+
+func TestUpdates_StatusMapsToTheDTO(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	a.updates = &fakeUpdates{status: app.UpdateStatus{
+		Current: "1.1.1", Available: true,
+		CheckedAt: time.UnixMilli(1_700_000_000_000),
+		Latest: &app.UpdateRelease{
+			Version: "1.1.2", Name: "EinCast 1.1.2", Notes: "- fixes", URL: "https://github.com/x/y/releases/tag/v1.1.2",
+			PublishedAt: time.UnixMilli(1_700_000_100_000),
+			Assets:      []app.ReleaseAsset{{Name: "a.zip", Size: 5, SHA256: "ab"}},
+		},
+	}}
+
+	got := a.GetUpdateStatus()
+
+	want := UpdateStatusDTO{
+		Current: "1.1.1", Available: true, CheckedAt: 1_700_000_000_000,
+		Latest: &UpdateReleaseDTO{
+			Version: "1.1.2", Name: "EinCast 1.1.2", Notes: "- fixes", PublishedAt: 1_700_000_100_000,
+			Assets: []UpdateAssetDTO{{Name: "a.zip", Size: 5, SHA256: "ab"}},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetUpdateStatus() = %+v\nwant %+v", got, want)
+	}
+}
+
+func TestUpdates_TheReleaseAddressNeverCrossesTheBridge(t *testing.T) {
+	// The UI opens the page by asking Go, so it can never be told to open a
+	// different address.
+	const url = "https://github.com/x/y/releases/tag/v1.1.2"
+	a := newTestApp(&fakeLibrary{})
+	a.updates = &fakeUpdates{status: app.UpdateStatus{Available: true, Latest: &app.UpdateRelease{URL: url}}}
+
+	data, err := json.Marshal(a.GetUpdateStatus())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "github.com") {
+		t.Fatalf("the DTO carries the address: %s", data)
+	}
+}
+
+func TestUpdates_NoReleaseIsNullAndNoZeroTimes(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	a.updates = &fakeUpdates{status: app.UpdateStatus{Current: "1.1.1"}}
+
+	got := a.GetUpdateStatus()
+	if got.Latest != nil || got.CheckedAt != 0 {
+		t.Fatalf("status = %+v, want no release and CheckedAt 0 (a zero time is not a Unix time)", got)
+	}
+}
+
+func TestUpdates_CheckNowAsksTheService(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fu := &fakeUpdates{status: app.UpdateStatus{Current: "1.1.1", Error: "offline"}}
+	a.updates = fu
+
+	if got := a.CheckForUpdatesNow(); fu.checks != 1 || got.Error != "offline" {
+		t.Fatalf("checks = %d, status = %+v", fu.checks, got)
+	}
+}
+
+func TestUpdates_OpenUpdatePage(t *testing.T) {
+	const url = "https://github.com/x/y/releases/tag/v1.1.2"
+	a := newTestApp(&fakeLibrary{})
+	var opened []string
+	a.openURL = func(_ context.Context, u string) { opened = append(opened, u) }
+
+	a.updates = &fakeUpdates{}
+	if err := a.OpenUpdatePage(); err == nil || len(opened) != 0 {
+		t.Errorf("with nothing newer: err=%v opened=%v; want an error and no browser", err, opened)
+	}
+
+	a.updates = &fakeUpdates{pageURL: url}
+	if err := a.OpenUpdatePage(); err != nil || !reflect.DeepEqual(opened, []string{url}) {
+		t.Errorf("err=%v opened=%v, want exactly the release page", err, opened)
+	}
+}
+
+func TestStartup_RunsTheUpdateCheckUntilTheAppEnds(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fu := &fakeUpdates{ran: make(chan struct{})}
+	a.updates = fu
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.startup(ctx)
+
+	select {
+	case <-fu.ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startup did not start the update check")
+	}
+}
+
+// fakeReset records the order of the reset steps into a shared log, so a test
+// can say what must happen before what.
+type fakeReset struct {
+	steps                 *[]string
+	eraseErr, relaunchErr error
+}
+
+func (f *fakeReset) Erase() error    { *f.steps = append(*f.steps, "erase"); return f.eraseErr }
+func (f *fakeReset) Relaunch() error { *f.steps = append(*f.steps, "relaunch"); return f.relaunchErr }
+
+func newResetApp(t *testing.T) (*App, *fakeReset, *fakeStreaming, *[]string) {
+	t.Helper()
+	a, st := newTestAppWithStreaming(&fakeLibrary{})
+	var steps []string
+	fr := &fakeReset{steps: &steps}
+	a.reset = fr
+	a.closers = []func(){func() { steps = append(steps, "closers") }}
+	a.quit = func(context.Context) { steps = append(steps, "quit") }
+	return a, fr, st, &steps
+}
+
+func TestResetApp_StopsFlushesErasesThenReopensAndQuits(t *testing.T) {
+	a, _, st, steps := newResetApp(t)
+
+	if err := a.ResetApp(); err != nil {
+		t.Fatalf("ResetApp() = %v", err)
+	}
+
+	// The closers write the last resume positions: they must be done before the
+	// files are erased, or they would bring one back.
+	want := []string{"closers", "erase", "relaunch", "quit"}
+	if !reflect.DeepEqual(*steps, want) {
+		t.Errorf("steps = %v, want %v", *steps, want)
+	}
+	if st.stops != 1 {
+		t.Errorf("server stopped %d times, want 1", st.stops)
+	}
+}
+
+func TestResetApp_TheShutdownThatFollowsDoesNotStopOrWriteAgain(t *testing.T) {
+	a, _, st, steps := newResetApp(t)
+	if err := a.ResetApp(); err != nil {
+		t.Fatal(err)
+	}
+
+	a.shutdown(context.Background()) // Wails runs this after quit
+
+	if st.stops != 1 {
+		t.Errorf("server stopped %d times in all, want 1", st.stops)
+	}
+	if n := countOf(*steps, "closers"); n != 1 {
+		t.Errorf("closers ran %d times; a second run could write a file back after the erase", n)
+	}
+}
+
+func TestResetApp_IfEraseFailsNothingIsReopenedAndTheAppStaysOpen(t *testing.T) {
+	a, fr, _, steps := newResetApp(t)
+	fr.eraseErr = errors.New("remove /x: permission denied")
+
+	err := a.ResetApp()
+
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("ResetApp() = %v, want the cause", err)
+	}
+	if countOf(*steps, "relaunch") != 0 || countOf(*steps, "quit") != 0 {
+		t.Errorf("steps = %v; a failed erase must leave the app open for the person to read the error", *steps)
+	}
+}
+
+func TestResetApp_IfReopeningFailsItStillQuits(t *testing.T) {
+	a, fr, _, steps := newResetApp(t)
+	fr.relaunchErr = errors.New("no such program")
+
+	if err := a.ResetApp(); err != nil {
+		t.Fatalf("ResetApp() = %v; the data is gone, so the reset itself succeeded", err)
+	}
+	if countOf(*steps, "quit") != 1 {
+		t.Errorf("steps = %v, want a quit: staying open would show a library that no longer exists", *steps)
+	}
+}
+
+func TestResetApp_WithoutAResetServiceChangesNothing(t *testing.T) {
+	a, st := newTestAppWithStreaming(&fakeLibrary{})
+	if err := a.ResetApp(); err == nil {
+		t.Fatal("ResetApp() = nil, want an error")
+	}
+	if st.stops != 0 {
+		t.Error("the server was stopped by a reset that is not available")
+	}
+}
+
+func countOf(steps []string, want string) int {
+	n := 0
+	for _, s := range steps {
+		if s == want {
+			n++
+		}
+	}
+	return n
+}
+
+type fakeDiagnostics struct{ text string }
+
+func (f fakeDiagnostics) Report() string { return f.text }
+
+func TestGetDiagnostics(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	if _, err := a.GetDiagnostics(); err == nil {
+		t.Error("GetDiagnostics() = nil error without a service, want one")
+	}
+
+	a.diag = fakeDiagnostics{"EinCast diagnostics"}
+	got, err := a.GetDiagnostics()
+	if err != nil || got != "EinCast diagnostics" {
+		t.Errorf("GetDiagnostics() = %q, %v", got, err)
+	}
+}
+
+func TestOpenHelpPage(t *testing.T) {
+	tests := []struct {
+		topic, repo, want string
+		wantErr           bool
+	}{
+		{"bug", "me/eincast", "https://github.com/me/eincast/issues/new?template=bug_report.yml", false},
+		{"idea", "me/eincast", "https://github.com/me/eincast/issues/new?template=feature_request.yml", false},
+		{"privacy", "me/eincast", "https://github.com/me/eincast/blob/main/docs/PRIVACY.md", false},
+		{"https://evil.example", "me/eincast", "", true}, // the window cannot choose an address
+		{"", "me/eincast", "", true},
+		{"bug", "", "", true}, // a build with no project page opens nothing
+	}
+	for _, tt := range tests {
+		t.Run(tt.topic+"/"+tt.repo, func(t *testing.T) {
+			a := newTestApp(&fakeLibrary{})
+			a.info.Repo = tt.repo
+			var opened []string
+			a.openURL = func(_ context.Context, u string) { opened = append(opened, u) }
+
+			err := a.OpenHelpPage(tt.topic)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("OpenHelpPage(%q) error = %v, wantErr %v", tt.topic, err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if len(opened) != 0 {
+					t.Errorf("opened %v despite the refusal", opened)
+				}
+				return
+			}
+			if len(opened) != 1 || opened[0] != tt.want {
+				t.Errorf("opened %v, want [%s]", opened, tt.want)
 			}
 		})
 	}

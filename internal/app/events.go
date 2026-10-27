@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"eincast/internal/domain/media"
 	"eincast/internal/domain/server"
 )
@@ -100,3 +102,49 @@ type RemoteStatusChanged struct {
 }
 
 func (RemoteStatusChanged) event() {}
+
+// ProfilesChanged is published after a profile is added, changed or removed, or
+// its PIN is set or cleared. It carries no PINs or hashes.
+type ProfilesChanged struct {
+	Profiles []ProfileEntry
+}
+
+func (ProfilesChanged) event() {}
+
+// UpdateStatus describes the version situation at one instant.
+type UpdateStatus struct {
+	// Current is the version running now, as it was built ("dev" for a build from
+	// source, which has nothing to compare).
+	Current string
+	// Checking is true while a check is running.
+	Checking bool
+	// Available is true when the newest release seen is newer than Current.
+	Available bool
+	// Latest is the newest release the last successful check saw, newer or not.
+	// It is kept when a later check fails, so a notice does not vanish with the
+	// Wi-Fi. Nil until a check succeeds.
+	Latest *UpdateRelease
+	// CheckedAt is when the last check succeeded; zero until then.
+	CheckedAt time.Time
+	// Error is why the last check failed, in words for the person; empty if it
+	// did not.
+	Error string
+}
+
+// UpdateRelease is a release as the UI shows it: its version without the "v",
+// and only the files for this computer.
+type UpdateRelease struct {
+	Version     string
+	Name        string
+	Notes       string
+	URL         string
+	PublishedAt time.Time
+	Assets      []ReleaseAsset
+}
+
+// UpdateChanged is published when a check starts or ends.
+type UpdateChanged struct {
+	Status UpdateStatus
+}
+
+func (UpdateChanged) event() {}

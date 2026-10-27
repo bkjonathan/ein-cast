@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EinCast: your home media, on every screen</title>
+<meta name="description" content="EinCast turns a folder on your Mac or Windows PC into a media server for your TV, tablet and phone. No accounts, no cloud. Free and open source.">
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#"><img src="logo.png" alt="" width="32" height="32"> EinCast</a>
+  <nav aria-label="Language">
+    <button type="button" data-set-lang="en" aria-pressed="true">English</button>
+    <button type="button" data-set-lang="my" aria-pressed="false">မြန်မာ</button>
+  </nav>
+</header>
+
+<main>
+  <section class="hero">
+    <h1 lang="en">Your home media, on every screen.</h1>
+    <h1 lang="my">သင့်အိမ်ရှိ မီဒီယာများကို ဖန်သားပြင်တိုင်းတွင်။</h1>
+    <p class="lead" lang="en">EinCast turns a folder on your Mac or Windows PC into a media server for the TVs, tablets and phones in your home. Pick a folder, scan a QR code, press play. No accounts, no cloud, nothing to install on the TV.</p>
+    <p class="lead" lang="my">EinCast သည် သင့် Mac သို့မဟုတ် Windows ကွန်ပျူတာရှိ ဖိုလ်ဒါတစ်ခုကို အိမ်ရှိ တီဗီ၊ တက်ဘလက်၊ ဖုန်းများသို့ မျှဝေပေးသည်။ ဖိုလ်ဒါရွေးပါ၊ QR ကုဒ်စကင်ဖတ်ပါ၊ ကြည့်ပါ။ အကောင့်မလို၊ cloud မလို၊ တီဗီတွင် ဘာမျှ ထည့်စရာမလို။</p>
+    <p class="cta">
+      <a class="button" href="https://github.com/bkjonathan/ein-cast/releases/latest"><span lang="en">Download for macOS and Windows</span><span lang="my">macOS နှင့် Windows အတွက် ဒေါင်းလုဒ်</span></a>
+      <a class="button ghost" href="https://github.com/bkjonathan/ein-cast"><span lang="en">View the source</span><span lang="my">ကုဒ်ကြည့်ရန်</span></a>
+    </p>
+    <p class="note" lang="en">Free and open source (MIT). Builds are not code-signed yet, so your system warns the first time: the <a href="https://github.com/bkjonathan/ein-cast#download">README</a> says how to open it.</p>
+    <p class="note" lang="my">အခမဲ့၊ open source (MIT)။ လက်မှတ်ထိုးထားခြင်း မရှိသေးသဖြင့် ပထမအကြိမ် ဖွင့်ချိန် စနစ်က သတိပေးပါမည်။ ဖွင့်နည်းကို <a href="https://github.com/bkjonathan/ein-cast#download">README</a> တွင် ကြည့်ပါ။</p>
+    <!-- TODO (Phase 20.6/20.7): screenshots and the demo video go here, from docs/assets/screenshots/. -->
+  </section>
+
+  <section aria-labelledby="how">
+    <h2 id="how" lang="en">How it works</h2>
+    <h2 lang="my">အလုပ်လုပ်ပုံ</h2>
+    <ol class="steps">
+      <li><strong lang="en">Choose a folder</strong><strong lang="my">ဖိုလ်ဒါရွေးပါ</strong>
+        <span lang="en">EinCast scans it and starts sharing.</span><span lang="my">EinCast က စကင်ဖတ်ပြီး မျှဝေစတင်သည်။</span></li>
+      <li><strong lang="en">Scan the QR code</strong><strong lang="my">QR ကုဒ်စကင်ဖတ်ပါ</strong>
+        <span lang="en">On a phone, tablet or TV browser. Or type the address.</span><span lang="my">ဖုန်း၊ တက်ဘလက်၊ တီဗီ ဘရောက်ဇာဖြင့်။ သို့မဟုတ် လိပ်စာရိုက်ပါ။</span></li>
+      <li><strong lang="en">Press play</strong><strong lang="my">ကြည့်ပါ</strong>
+        <span lang="en">Video, music and photos. Or open the playlist in VLC or Infuse.</span><span lang="my">ဗီဒီယို၊ သီချင်း၊ ဓာတ်ပုံ။ သို့မဟုတ် VLC / Infuse တွင် playlist ဖွင့်ပါ။</span></li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="features">
+    <h2 id="features" lang="en">What you get</h2>
+    <h2 lang="my">ရရှိမည့်အရာများ</h2>
+    <ul class="features">
+      <li lang="en">Plays on any browser; smart TVs can find it by themselves (DLNA).</li><li lang="my">ဘရောက်ဇာတိုင်းတွင် ကစားနိုင်သည်။ စမတ်တီဗီများက ကိုယ်တိုင်ရှာတွေ့နိုင်သည် (DLNA)။</li>
+      <li lang="en">Converts MKV/HEVC for iPhone and iPad (with ffmpeg).</li><li lang="my">iPhone / iPad အတွက် MKV/HEVC ကို ပြောင်းပေးသည် (ffmpeg ဖြင့်)။</li>
+      <li lang="en">Subtitles, several audio languages, and “continue watching” that follows you from phone to TV.</li><li lang="my">စာတန်းထိုး၊ အသံဘာသာစကားများ၊ ဖုန်းမှ တီဗီသို့ လိုက်ပါသော “ဆက်ကြည့်ရန်”။</li>
+      <li lang="en">Profiles for the household, with optional PINs.</li><li lang="my">မိသားစုအတွက် ပရိုဖိုင်များ၊ PIN ထည့်နိုင်သည်။</li>
+      <li lang="en">Watch away from home through Tailscale, or a tunnel behind a PIN.</li><li lang="my">အိမ်ပြင်ပမှ Tailscale (သို့) PIN ဖြင့် ကာကွယ်ထားသော tunnel ဖြင့် ကြည့်နိုင်သည်။</li>
+      <li lang="en">English and Burmese.</li><li lang="my">အင်္ဂလိပ်နှင့် မြန်မာ။</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="faq">
+    <h2 id="faq" lang="en">Questions</h2>
+    <h2 lang="my">မေးခွန်းများ</h2>
+    <details><summary><span lang="en">Why not Jellyfin or Plex?</span><span lang="my">Jellyfin / Plex မသုံးဘဲ ဘာကြောင့်?</span></summary>
+      <p lang="en">Often you should. EinCast is for “play this folder on that TV, now” with no accounts and nothing to maintain. If you want a catalogue with posters, an always-on server or native TV apps, use one of them. <a href="https://github.com/bkjonathan/ein-cast/blob/main/docs/WHY-NOT-JELLYFIN.md">The honest comparison.</a></p>
+      <p lang="my">မကြာခဏ သုံးသင့်ပါသည်။ EinCast သည် “ဒီဖိုလ်ဒါကို ဒီတီဗီမှာ အခုကြည့်မယ်” အတွက်ဖြစ်ပြီး အကောင့်မလို၊ ထိန်းသိမ်းစရာမလို။ ပိုစတာပါသော စာရင်း၊ အမြဲဖွင့်ထားသော server သို့မဟုတ် တီဗီ app လိုပါက ၎င်းတို့ကို သုံးပါ။ <a href="https://github.com/bkjonathan/ein-cast/blob/main/docs/WHY-NOT-JELLYFIN.md">အပြည့်အစုံ နှိုင်းယှဉ်ချက်။</a></p></details>
+    <details><summary><span lang="en">Does it send anything about me?</span><span lang="my">ကျွန်ုပ်အကြောင်း တစ်ခုခု ပို့ပါသလား?</span></summary>
+      <p lang="en">No accounts, no analytics. Once a day it reads the project’s public release list on GitHub to tell you about updates; you can turn that off. <a href="https://github.com/bkjonathan/ein-cast/blob/main/docs/PRIVACY.md">Everything it sends.</a></p>
+      <p lang="my">အကောင့်မရှိ၊ analytics မရှိ။ တစ်ရက်လျှင် တစ်ကြိမ် GitHub ရှိ ပြည်သူသုံး release စာရင်းကို ဖတ်၍ အပ်ဒိတ်ကို အသိပေးသည်။ ၎င်းကို ပိတ်နိုင်သည်။ <a href="https://github.com/bkjonathan/ein-cast/blob/main/docs/PRIVACY.md">ပို့သမျှ အားလုံး။</a></p></details>
+    <details><summary><span lang="en">Does it work when my computer is off?</span><span lang="my">ကွန်ပျူတာပိတ်ထားလျှင် အလုပ်လုပ်ပါသလား?</span></summary>
+      <p lang="en">No. EinCast shares while the app is open. It can open at login and keep sharing with its window closed.</p>
+      <p lang="my">မလုပ်ပါ။ app ဖွင့်ထားမှသာ မျှဝေသည်။ ဝင်သည်နှင့် အလိုအလျောက်ဖွင့်ပြီး ဝင်းဒိုးပိတ်ထားသော်လည်း မျှဝေနေစေနိုင်သည်။</p></details>
+    <details><summary><span lang="en">Is it safe on my Wi-Fi?</span><span lang="my">ကျွန်ုပ်၏ Wi-Fi တွင် ဘေးကင်းပါသလား?</span></summary>
+      <p lang="en">A new install requires a private link (the QR code) to open your library, and a tunnel always requires a PIN. Found a problem? <a href="https://github.com/bkjonathan/ein-cast/blob/main/SECURITY.md">Tell us privately.</a></p>
+      <p lang="my">install အသစ်တွင် စာကြည့်တိုက်ကို ဖွင့်ရန် ကိုယ်ပိုင်လင့်ခ် (QR ကုဒ်) လိုပြီး tunnel အတွက် PIN အမြဲလိုသည်။ ပြဿနာတွေ့လျှင် <a href="https://github.com/bkjonathan/ein-cast/blob/main/SECURITY.md">တိတ်တဆိတ် အကြောင်းကြားပါ။</a></p></details>
+  </section>
+</main>
+
+<footer>
+  <p lang="en">EinCast is free software under the <a href="https://github.com/bkjonathan/ein-cast/blob/main/LICENSE">MIT licence</a>. <a href="https://github.com/bkjonathan/ein-cast/issues">Report a problem</a> · <a href="https://github.com/bkjonathan/ein-cast/discussions">Discussions</a> · <a href="https://github.com/bkjonathan/ein-cast/blob/main/CONTRIBUTING.md">Contribute</a></p>
+  <p lang="my">EinCast သည် <a href="https://github.com/bkjonathan/ein-cast/blob/main/LICENSE">MIT လိုင်စင်</a> ဖြင့် အခမဲ့ software ဖြစ်သည်။ <a href="https://github.com/bkjonathan/ein-cast/issues">ပြဿနာတိုင်ကြားရန်</a> · <a href="https://github.com/bkjonathan/ein-cast/discussions">ဆွေးနွေးချက်များ</a> · <a href="https://github.com/bkjonathan/ein-cast/blob/main/CONTRIBUTING.md">ပါဝင်ကူညီရန်</a></p>
+  <p class="note" lang="en">This page loads nothing from other sites. The Burmese text is a draft awaiting a native reviewer.</p>
+  <p class="note" lang="my">ဤစာမျက်နှာသည် အခြားဝက်ဘ်ဆိုက်မှ ဘာမျှ မခေါ်ပါ။ မြန်မာစာသည် မူကြမ်းဖြစ်ပြီး ဗမာစကားပြောသူ၏ စစ်ဆေးမှုကို စောင့်နေသည်။</p>
+</footer>
+
+<script src="lang.js"></script>
+</body>
+</html>

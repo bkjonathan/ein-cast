@@ -4,21 +4,35 @@ import {bridge} from '../models';
 
 export function AppInfo():Promise<bridge.AppInfoDTO>;
 
+export function CheckForUpdatesNow():Promise<bridge.UpdateStatusDTO>;
+
 export function CheckPort(arg1:number):Promise<Array<bridge.PortHolderDTO>>;
+
+export function ChooseFFmpeg():Promise<void>;
 
 export function ChooseFile(arg1:string):Promise<string>;
 
 export function ChooseFolder():Promise<void>;
 
+export function ClearFFmpegPath():Promise<void>;
+
+export function ClearProfilePIN(arg1:string):Promise<void>;
+
 export function ClearRemotePIN():Promise<void>;
 
 export function ClearRemoteProviderField(arg1:string,arg2:string):Promise<void>;
+
+export function DeleteProfile(arg1:string):Promise<void>;
 
 export function DisableRemote():Promise<void>;
 
 export function EnableRemote(arg1:string):Promise<void>;
 
 export function FreePort(arg1:number,arg2:number):Promise<void>;
+
+export function GetDiagnostics():Promise<string>;
+
+export function GetFFmpegStatus():Promise<bridge.FFmpegStatusDTO>;
 
 export function GetLogHistory():Promise<Array<bridge.LogLineDTO>>;
 
@@ -32,11 +46,21 @@ export function GetSettings():Promise<bridge.SettingsDTO>;
 
 export function GetThumbnail(arg1:string):Promise<string>;
 
+export function GetUpdateStatus():Promise<bridge.UpdateStatusDTO>;
+
 export function ListLibraries():Promise<Array<bridge.LibraryStateDTO>>;
 
 export function ListLibrary():Promise<Array<bridge.LibraryItemDTO>>;
 
+export function ListProfiles():Promise<Array<bridge.ProfileDTO>>;
+
 export function ListRemoteProviders():Promise<Array<bridge.RemoteProviderDTO>>;
+
+export function OpenHelpPage(arg1:string):Promise<void>;
+
+export function OpenUpdatePage():Promise<void>;
+
+export function RefreshAddresses():Promise<void>;
 
 export function RemoveLibrary(arg1:string):Promise<void>;
 
@@ -46,7 +70,15 @@ export function RescanAllLibraries():Promise<void>;
 
 export function RescanLibrary(arg1:string):Promise<void>;
 
+export function ResetApp():Promise<void>;
+
 export function RotateAccessToken():Promise<void>;
+
+export function SaveProfile(arg1:bridge.ProfileDTO):Promise<bridge.ProfileDTO>;
+
+export function SetLibraryHiddenFromTVs(arg1:string,arg2:boolean):Promise<void>;
+
+export function SetProfilePIN(arg1:string,arg2:string):Promise<void>;
 
 export function SetRemotePIN(arg1:string):Promise<void>;
 

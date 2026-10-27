@@ -28,13 +28,14 @@ type Service struct {
 	log       *slog.Logger
 	public    app.PublicAccess // nil when remote access is not wired in
 	discovery []app.Discovery  // may be empty
+	power     app.PowerGuard   // nil when the platform has no way to stay awake
 
 	machine *server.Machine
 
 	mu      sync.Mutex // serializes Start, Stop and the crash watcher
 	current app.RunningServer
 	gen     uint64   // identifies a run, so a stale watcher can recognise itself
-	stops   []func() // withdraw each announcement of the current run
+	stops   []func() // undo what the current run set up: announcements, the wake hold
 
 	infoMu sync.RWMutex // guards info so Status never waits on mu
 	info   endpoints
@@ -64,6 +65,12 @@ func WithPublicAccess(p app.PublicAccess) ServiceOption {
 // skipped; the server runs regardless.
 func WithDiscovery(d ...app.Discovery) ServiceOption {
 	return func(s *Service) { s.discovery = append(s.discovery, d...) }
+}
+
+// WithPowerGuard lets a run keep the computer awake when its Config asks for it.
+// The hold is given back when the server stops or dies.
+func WithPowerGuard(g app.PowerGuard) ServiceOption {
+	return func(s *Service) { s.power = g }
 }
 
 // NewService builds a Service from its ports.
@@ -110,9 +117,27 @@ func (s *Service) Start(ctx context.Context, cfg Config) error {
 		slog.Int("port", ep.port),
 		slog.Any("urls", append([]string{ep.localURL}, ep.lanURLs...)),
 	)
+	s.keepAwake(cfg)
 	s.announce(ctx, cfg, run)
 	go s.watch(run, s.gen)
 	return nil
+}
+
+// keepAwake stops the computer sleeping for the length of this run. Failing to
+// is logged and the server runs regardless: a laptop that may sleep is a
+// nuisance, not a reason to refuse to serve.
+func (s *Service) keepAwake(cfg Config) {
+	if !cfg.KeepAwake || s.power == nil {
+		return
+	}
+	release, err := s.power.Hold("EinCast is sharing your media")
+	if err != nil {
+		s.log.Warn("could not keep the computer awake; it may sleep while sharing",
+			slog.String("error", err.Error()))
+		return
+	}
+	s.stops = append(s.stops, release)
+	s.log.Info("keeping the computer awake while sharing")
 }
 
 // announce tells the local network about the server. Each kind of discovery
@@ -152,8 +177,9 @@ func (s *Service) announce(ctx context.Context, cfg Config, run app.RunningServe
 	}
 }
 
-// withdrawDiscovery takes every announcement of the current run back.
-func (s *Service) withdrawDiscovery() {
+// endRun undoes what the current run set up: it takes the announcements back and
+// lets the computer sleep again.
+func (s *Service) endRun() {
 	for _, stop := range s.stops {
 		stop()
 	}
@@ -178,7 +204,7 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	stopCtx, cancel := context.WithTimeout(ctx, stopTimeout)
 	defer cancel()
-	s.withdrawDiscovery()           // first: stop telling people where to find a server that is going away
+	s.endRun()                      // first: stop telling people where to find a server that is going away
 	s.withdrawPublicAccess(stopCtx) // the tunnel goes first, then the server behind it
 	if run != nil {
 		if err := run.Stop(stopCtx); err != nil {
@@ -246,7 +272,7 @@ func (s *Service) watch(run app.RunningServer, gen uint64) {
 	s.log.Error("server died", slog.String("error", cause.Error()))
 	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 	defer cancel()
-	s.withdrawDiscovery()
+	s.endRun()
 	s.withdrawPublicAccess(ctx)
 	s.clearEndpoints()
 	s.fail(cause)

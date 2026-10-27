@@ -26,6 +26,14 @@ func NewID(lib LibraryID, relPath string) ID {
 	return ID(hex.EncodeToString(sum[:idBytes]))
 }
 
+// LegacyID is the ID an item had before libraries existed (ADR 0021): the hash of
+// the relative path alone. Browsers kept resume positions under it, so the player
+// page uses it to carry those positions over to the current ID.
+func LegacyID(relPath string) ID {
+	sum := sha256.Sum256([]byte(relPath))
+	return ID(hex.EncodeToString(sum[:idBytes]))
+}
+
 // Item is one servable file in the library.
 type Item struct {
 	ID ID
@@ -47,4 +55,18 @@ type Item struct {
 	// Subtitles are the sidecar subtitle files found next to a video, in a
 	// stable order. Clients refer to one by its position in this list.
 	Subtitles []Subtitle
+	// Meta is what the name and any .nfo file say about a video (a title, a year,
+	// the series an episode belongs to). The zero Meta is every other kind.
+	Meta Meta
+	// Artwork is the poster found next to a video, if any.
+	Artwork Artwork
+}
+
+// DisplayName is what lists show for the item: its title when it has one, else
+// the file name.
+func (it Item) DisplayName() string {
+	if it.Meta.Title != "" {
+		return it.Meta.Title
+	}
+	return it.Name
 }

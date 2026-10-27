@@ -20,6 +20,22 @@ type itemJSON struct {
 	// Subtitles lists the tracks of a video, in order. A track is fetched as
 	// /subtitle/{id}/{position}; its file name and disk path are not exposed.
 	Subtitles []subtitleJSON `json:"subtitles"`
+	// Title is what to show for the item: read from the file name or a .nfo, or
+	// the file name itself. Name stays the file name.
+	Title string `json:"title"`
+	// Year is 0 when unknown. Show, Season and Episode are set for an episode of
+	// a series (Show empty, numbers 0 otherwise). Plot comes from a .nfo only.
+	Year    int    `json:"year"`
+	Show    string `json:"show"`
+	Season  int    `json:"season"`
+	Episode int    `json:"episode"`
+	Plot    string `json:"plot"`
+	// LegacyID is the ID the item had before libraries existed. The player page
+	// moves a resume position saved under it to the current ID.
+	LegacyID media.ID `json:"legacyId"`
+	// Poster says /thumb/{id} is a poster found next to the file (a portrait
+	// picture), not a frame taken from it.
+	Poster bool `json:"poster"`
 }
 
 type subtitleJSON struct {
@@ -32,12 +48,24 @@ func toItemJSON(it media.Item) itemJSON {
 	for i, s := range it.Subtitles {
 		subs[i] = subtitleJSON{Label: s.Label, Lang: s.Lang}
 	}
-	return itemJSON{ID: it.ID, Name: it.Name, Kind: it.Kind, Size: it.Size, ModTime: it.ModTime, Subtitles: subs}
+	m := it.Meta
+	show, season, episode := "", 0, 0
+	if m.IsEpisode() {
+		show, season, episode = m.Show, m.Season, m.Episode
+	}
+	return itemJSON{
+		ID: it.ID, Name: it.Name, Kind: it.Kind, Size: it.Size, ModTime: it.ModTime, Subtitles: subs,
+		Title: it.DisplayName(), Year: m.Year, Show: show, Season: season, Episode: episode, Plot: m.Plot,
+		Poster: it.Artwork.Present(), LegacyID: media.LegacyID(it.RelPath),
+	}
 }
 
-// handleLibrary lists every item.
-func (a *api) handleLibrary(w http.ResponseWriter, _ *http.Request) {
-	items := a.lib.List()
+// handleLibrary lists the items the request may see.
+func (a *api) handleLibrary(w http.ResponseWriter, r *http.Request) {
+	items, _, ok := a.visibleItems(w, r)
+	if !ok {
+		return
+	}
 	out := make([]itemJSON, 0, len(items)) // non-nil: an empty library is [], not null
 	for _, it := range items {
 		out = append(out, toItemJSON(it))
@@ -55,11 +83,17 @@ func (a *api) handleLibraryItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // lookup resolves the {id} path value. On failure it has already written the
-// response and ok is false.
+// response and ok is false. An item the request may not see is the same 404 as one
+// that does not exist: the answer must not confirm that an ID is real (ADR 0027).
+// Every route that takes an ID goes through here.
 func (a *api) lookup(w http.ResponseWriter, r *http.Request) (media.Item, bool) {
 	it, err := a.lib.Get(media.ID(r.PathValue("id")))
 	switch {
 	case err == nil:
+		if !a.allowed(r, it) {
+			writeError(w, http.StatusNotFound, codeNotFound, "media not found")
+			return media.Item{}, false
+		}
 		return it, true
 	case errors.Is(err, media.ErrNotFound):
 		writeError(w, http.StatusNotFound, codeNotFound, "media not found")

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CircleCheck, OctagonX, Search } from "lucide-react";
 import type { PortHolder } from "@/shared/bridge";
+import { useT } from "@/shared/i18n";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 import { Input } from "@/shared/ui/input";
 import { parsePort } from "../dirty";
@@ -12,17 +13,31 @@ import { useSettingsStore } from "../store";
  * port. It first shows which program that is, and ends it only on a second,
  * explicit click: killing a process is not something to do from a guess.
  */
-export function PortSettings() {
+export function PortSettings({ checkPort }: { checkPort?: number }) {
   const saved = useSettingsStore((s) => s.settings);
   if (!saved) return null;
-  return <PortTools initialPort={saved.port} />;
+  return <PortTools initialPort={checkPort ?? saved.port} lookNow={checkPort !== undefined} />;
 }
 
-function PortTools({ initialPort }: { initialPort: number }) {
+/**
+ * `lookNow` is set when the Dashboard sent the person here because the server
+ * could not bind: the answer to "who has it?" is then shown without another click.
+ */
+function PortTools({ initialPort, lookNow }: { initialPort: number; lookNow: boolean }) {
   const [text, setText] = useState(String(initialPort));
+  const panel = useRef<HTMLDivElement>(null);
   const [confirming, setConfirming] = useState<number | null>(null);
-  const { holders, checkedPort, freedNote, pending, error, check, free, reset } = usePortTools();
+  const { holders, checkedPort, freed, pending, error, check, free, reset } = usePortTools();
+  const { t } = useT();
   const port = parsePort(text);
+
+  useEffect(() => {
+    if (!lookNow) return;
+    panel.current?.scrollIntoView?.({ block: "start" });
+    void check(initialPort);
+    // Once, when the screen opens. `check` is stable, and a later edit of the
+    // text must not search again by itself.
+  }, []);
 
   const onCheck = () => {
     setConfirming(null);
@@ -30,13 +45,13 @@ function PortTools({ initialPort }: { initialPort: number }) {
   };
 
   return (
-    <GlassPanel className="flex flex-col gap-4 p-6">
+    <GlassPanel ref={panel} className="flex flex-col gap-4 p-6">
       <header className="space-y-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <OctagonX className="size-5" aria-hidden /> Free a port
+          <OctagonX className="size-5" aria-hidden /> {t("settings.port.title")}
         </h2>
         <p className="text-sm text-muted-foreground">
-          If the server won't start because the port is already in use, find the program holding it and end it.
+          {t("settings.port.intro")}
         </p>
       </header>
 
@@ -48,7 +63,7 @@ function PortTools({ initialPort }: { initialPort: number }) {
         }}
       >
         <label className="w-36 space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Port</span>
+          <span className="text-xs font-medium text-muted-foreground">{t("settings.server.port")}</span>
           <Input
             value={text}
             onChange={(e) => {
@@ -59,18 +74,20 @@ function PortTools({ initialPort }: { initialPort: number }) {
             inputMode="numeric"
             autoComplete="off"
             className="font-mono"
-            aria-label="Port to check"
+            aria-label={t("settings.port.toCheck")}
           />
         </label>
         <GlassButton type="submit" disabled={pending}>
-          <Search /> Check
+          <Search /> {t("settings.port.check")}
         </GlassButton>
       </form>
 
       {holders !== null && holders.length === 0 && (
         <p role="status" className="flex items-center gap-2 text-sm text-success">
           <CircleCheck className="size-4 shrink-0" aria-hidden />
-          {freedNote ?? `Port ${checkedPort} is free.`}
+          {freed
+            ? t("settings.port.freed", { who: typeof freed.who === "number" ? t("settings.port.process", { pid: freed.who }) : freed.who, port: freed.port })
+            : t("settings.port.free", { port: checkedPort ?? 0 })}
         </p>
       )}
 
@@ -112,18 +129,19 @@ interface HolderRowProps {
 }
 
 function HolderRow({ holder, confirming, pending, onAsk, onCancel, onEnd }: HolderRowProps) {
-  const label = holder.name || "Unknown program";
+  const { t } = useT();
+  const label = holder.name || t("settings.port.unknown");
   return (
     <li className="glass flex flex-wrap items-center justify-between gap-3 rounded-glass-sm px-3 py-2">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">
-          {label} <span className="font-mono text-xs text-muted-foreground">pid {holder.pid}</span>
+          {label} <span className="font-mono text-xs text-muted-foreground">{t("settings.port.pid", { pid: holder.pid })}</span>
         </p>
         {holder.self && (
-          <p className="text-xs text-muted-foreground">This is EinCast. Stop the server from the Dashboard to free the port.</p>
+          <p className="text-xs text-muted-foreground">{t("settings.port.self")}</p>
         )}
         {confirming && (
-          <p className="text-xs text-warning">Unsaved work in this program may be lost.</p>
+          <p className="text-xs text-warning">{t("settings.port.unsaved")}</p>
         )}
       </div>
 
@@ -131,15 +149,15 @@ function HolderRow({ holder, confirming, pending, onAsk, onCancel, onEnd }: Hold
         (confirming ? (
           <div className="flex gap-2">
             <GlassButton size="sm" disabled={pending} onClick={onEnd}>
-              <OctagonX /> End {label}
+              <OctagonX /> {t("settings.port.end", { name: label })}
             </GlassButton>
             <GlassButton size="sm" disabled={pending} onClick={onCancel}>
-              Cancel
+              {t("common.cancel")}
             </GlassButton>
           </div>
         ) : (
           <GlassButton size="sm" disabled={pending} onClick={onAsk}>
-            End process…
+            {t("settings.port.endAsk")}
           </GlassButton>
         ))}
     </li>

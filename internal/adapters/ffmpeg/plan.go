@@ -1,34 +1,22 @@
 package ffmpeg
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"eincast/internal/app"
 )
-
-// streamInfo is what ffprobe says about one stream of a file.
-type streamInfo struct {
-	CodecType string `json:"codec_type"`
-	CodecName string `json:"codec_name"`
-	PixFmt    string `json:"pix_fmt"`
-}
-
-// parseProbe reads `ffprobe -of json -show_entries stream=…` output.
-func parseProbe(out []byte) ([]streamInfo, error) {
-	var doc struct {
-		Streams []streamInfo `json:"streams"`
-	}
-	if err := json.Unmarshal(out, &doc); err != nil {
-		return nil, fmt.Errorf("read ffprobe output: %w", err)
-	}
-	return doc.Streams, nil
-}
 
 // plan says how each stream gets into the HLS output: copied as it is (fast and
 // lossless) or converted.
 type plan struct {
 	copyVideo bool
 	copyAudio bool
+	// audio is the position of the audio stream to use among the file's audio
+	// streams.
+	audio int
+	// encoder makes the picture when copyVideo is false.
+	encoder encoder
 }
 
 // makePlan decides from the probe. What Safari, iOS and TVs all play inside
@@ -36,20 +24,46 @@ type plan struct {
 // new container, which takes a moment, while anything else (HEVC, 10-bit, AC-3,
 // FLAC, …) is converted. With no probe result, everything is converted: slower,
 // but never wrong.
-func makePlan(streams []streamInfo) plan {
-	var p plan
-	seenVideo, seenAudio := false, false
+//
+// audioTrack picks the audio stream; app.DefaultAudioTrack picks the one the
+// file marks as default, else the first. A position the file does not have is
+// an error here, because ffmpeg would otherwise quietly leave the sound out; a
+// file with no sound at all has nothing to choose, so any position is fine.
+func makePlan(streams []streamInfo, audioTrack int) (plan, error) {
+	p := plan{encoder: encoderX264}
+	var audio []streamInfo
+	seenVideo := false
 	for _, s := range streams {
 		switch {
 		case s.CodecType == "video" && !seenVideo:
 			seenVideo = true
 			p.copyVideo = s.CodecName == "h264" && (s.PixFmt == "yuv420p" || s.PixFmt == "yuvj420p")
-		case s.CodecType == "audio" && !seenAudio:
-			seenAudio = true
-			p.copyAudio = s.CodecName == "aac"
+		case s.CodecType == "audio":
+			audio = append(audio, s)
 		}
 	}
-	return p
+
+	switch {
+	case audioTrack == app.DefaultAudioTrack:
+		for i, s := range audio {
+			if s.Disposition.Default == 1 {
+				audioTrack = i
+				break
+			}
+		}
+		if audioTrack == app.DefaultAudioTrack {
+			audioTrack = 0
+		}
+	case len(audio) > 0 && audioTrack >= len(audio):
+		return plan{}, fmt.Errorf("the video has no audio track %d", audioTrack+1)
+	case audioTrack < 0:
+		return plan{}, fmt.Errorf("no audio track %d", audioTrack)
+	}
+	p.audio = audioTrack
+	if audioTrack < len(audio) {
+		p.copyAudio = audio[audioTrack].CodecName == "aac"
+	}
+	return p, nil
 }
 
 // segmentSeconds is the target length of one HLS segment. Short enough to start
@@ -64,16 +78,15 @@ func hlsArgs(file, dir string, p plan) []string {
 		"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-protocol_whitelist", "file,pipe",
 		"-i", "file:" + file,
-		// The first video stream, and the first audio stream if there is one.
-		"-map", "0:v:0", "-map", "0:a:0?",
+		// The first video stream, and the chosen audio stream if there is one.
+		"-map", "0:v:0", "-map", fmt.Sprintf("0:a:%d?", p.audio),
 		"-sn",
 	}
 	if p.copyVideo {
 		a = append(a, "-c:v", "copy")
 	} else {
+		a = append(a, p.encoder.args()...)
 		a = append(a,
-			"-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-			"-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.1",
 			// Never bigger than 1080p wide: more costs time and bandwidth for no
 			// visible gain on a phone or a TV across a room.
 			"-vf", "scale='min(1920,iw)':-2",

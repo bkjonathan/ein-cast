@@ -11,15 +11,18 @@ import (
 	"log/slog"
 	"runtime"
 	"strings"
+	"sync"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"eincast/internal/app"
 	"eincast/internal/app/portfree"
+	"eincast/internal/app/profiles"
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/app/thumbnails"
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/profile"
 	"eincast/internal/domain/server"
 )
 
@@ -27,6 +30,9 @@ import (
 type Info struct {
 	Name    string
 	Version string
+	// Repo is the GitHub repository as "owner/name". The help links are built from
+	// it; empty means the build has none and they are refused.
+	Repo string
 }
 
 // Library is the part of the library use cases the bridge needs. It is declared
@@ -35,6 +41,7 @@ type Library interface {
 	Add(ctx context.Context, root string) (app.LibraryState, error)
 	Remove(id media.LibraryID) error
 	Rename(id media.LibraryID, name string) error
+	SetHiddenFromTVs(id media.LibraryID, hidden bool) error
 	Rescan(ctx context.Context, id media.LibraryID) error
 	RescanAll(ctx context.Context) error
 	Restore(ctx context.Context) error
@@ -49,6 +56,25 @@ type Settings interface {
 	Get() app.SettingsView
 	Update(in settings.Input) (app.SettingsView, error)
 	RotateToken() (app.SettingsView, error)
+	SetFFmpegPath(path string) error
+}
+
+// Profiles is the part of the profile use cases the bridge drives.
+type Profiles interface {
+	Entries() []app.ProfileEntry
+	Save(p profile.Profile) (profile.Profile, error)
+	Delete(id profile.ID) error
+	SetPIN(id profile.ID, pin string) error
+	ClearPIN(id profile.ID) error
+}
+
+// FFmpeg is the part of the ffmpeg adapter the bridge needs: where it is, and
+// whether a file the person picked can be run.
+type FFmpeg interface {
+	// Path returns where ffmpeg is, or "" if it cannot be found.
+	Path() string
+	// Check reports why path cannot be used as ffmpeg, in words for the person.
+	Check(path string) error
 }
 
 // Streaming is the part of the server lifecycle the bridge drives.
@@ -95,6 +121,30 @@ type Conversions interface {
 	StopAll()
 }
 
+// Updates is the part of the update check the bridge drives.
+type Updates interface {
+	Status() app.UpdateStatus
+	// Check asks now; the outcome is in the returned status.
+	Check(ctx context.Context) app.UpdateStatus
+	// PageURL is the newest release's page, or "" when there is nothing to open.
+	PageURL() string
+	// Run checks by itself until ctx ends.
+	Run(ctx context.Context)
+}
+
+// Diagnostics builds the text a person attaches to a bug report.
+type Diagnostics interface {
+	Report() string
+}
+
+// Reset is the part of "Reset EinCast" the bridge drives.
+type Reset interface {
+	// Erase removes every saved setting, token and cache; media folders are untouched.
+	Erase() error
+	// Relaunch arranges for EinCast to open again once this process has exited.
+	Relaunch() error
+}
+
 // App is the Wails-bound facade. Every exported method is callable from JS, so
 // keep this surface small and stable (and keep lifecycle hooks unexported).
 type App struct {
@@ -106,9 +156,19 @@ type App struct {
 	ports     Ports
 	thumbs    Thumbnails  // nil: no thumbnails
 	convert   Conversions // nil: no conversion
+	ffmpeg    FFmpeg      // nil: ffmpeg is not managed from Settings
+	profiles  Profiles    // nil: profiles are not managed from Settings
+	updates   Updates     // nil: no update check
+	reset     Reset       // nil: no reset
+	diag      Diagnostics // nil: no diagnostics
+	closers   []func()    // run at shutdown, after the server has stopped
 	logs      app.LogStream
 	emitter   *Emitter
 	log       *slog.Logger
+
+	// windDown makes sure the server and the closers stop once, whether the app
+	// ends by itself or a reset ends it first.
+	windDown sync.Once
 
 	// ctx lives for the whole app run and is cancelled on shutdown. Wails
 	// binding calls carry no context of their own, so long operations use this.
@@ -117,6 +177,11 @@ type App struct {
 	// replace the one thing that needs a real window.
 	pickFolder func(ctx context.Context) (string, error)
 	pickFile   func(ctx context.Context, title string) (string, error)
+	// openURL opens an address in the default browser. A field so tests can
+	// observe the choice without a real browser.
+	openURL func(ctx context.Context, url string)
+	// quit ends the app. A field so tests do not end themselves.
+	quit func(ctx context.Context)
 	// windowThemes maps a theme name to the Wails call that applies it. A field
 	// so tests can observe the choice without a native window.
 	windowThemes map[string]func(ctx context.Context)
@@ -134,9 +199,22 @@ type Deps struct {
 	Thumbnails Thumbnails
 	// Conversions may be nil.
 	Conversions Conversions
-	Logs        app.LogStream
-	Emitter     *Emitter
-	Log         *slog.Logger
+	// FFmpeg may be nil.
+	FFmpeg FFmpeg
+	// Profiles may be nil.
+	Profiles Profiles
+	// Updates may be nil.
+	Updates Updates
+	// Reset may be nil.
+	Reset Reset
+	// Diagnostics may be nil.
+	Diagnostics Diagnostics
+	// OnShutdown runs once the server has stopped, for whatever must be written
+	// before the app ends (resume positions).
+	OnShutdown []func()
+	Logs       app.LogStream
+	Emitter    *Emitter
+	Log        *slog.Logger
 }
 
 // New builds the facade from its dependencies.
@@ -150,11 +228,19 @@ func New(d Deps) *App {
 		ports:      d.Ports,
 		thumbs:     d.Thumbnails,
 		convert:    d.Conversions,
+		ffmpeg:     d.FFmpeg,
+		profiles:   d.Profiles,
+		updates:    d.Updates,
+		reset:      d.Reset,
+		diag:       d.Diagnostics,
+		closers:    d.OnShutdown,
 		logs:       d.Logs,
 		emitter:    d.Emitter,
 		log:        d.Log,
 		pickFolder: openFolderDialog,
 		pickFile:   openFileDialog,
+		openURL:    wruntime.BrowserOpenURL,
+		quit:       wruntime.Quit,
 		windowThemes: map[string]func(context.Context){
 			"system": wruntime.WindowSetSystemDefaultTheme,
 			"light":  wruntime.WindowSetLightTheme,
@@ -176,22 +262,49 @@ func OnShutdown(a *App) func(ctx context.Context) {
 	return a.shutdown
 }
 
+// ShowWindow brings the window back after it was hidden or minimised. It is a
+// function, not a method, so it is not bound to JS. The tray and a second launch
+// of the app use it.
+func ShowWindow(a *App) {
+	wruntime.WindowShow(a.ctx)
+	wruntime.WindowUnminimise(a.ctx)
+}
+
+// Quit really ends the app: the window closing may only hide it, and this is the
+// way out. The shutdown hook then stops the server.
+func Quit(a *App) {
+	wruntime.Quit(a.ctx)
+}
+
 func (a *App) shutdown(ctx context.Context) {
-	// The app context may already be cancelled; shutdown must still run.
-	ctx = context.WithoutCancel(ctx)
-	// Stopping the server also turns remote access off, but a tunnel must never
-	// outlive the app, so do not depend on the server being in a state to stop.
-	if err := a.remote.Disable(ctx); err != nil {
-		a.log.Warn("turn off remote access on shutdown", slog.String("error", err.Error()))
-	}
-	if err := a.streaming.Stop(ctx); err != nil && !errors.Is(err, server.ErrInvalidTransition) {
-		// Nothing more to do while quitting, but leave a trace.
-		a.log.Warn("stop server on shutdown", slog.String("error", err.Error()))
-	}
-	// No ffmpeg or temporary file may outlive the app.
-	if a.convert != nil {
-		a.convert.StopAll()
-	}
+	a.stopEverything(ctx)
+}
+
+// stopEverything turns off remote access, stops the server and the conversions,
+// and runs the closers, once. A reset calls it before erasing, and the shutdown
+// hook that follows finds it already done: the closers (resume positions) must
+// not write again after the files are gone.
+func (a *App) stopEverything(ctx context.Context) {
+	a.windDown.Do(func() {
+		// The app context may already be cancelled; this must still run.
+		ctx = context.WithoutCancel(ctx)
+		// Stopping the server also turns remote access off, but a tunnel must never
+		// outlive the app, so do not depend on the server being in a state to stop.
+		if err := a.remote.Disable(ctx); err != nil {
+			a.log.Warn("turn off remote access on shutdown", slog.String("error", err.Error()))
+		}
+		if err := a.streaming.Stop(ctx); err != nil && !errors.Is(err, server.ErrInvalidTransition) {
+			// Nothing more to do while quitting, but leave a trace.
+			a.log.Warn("stop server on shutdown", slog.String("error", err.Error()))
+		}
+		// No ffmpeg or temporary file may outlive the app.
+		if a.convert != nil {
+			a.convert.StopAll()
+		}
+		for _, f := range a.closers {
+			f()
+		}
+	})
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -205,6 +318,11 @@ func (a *App) startup(ctx context.Context) {
 	if a.convert != nil {
 		go a.convert.Run(ctx)
 	}
+	// Looks for a newer version now and then, if the person allows it; ends with
+	// the app context.
+	if a.updates != nil {
+		go a.updates.Run(ctx)
+	}
 	// Reopen the last folder in the background so the window appears at once.
 	go a.restoreLibrary(ctx)
 }
@@ -215,6 +333,23 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) restoreLibrary(ctx context.Context) {
 	if err := a.library.Restore(ctx); err != nil {
 		a.log.Warn("could not reopen the previous library folder", slog.String("error", err.Error()))
+	}
+	a.autoStart()
+}
+
+// autoStart starts the server when the person asked for that and there is
+// something to share. It does nothing when the server is already up or on its
+// way, so the first folder, a restore and a click can all call it freely.
+func (a *App) autoStart() {
+	if !a.settings.Get().AutoStart || len(a.library.State()) == 0 {
+		return
+	}
+	if a.streaming.Status().State != server.Idle {
+		return
+	}
+	if err := a.StartServer(); err != nil && !errors.Is(err, server.ErrInvalidTransition) {
+		// The failure also reaches the UI as a server:state event; this is the trace.
+		a.log.Warn("could not start the server automatically", slog.String("error", err.Error()))
 	}
 }
 
@@ -262,8 +397,11 @@ func (a *App) ChooseFolder() error {
 	if path == "" {
 		return nil
 	}
-	_, err = a.library.Add(a.ctx, path)
-	return err
+	if _, err = a.library.Add(a.ctx, path); err != nil {
+		return err
+	}
+	a.autoStart()
+	return nil
 }
 
 // ListLibraries returns every library with what is in it and what is happening
@@ -345,14 +483,35 @@ func (a *App) SetWindowTheme(mode string) error {
 // arrives as a "server:state" event; an error here means the request itself was
 // refused (for example, the server is already running) or the bind failed.
 func (a *App) StartServer() error {
+	return a.streaming.Start(a.ctx, a.serverConfig())
+}
+
+// serverConfig is the saved settings in the form the server starts with.
+func (a *App) serverConfig() streaming.Config {
 	s := a.settings.Get()
-	return a.streaming.Start(a.ctx, streaming.NewConfig(
+	return streaming.NewConfig(
 		streaming.WithPort(s.Port),
 		streaming.WithName(s.Name),
 		// Never together with the token (settings refuses that too): a TV cannot
 		// present it, so this is a second lock on the same door.
 		streaming.WithDLNA(s.DLNA && !s.RequireToken),
-	))
+		streaming.WithKeepAwake(s.KeepAwake),
+	)
+}
+
+// RefreshAddresses restarts the running server so it picks up the addresses the
+// computer has now, after the Wi-Fi or cable changed. The listeners are fixed
+// when the server starts, so this is the whole job. Remote access goes down with
+// the server (a tunnel never outlives it) and has to be turned on again. Nothing
+// happens when the server is not running.
+func (a *App) RefreshAddresses() error {
+	if a.streaming.Status().State != server.Running {
+		return nil
+	}
+	if err := a.streaming.Stop(a.ctx); err != nil {
+		return fmt.Errorf("refresh addresses: %w", err)
+	}
+	return a.StartServer()
 }
 
 // StopServer stops the HTTP server gracefully.
@@ -375,8 +534,133 @@ func (a *App) GetSettings() SettingsDTO {
 // port, name or Smart TV setting applies the next time the server starts; the
 // token applies at once.
 func (a *App) UpdateSettings(in SettingsInputDTO) error {
-	_, err := a.settings.Update(settings.Input{Port: in.Port, Name: in.Name, RequireToken: in.RequireToken, DLNA: in.DLNA})
+	_, err := a.settings.Update(settings.Input{
+		Port: in.Port, Name: in.Name, RequireToken: in.RequireToken, DLNA: in.DLNA,
+		AutoStart: in.AutoStart, KeepAwake: in.KeepAwake, OpenAtLogin: in.OpenAtLogin, HideOnClose: in.HideOnClose,
+		HardwareEncoding: in.HardwareEncoding, CheckForUpdates: in.CheckForUpdates,
+	})
 	return err
+}
+
+// SetLibraryHiddenFromTVs keeps a library off smart TVs, or shows it to them again.
+// A TV cannot say who is watching, so this is the one choice it gets.
+func (a *App) SetLibraryHiddenFromTVs(id string, hidden bool) error {
+	return a.library.SetHiddenFromTVs(media.LibraryID(id), hidden)
+}
+
+// ListProfiles returns the profiles with what each may see. The UI calls it on
+// load; changes arrive as "profiles:changed". PINs and hashes never cross.
+func (a *App) ListProfiles() []ProfileDTO {
+	if a.profiles == nil {
+		return []ProfileDTO{}
+	}
+	return toProfileDTOs(a.profiles.Entries())
+}
+
+// SaveProfile adds a profile (an empty id) or changes one, and returns it as
+// stored. A refusal comes back in words for the person.
+func (a *App) SaveProfile(in ProfileDTO) (ProfileDTO, error) {
+	if a.profiles == nil {
+		return ProfileDTO{}, errors.New("profiles are not available in this build")
+	}
+	saved, err := a.profiles.Save(in.toProfile())
+	if err != nil {
+		return ProfileDTO{}, profileError(err)
+	}
+	return toProfileDTO(app.ProfileEntry{Profile: saved, HasPIN: in.HasPIN}), nil
+}
+
+// DeleteProfile removes a profile and ends every sign-in made as it.
+func (a *App) DeleteProfile(id string) error {
+	if a.profiles == nil {
+		return errors.New("profiles are not available in this build")
+	}
+	return profileError(a.profiles.Delete(profile.ID(id)))
+}
+
+// SetProfilePIN sets or changes a profile's PIN (4 to 6 digits). Devices that chose
+// the profile with the old one have to choose again.
+func (a *App) SetProfilePIN(id, pin string) error {
+	if a.profiles == nil {
+		return errors.New("profiles are not available in this build")
+	}
+	return profileError(a.profiles.SetPIN(profile.ID(id), pin))
+}
+
+// ClearProfilePIN removes a profile's PIN.
+func (a *App) ClearProfilePIN(id string) error {
+	if a.profiles == nil {
+		return errors.New("profiles are not available in this build")
+	}
+	return profileError(a.profiles.ClearPIN(profile.ID(id)))
+}
+
+// profileError rewrites the refusals a person can act on as plain advice. These
+// messages are shown in the UI; the invalid-profile ones are already written for it.
+func profileError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, profiles.ErrLastProfile):
+		return errors.New("There has to be at least one profile.")
+	case errors.Is(err, profiles.ErrTooMany):
+		return fmt.Errorf("There can be at most %d profiles.", profiles.MaxProfiles)
+	case errors.Is(err, profiles.ErrUnknownProfile):
+		return errors.New("That profile no longer exists.")
+	case errors.Is(err, profile.ErrInvalid):
+		return errors.New(strings.TrimPrefix(err.Error(), profile.ErrInvalid.Error()+": "))
+	default:
+		return err
+	}
+}
+
+// GetFFmpegStatus says whether ffmpeg was found, where, and what to run to
+// install it. It is the answer to "why are there no pictures?".
+func (a *App) GetFFmpegStatus() FFmpegStatusDTO {
+	st := FFmpegStatusDTO{InstallCommand: ffmpegInstallCommand(runtime.GOOS), Chosen: a.settings.Get().FFmpegPath}
+	if a.ffmpeg != nil {
+		st.Path = a.ffmpeg.Path()
+	}
+	st.Available = st.Path != ""
+	return st
+}
+
+// ffmpegInstallCommand is the one line that installs ffmpeg with the package
+// manager people on that system usually have. Empty means there is no such line.
+func ffmpegInstallCommand(goos string) string {
+	switch goos {
+	case "darwin":
+		return "brew install ffmpeg"
+	case "windows":
+		return "winget install ffmpeg"
+	default:
+		return ""
+	}
+}
+
+// ChooseFFmpeg opens the native file picker for the person to point at ffmpeg,
+// checks that it can be run, and remembers it. Cancelling is not an error. The
+// new state arrives as a "settings:changed" event.
+func (a *App) ChooseFFmpeg() error {
+	if a.ffmpeg == nil {
+		return errors.New("ffmpeg cannot be set on this build")
+	}
+	path, err := a.pickFile(a.ctx, "Locate ffmpeg")
+	if err != nil {
+		return fmt.Errorf("choose ffmpeg: %w", err)
+	}
+	if path == "" {
+		return nil
+	}
+	if err := a.ffmpeg.Check(path); err != nil {
+		return err
+	}
+	return a.settings.SetFFmpegPath(path)
+}
+
+// ClearFFmpegPath goes back to looking for ffmpeg without help.
+func (a *App) ClearFFmpegPath() error {
+	return a.settings.SetFFmpegPath("")
 }
 
 // RotateAccessToken replaces the access token. Devices using the old link are
@@ -554,4 +838,96 @@ func openFileDialog(ctx context.Context, title string) (string, error) {
 		return "", errors.New("app not started")
 	}
 	return wruntime.OpenFileDialog(ctx, wruntime.OpenDialogOptions{Title: title})
+}
+
+// GetUpdateStatus says whether a newer version is out, as far as the last check
+// knows. The UI calls it on load; changes arrive as "update:status".
+func (a *App) GetUpdateStatus() UpdateStatusDTO {
+	if a.updates == nil {
+		return UpdateStatusDTO{Current: a.info.Version}
+	}
+	return toUpdateStatusDTO(a.updates.Status())
+}
+
+// CheckForUpdatesNow asks for the newest version right away, whatever the
+// "check for updates" setting says: the person pressed the button. A failure is
+// part of the returned status, not an error.
+func (a *App) CheckForUpdatesNow() UpdateStatusDTO {
+	if a.updates == nil {
+		return UpdateStatusDTO{Current: a.info.Version}
+	}
+	return toUpdateStatusDTO(a.updates.Check(a.ctx))
+}
+
+// OpenUpdatePage opens the newest release's download page in the person's
+// browser. It takes no address: only the page the update check found can be
+// opened, so the UI cannot be made to open anything else.
+func (a *App) OpenUpdatePage() error {
+	if a.updates == nil {
+		return errors.New("update checks are not available in this build")
+	}
+	url := a.updates.PageURL()
+	if url == "" {
+		return errors.New("there is no newer version to download")
+	}
+	a.openURL(a.ctx, url)
+	return nil
+}
+
+// ResetApp forgets everything this install knows and opens EinCast again as a
+// first run: it stops sharing, erases settings, libraries, profiles, resume
+// positions, tokens, PINs and caches, then quits and starts a new copy. The
+// person's media files are not touched. On success the app ends, so the promise
+// never resolves; an error means it was erased only in part (the cause is in
+// the message) and nothing was restarted.
+func (a *App) ResetApp() error {
+	if a.reset == nil {
+		return errors.New("reset is not available in this build")
+	}
+	a.log.Warn("reset requested: erasing all saved data")
+	// Nothing may write while the files are deleted, so stop first.
+	a.stopEverything(a.ctx)
+	if err := a.reset.Erase(); err != nil {
+		return fmt.Errorf("Could not erase everything: %w", err)
+	}
+	// The data is gone either way. If the new copy cannot be started, quitting
+	// is still right: staying open would show a library that no longer exists.
+	if err := a.reset.Relaunch(); err != nil {
+		a.log.Error("could not reopen EinCast after the reset; open it again yourself", slog.String("error", err.Error()))
+	}
+	a.quit(a.ctx)
+	return nil
+}
+
+// GetDiagnostics returns the text for a bug report: version, system, a summary of
+// the settings and the latest log lines, with folder names and secrets hidden. It
+// is only made when asked for and goes nowhere by itself: the person copies it.
+func (a *App) GetDiagnostics() (string, error) {
+	if a.diag == nil {
+		return "", errors.New("diagnostics are not available in this build")
+	}
+	return a.diag.Report(), nil
+}
+
+// helpPages are the pages the Settings screen can open, by topic. The window
+// names a topic, never an address, so it cannot be made to open anything else
+// (the same rule as OpenUpdatePage).
+var helpPages = map[string]string{
+	"bug":     "/issues/new?template=bug_report.yml",
+	"idea":    "/issues/new?template=feature_request.yml",
+	"privacy": "/blob/main/docs/PRIVACY.md",
+}
+
+// OpenHelpPage opens "bug" (report a problem), "idea" (suggest something) or
+// "privacy" (what EinCast sends, and to whom) in the person's browser.
+func (a *App) OpenHelpPage(topic string) error {
+	path, ok := helpPages[topic]
+	if !ok {
+		return fmt.Errorf("open help page: unknown topic %q", topic)
+	}
+	if a.info.Repo == "" {
+		return errors.New("this build does not know where its project page is")
+	}
+	a.openURL(a.ctx, "https://github.com/"+a.info.Repo+path)
+	return nil
 }

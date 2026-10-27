@@ -20,43 +20,108 @@ import (
 func TestParseProbe(t *testing.T) {
 	out := []byte(`{"programs":[],"streams":[
 		{"index":0,"codec_name":"h264","codec_type":"video","pix_fmt":"yuv420p"},
-		{"index":1,"codec_name":"aac","codec_type":"audio"}]}`)
+		{"index":1,"codec_name":"ac3","codec_type":"audio","channels":6,"tags":{"language":"eng","title":"Surround"},"disposition":{"default":1}}]}`)
 	got, err := parseProbe(out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []streamInfo{{"video", "h264", "yuv420p"}, {"audio", "aac", ""}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("parseProbe() = %+v, want %+v", got, want)
+	if len(got) != 2 || got[0].CodecName != "h264" || got[0].PixFmt != "yuv420p" {
+		t.Fatalf("parseProbe() = %+v", got)
+	}
+	a := got[1]
+	if a.CodecType != "audio" || a.Channels != 6 || a.Tags.Language != "eng" || a.Tags.Title != "Surround" || a.Disposition.Default != 1 {
+		t.Errorf("audio stream = %+v", a)
 	}
 	if _, err := parseProbe([]byte("not json")); err == nil {
 		t.Error("parseProbe(garbage) = nil error")
 	}
 }
 
+// stream builders for the tests below.
+func vid(codec, pix string) streamInfo {
+	return streamInfo{CodecType: "video", CodecName: codec, PixFmt: pix}
+}
+func aud(codec string, def bool) streamInfo {
+	s := streamInfo{CodecType: "audio", CodecName: codec}
+	if def {
+		s.Disposition.Default = 1
+	}
+	return s
+}
+
 func TestMakePlan(t *testing.T) {
-	v := func(codec, pix string) streamInfo { return streamInfo{"video", codec, pix} }
-	a := func(codec string) streamInfo { return streamInfo{"audio", codec, ""} }
 	tests := []struct {
 		name    string
 		streams []streamInfo
+		track   int
 		want    plan
 	}{
-		{"h264 and aac only need a new container", []streamInfo{v("h264", "yuv420p"), a("aac")}, plan{true, true}},
-		{"jpeg-range h264 is fine too", []streamInfo{v("h264", "yuvj420p"), a("aac")}, plan{true, true}},
-		{"hevc is converted", []streamInfo{v("hevc", "yuv420p"), a("aac")}, plan{false, true}},
-		{"10-bit h264 is converted (iOS cannot play it)", []streamInfo{v("h264", "yuv420p10le"), a("aac")}, plan{false, true}},
-		{"ac3 audio is converted", []streamInfo{v("h264", "yuv420p"), a("ac3")}, plan{true, false}},
-		{"no audio at all", []streamInfo{v("h264", "yuv420p")}, plan{true, false}},
-		{"only the first video and first audio count", []streamInfo{a("aac"), v("hevc", "yuv420p"), v("h264", "yuv420p"), a("flac")}, plan{false, true}},
-		{"no probe result converts everything", nil, plan{false, false}},
+		{"h264 and aac only need a new container", []streamInfo{vid("h264", "yuv420p"), aud("aac", false)}, app.DefaultAudioTrack, plan{copyVideo: true, copyAudio: true}},
+		{"jpeg-range h264 is fine too", []streamInfo{vid("h264", "yuvj420p"), aud("aac", false)}, app.DefaultAudioTrack, plan{copyVideo: true, copyAudio: true}},
+		{"hevc is converted", []streamInfo{vid("hevc", "yuv420p"), aud("aac", false)}, app.DefaultAudioTrack, plan{copyAudio: true}},
+		{"10-bit h264 is converted (iOS cannot play it)", []streamInfo{vid("h264", "yuv420p10le"), aud("aac", false)}, app.DefaultAudioTrack, plan{copyAudio: true}},
+		{"ac3 audio is converted", []streamInfo{vid("h264", "yuv420p"), aud("ac3", false)}, app.DefaultAudioTrack, plan{copyVideo: true}},
+		{"no audio at all", []streamInfo{vid("h264", "yuv420p")}, app.DefaultAudioTrack, plan{copyVideo: true}},
+		{"only the first video counts; the first audio is the default", []streamInfo{aud("aac", false), vid("hevc", "yuv420p"), vid("h264", "yuv420p"), aud("flac", false)}, app.DefaultAudioTrack, plan{copyAudio: true}},
+		{"the track the file marks as default wins", []streamInfo{vid("h264", "yuv420p"), aud("ac3", false), aud("aac", true)}, app.DefaultAudioTrack, plan{copyVideo: true, copyAudio: true, audio: 1}},
+		{"a chosen track is judged on its own codec", []streamInfo{vid("h264", "yuv420p"), aud("aac", false), aud("ac3", false)}, 1, plan{copyVideo: true, audio: 1}},
+		{"a chosen track beats the default", []streamInfo{vid("h264", "yuv420p"), aud("ac3", true), aud("aac", false)}, 1, plan{copyVideo: true, copyAudio: true, audio: 1}},
+		{"no probe result converts everything", nil, app.DefaultAudioTrack, plan{}},
+		{"no probe result still honours a chosen track", nil, 2, plan{audio: 2}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := makePlan(tt.streams); got != tt.want {
+			got, err := makePlan(tt.streams, tt.track)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.want.encoder = encoderX264
+			if got != tt.want {
 				t.Fatalf("makePlan() = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+
+	t.Run("a track the file does not have is an error, not silence", func(t *testing.T) {
+		streams := []streamInfo{vid("h264", "yuv420p"), aud("aac", false)}
+		for _, track := range []int{1, 7, -2} {
+			if _, err := makePlan(streams, track); err == nil {
+				t.Errorf("makePlan(track %d) = nil error", track)
+			}
+		}
+	})
+}
+
+func TestStreamsOf(t *testing.T) {
+	sub := func(codec, lang string) streamInfo {
+		s := streamInfo{CodecType: "subtitle", CodecName: codec}
+		s.Tags.Language = lang
+		return s
+	}
+	a := aud("aac", true)
+	a.Tags.Language = "jpn"
+	a.Channels = 2
+
+	got := streamsOf([]streamInfo{vid("h264", "yuv420p"), a, sub("hdmv_pgs_subtitle", "eng"), aud("ac3", false), sub("subrip", "fre"), sub("ass", "")})
+
+	if len(got.Audio) != 2 || got.Audio[0] != (app.AudioStream{Index: 0, Language: "jpn", Codec: "aac", Channels: 2, Default: true}) || got.Audio[1].Index != 1 {
+		t.Errorf("Audio = %+v", got.Audio)
+	}
+	want := []struct {
+		index int
+		codec string
+		text  bool
+	}{{0, "hdmv_pgs_subtitle", false}, {1, "subrip", true}, {2, "ass", true}}
+	if len(got.Subtitles) != len(want) {
+		t.Fatalf("Subtitles = %+v", got.Subtitles)
+	}
+	for i, w := range want {
+		if s := got.Subtitles[i]; s.Index != w.index || s.Codec != w.codec || s.Text != w.text {
+			t.Errorf("Subtitles[%d] = %+v, want %+v", i, s, w)
+		}
+	}
+	if empty := streamsOf(nil); empty.Audio != nil || empty.Subtitles != nil {
+		t.Errorf("streamsOf(nil) = %+v", empty)
 	}
 }
 
@@ -71,14 +136,14 @@ func TestHLSArgs(t *testing.T) {
 	}
 
 	t.Run("remux copies both streams and does not encode", func(t *testing.T) {
-		a := hlsArgs("/lib/a.mkv", "/out", plan{true, true})
+		a := hlsArgs("/lib/a.mkv", "/out", plan{copyVideo: true, copyAudio: true})
 		if !has(a, "-c:v", "copy") || !has(a, "-c:a", "copy") || slices.Contains(a, "libx264") {
 			t.Errorf("args = %v", a)
 		}
 	})
 
 	t.Run("conversion encodes H.264 + AAC with an even keyframe rhythm", func(t *testing.T) {
-		a := hlsArgs("/lib/a.mkv", "/out", plan{})
+		a := hlsArgs("/lib/a.mkv", "/out", plan{encoder: encoderX264})
 		for _, pair := range [][]string{
 			{"-c:v", "libx264"}, {"-pix_fmt", "yuv420p"}, {"-c:a", "aac"}, {"-ac", "2"}, {"-sc_threshold", "0"},
 			{"-force_key_frames", "expr:gte(t,n_forced*6)"},
@@ -92,6 +157,29 @@ func TestHLSArgs(t *testing.T) {
 	t.Run("reads the input as a file and keeps a missing audio track optional", func(t *testing.T) {
 		a := hlsArgs("/lib/concat:x.mkv", "/out", plan{})
 		if !has(a, "-i", "file:/lib/concat:x.mkv") || !has(a, "-protocol_whitelist", "file,pipe") || !has(a, "-map", "0:a:0?") {
+			t.Errorf("args = %v", a)
+		}
+	})
+
+	t.Run("maps the chosen audio stream", func(t *testing.T) {
+		a := hlsArgs("/lib/a.mkv", "/out", plan{audio: 2, encoder: encoderX264})
+		if !has(a, "-map", "0:a:2?") {
+			t.Errorf("args = %v", a)
+		}
+	})
+
+	t.Run("a chip encoder replaces libx264 and keeps the keyframe rhythm", func(t *testing.T) {
+		for _, enc := range []encoder{encoderVideoToolbox, encoderNVENC, encoderQSV} {
+			a := hlsArgs("/lib/a.mkv", "/out", plan{encoder: enc})
+			if !has(a, "-c:v", string(enc)) || slices.Contains(a, "libx264") || !has(a, "-force_key_frames", "expr:gte(t,n_forced*6)") {
+				t.Errorf("%s: args = %v", enc, a)
+			}
+		}
+	})
+
+	t.Run("a copied picture names no encoder", func(t *testing.T) {
+		a := hlsArgs("/lib/a.mkv", "/out", plan{copyVideo: true, encoder: encoderVideoToolbox})
+		if slices.Contains(a, string(encoderVideoToolbox)) {
 			t.Errorf("args = %v", a)
 		}
 	})
@@ -198,7 +286,7 @@ func readStreamFile(t *testing.T, s app.HLSStream, name string) string {
 
 func start(t *testing.T, tc *Transcoder, path string) app.HLSStream {
 	t.Helper()
-	s, err := tc.Start(context.Background(), app.TranscodeRequest{Root: filepath.Dir(path), Path: path})
+	s, err := tc.Start(context.Background(), app.TranscodeRequest{Root: filepath.Dir(path), Path: path, AudioTrack: app.DefaultAudioTrack})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -258,8 +346,8 @@ func TestTranscoder_ConvertsHEVCToH264(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := makePlan(streams); !p.copyVideo || !p.copyAudio {
-		t.Errorf("output streams = %+v, want 8-bit H.264 and AAC", streams)
+	if p, err := makePlan(streams, app.DefaultAudioTrack); err != nil || !p.copyVideo || !p.copyAudio {
+		t.Errorf("output streams = %+v (err %v), want 8-bit H.264 and AAC", streams, err)
 	}
 }
 

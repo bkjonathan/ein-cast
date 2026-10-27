@@ -25,6 +25,16 @@ import (
 type Transcoder struct {
 	finder
 	baseDir string // each conversion gets a folder in here
+
+	// freeBytes says how much room the disk holding baseDir has; a field so tests
+	// can make it small.
+	freeBytes func(dir string) (uint64, error)
+	// goos picks which chip encoders to look for; a field for tests.
+	goos string
+
+	mu        sync.Mutex
+	hardware  []encoder // chip encoders this ffmpeg has, once looked for
+	hwChecked string    // the ffmpeg they were looked for in
 }
 
 var _ app.Transcoder = (*Transcoder)(nil)
@@ -32,11 +42,9 @@ var _ app.Transcoder = (*Transcoder)(nil)
 // NewTranscoder returns a Transcoder that works in folders under baseDir. Whatever
 // an earlier run left there (a crash, a killed process) is deleted now: nothing
 // in it can be served again.
-func NewTranscoder(baseDir string, log *slog.Logger) *Transcoder {
-	t := &Transcoder{
-		finder:  finder{log: log.With(slog.String("source", "transcode")), find: locate},
-		baseDir: baseDir,
-	}
+func NewTranscoder(baseDir string, log *slog.Logger, opts ...Option) *Transcoder {
+	t := &Transcoder{baseDir: baseDir, freeBytes: freeBytes, goos: runtime.GOOS}
+	t.init(log.With(slog.String("source", "transcode")), opts)
 	t.clearStale()
 	return t
 }
@@ -71,6 +79,9 @@ func (t *Transcoder) Start(ctx context.Context, req app.TranscodeRequest) (app.H
 	if err := os.MkdirAll(t.baseDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create conversion folder: %w", err)
 	}
+	if err := t.checkDiskSpace(file); err != nil {
+		return nil, err
+	}
 	dir, err := os.MkdirTemp(t.baseDir, "s-")
 	if err != nil {
 		return nil, fmt.Errorf("create conversion folder: %w", err)
@@ -84,25 +95,63 @@ func (t *Transcoder) Start(ctx context.Context, req app.TranscodeRequest) (app.H
 		ready:  make(chan struct{}),
 		done:   make(chan struct{}),
 	}
-	go st.run(runCtx, bin, probeBinary(bin), file)
+	go st.run(runCtx, job{
+		ffmpeg: bin, ffprobe: probeBinary(bin), file: file, audio: req.AudioTrack,
+		encoders: func(ctx context.Context) []encoder { return t.encoderChain(ctx, bin) },
+	})
 	return st, nil
 }
 
-// probeBinary finds ffprobe: the one installed beside ffmpeg, else on PATH, else
-// "" (the video is then converted without looking first).
-func probeBinary(ffmpegPath string) string {
-	name := "ffprobe"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
+// Disk use of a conversion is bounded by what it is told to leave free, not by
+// its own size: the output is about as big as the source when copied, and
+// usually smaller when encoded, but not by a margin worth trusting.
+const (
+	// diskHeadroom is what a conversion must leave free for everything else the
+	// computer does.
+	diskHeadroom = 1 << 30
+	// diskEstimateCap caps the guess for one output, so a 60 GB 4K remux, which
+	// becomes a 1080p stream a fraction of its size, is not refused on a disk
+	// that has room for the result.
+	diskEstimateCap = 8 << 30
+)
+
+// checkDiskSpace refuses to start when the disk holding the conversion folder
+// would probably fill up. A failed check lets the conversion go ahead: not being
+// able to ask is no reason to refuse a film, and ffmpeg still fails cleanly if
+// the disk does fill.
+func (t *Transcoder) checkDiskSpace(file string) error {
+	info, err := os.Stat(file)
+	if err != nil {
+		return fmt.Errorf("convert %q: %w", file, err)
 	}
-	beside := filepath.Join(filepath.Dir(ffmpegPath), name)
-	if info, err := os.Stat(beside); err == nil && !info.IsDir() {
-		return beside
+	free, err := t.freeBytes(t.baseDir)
+	if err != nil {
+		t.log.Warn("could not check the free disk space", slog.String("error", err.Error()))
+		return nil
 	}
-	if p, err := exec.LookPath("ffprobe"); err == nil {
-		return p
+	need := min(uint64(info.Size()), diskEstimateCap) + diskHeadroom
+	if free < need {
+		t.log.Warn("not converting: the disk is too full",
+			slog.Uint64("free_bytes", free), slog.Uint64("needed_bytes", need))
+		return app.ErrNotEnoughDiskSpace
 	}
-	return ""
+	return nil
+}
+
+// encoderChain returns the encoders to try for a conversion, best first. The
+// chip encoders ffmpeg has are looked up once per ffmpeg program.
+func (t *Transcoder) encoderChain(ctx context.Context, bin string) []encoder {
+	if t.hardwareOn == nil || !t.hardwareOn() {
+		return encoderChain(nil, false)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.hwChecked != bin {
+		t.hardware = detectEncoders(ctx, bin, hardwareCandidates(t.goos))
+		t.hwChecked = bin
+		t.log.Debug("chip encoders in this ffmpeg", slog.Int("count", len(t.hardware)))
+	}
+	return encoderChain(t.hardware, true)
 }
 
 // outputName is every file name a stream serves: the playlist and its segments.
@@ -137,20 +186,34 @@ func (s *stream) Err() error {
 	return s.err
 }
 
+// job is what one conversion works from.
+type job struct {
+	ffmpeg, ffprobe string // the programs; ffprobe may be ""
+	file            string
+	audio           int
+	// encoders gives the video encoders to try, best first. It runs in the
+	// conversion's own goroutine because looking them up asks ffmpeg.
+	encoders func(ctx context.Context) []encoder
+}
+
 // run probes, converts and reports. It is the only writer of err and done.
-func (s *stream) run(ctx context.Context, ffmpegPath, ffprobePath, file string) {
+func (s *stream) run(ctx context.Context, j job) {
 	defer close(s.done)
 
 	var streams []streamInfo
-	if ffprobePath != "" {
+	if j.ffprobe != "" {
 		var err error
-		if streams, err = probe(ctx, ffprobePath, file); err != nil && ctx.Err() == nil {
+		if streams, err = probe(ctx, j.ffprobe, j.file); err != nil && ctx.Err() == nil {
 			// Converting everything still works; it is only slower.
 			s.log.Debug("probe failed; converting everything", slog.String("error", err.Error()))
 		}
 	}
-	p := makePlan(streams)
-	s.log.Debug("converting", slog.Bool("copy_video", p.copyVideo), slog.Bool("copy_audio", p.copyAudio))
+	p, err := makePlan(streams, j.audio)
+	if err != nil {
+		s.setErr(err)
+		return
+	}
+	s.log.Debug("converting", slog.Bool("copy_video", p.copyVideo), slog.Bool("copy_audio", p.copyAudio), slog.Int("audio_track", p.audio))
 
 	// The readiness check ends with the conversion, one way or another, and is
 	// waited for so nothing of ours runs after Done is closed.
@@ -165,16 +228,32 @@ func (s *stream) run(ctx context.Context, ffmpegPath, ffprobePath, file string) 
 		<-pollDone
 	}()
 
-	cmd := exec.CommandContext(ctx, ffmpegPath, hlsArgs(file, s.dir, p)...)
-	hideWindow(cmd)
+	// A copied picture needs no encoder. Otherwise the chip comes first and the
+	// processor is the way out when the chip does not work: whether it does is
+	// only found out by trying.
+	chain := []encoder{encoderX264}
+	if !p.copyVideo {
+		chain = j.encoders(ctx)
+	}
+	var runErr error
 	var stderr bytes.Buffer
-	cmd.Stderr = &limitedWriter{w: &stderr, left: 4 << 10}
-	runErr := cmd.Run()
+	for i, enc := range chain {
+		p.encoder = enc
+		stderr.Reset()
+		cmd := exec.CommandContext(ctx, j.ffmpeg, hlsArgs(j.file, s.dir, p)...)
+		hideWindow(cmd)
+		cmd.Stderr = &limitedWriter{w: &stderr, left: 4 << 10}
+		runErr = cmd.Run()
+		if runErr == nil || s.wasStopped() || ctx.Err() != nil || s.isReady() || i == len(chain)-1 {
+			break
+		}
+		// Failed before anything could be played: start again with the next one.
+		s.log.Info("video encoder failed; trying another",
+			slog.String("encoder", string(enc)), slog.String("reason", lastLine(stderr.String())))
+		s.clearOutput()
+	}
 
-	s.mu.Lock()
-	stopped := s.stopping
-	s.mu.Unlock()
-	if runErr != nil && !stopped {
+	if runErr != nil && !s.wasStopped() {
 		s.setErr(fmt.Errorf("ffmpeg: %s", lastLine(stderr.String())))
 		return
 	}
@@ -185,6 +264,32 @@ func (s *stream) run(ctx context.Context, ffmpegPath, ffprobePath, file string) 
 		} else {
 			s.setErr(errors.New("ffmpeg finished without writing a playlist"))
 		}
+	}
+}
+
+func (s *stream) wasStopped() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopping
+}
+
+func (s *stream) isReady() bool {
+	select {
+	case <-s.ready:
+		return true
+	default:
+		return false
+	}
+}
+
+// clearOutput deletes what a failed attempt left, so the next one starts clean.
+func (s *stream) clearOutput() {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		_ = os.RemoveAll(filepath.Join(s.dir, e.Name()))
 	}
 }
 
@@ -254,20 +359,4 @@ func (s *stream) Stop() {
 	if err := os.RemoveAll(s.dir); err != nil {
 		s.log.Warn("could not delete a conversion's files", slog.String("error", err.Error()))
 	}
-}
-
-// probe asks ffprobe about the streams of a file.
-func probe(ctx context.Context, ffprobePath, file string) ([]streamInfo, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, ffprobePath,
-		"-v", "error", "-protocol_whitelist", "file,pipe",
-		"-show_entries", "stream=codec_type,codec_name,pix_fmt",
-		"-of", "json", "file:"+file)
-	hideWindow(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("ffprobe: %w", err)
-	}
-	return parseProbe(out)
 }

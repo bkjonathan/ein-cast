@@ -27,6 +27,17 @@ export interface LibraryItem {
   size: number;
   /** Last modified, Unix milliseconds. */
   modTime: number;
+  /** What to show: read from the name or a .nfo, else the file name. `name` stays the file name. */
+  title: string;
+  /** Release year, 0 when unknown. */
+  year: number;
+  /** The series an episode belongs to; empty for everything else. */
+  show: string;
+  /** 0 when unknown. */
+  season: number;
+  episode: number;
+  /** True when the thumbnail is a poster found next to the file, not a frame of it. */
+  poster: boolean;
 }
 
 export interface KindCounts {
@@ -54,6 +65,26 @@ export interface LibraryState {
   error: string;
   /** True while Go watches the folder, so changes on disk reach the library by themselves. */
   watching: boolean;
+  /** Kept off smart TVs: a TV cannot say who is watching, so this is the one choice it gets. */
+  hiddenFromTVs: boolean;
+}
+
+/**
+ * One person's view of the library. `libraries` matter only when `allLibraries`
+ * is false; empty `kinds` means every kind; `hiddenFolders` are names (with * and ?)
+ * matched against each folder in a file's path. A PIN never leaves Go: only
+ * whether one is set.
+ */
+export interface Profile {
+  /** Empty for a profile that has not been saved yet. */
+  id: string;
+  name: string;
+  color: string;
+  allLibraries: boolean;
+  libraries: string[];
+  kinds: MediaKind[];
+  hiddenFolders: string[];
+  hasPin: boolean;
 }
 
 /** The user's preferences, plus the access token when it is switched on. */
@@ -63,6 +94,20 @@ export interface Settings {
   requireToken: boolean;
   /** Smart TV (DLNA) discovery. Never on together with requireToken: Go refuses both. */
   dlna: boolean;
+  /** Start the server when EinCast opens and right after the first folder is added. */
+  autoStart: boolean;
+  /** Keep the computer from sleeping while the server runs. */
+  keepAwake: boolean;
+  /** Open EinCast when the person signs in to the computer. */
+  openAtLogin: boolean;
+  /** Closing the window keeps sharing; read when EinCast starts. */
+  hideOnClose: boolean;
+  /** Where the person said ffmpeg is; empty means "look for it". */
+  ffmpegPath: string;
+  /** Let video conversions use the computer's video chip; Go falls back to the processor by itself. */
+  hardwareEncoding: boolean;
+  /** Let EinCast look for a newer version by itself (about once a day). Off stops those requests. */
+  checkForUpdates: boolean;
   /** Empty unless requireToken is on. */
   accessToken: string;
   /** False when the token could not be saved to the system credential store. */
@@ -70,7 +115,21 @@ export interface Settings {
 }
 
 /** The editable part of Settings. */
-export type SettingsInput = Pick<Settings, "port" | "name" | "requireToken" | "dlna">;
+export type SettingsInput = Pick<
+  Settings,
+  "port" | "name" | "requireToken" | "dlna" | "autoStart" | "keepAwake" | "openAtLogin" | "hideOnClose" | "hardwareEncoding" | "checkForUpdates"
+>;
+
+/** Whether ffmpeg was found, and what the person can do about it. */
+export interface FFmpegStatus {
+  available: boolean;
+  /** Where it was found; empty when it was not. */
+  path: string;
+  /** The location the person set, shown even when it no longer works. */
+  chosen: string;
+  /** A one-line install command for this system; empty when there is none to suggest. */
+  installCommand: string;
+}
 
 /** A program using a TCP port. `self` is EinCast's own process, which cannot be ended from here. */
 export interface PortHolder {
@@ -176,4 +235,43 @@ export interface LogLine {
   source: string;
   message: string;
   attrs: LogAttr[];
+}
+
+/** One downloadable file of a release. */
+export interface UpdateAsset {
+  name: string;
+  /** Bytes. */
+  size: number;
+  /** Lowercase hex; empty when the release published no checksum for the file. */
+  sha256: string;
+}
+
+/**
+ * The newest release. `notes` is plain text that came from the network: render it
+ * as text, never as markup. The release page's address is deliberately absent;
+ * `openUpdatePage` asks Go to open it.
+ */
+export interface UpdateRelease {
+  /** Without a leading "v". */
+  version: string;
+  name: string;
+  notes: string;
+  /** Unix milliseconds; 0 when unknown. */
+  publishedAt: number;
+  /** Only the files for this computer. */
+  assets: UpdateAsset[];
+}
+
+/** Whether a newer version is out, as far as the last check knows. */
+export interface UpdateStatus {
+  /** The running version; "dev" for a build from source. */
+  current: string;
+  checking: boolean;
+  available: boolean;
+  /** The newest release the last successful check saw, newer or not. Null before one succeeds. */
+  latest: UpdateRelease | null;
+  /** When the last check succeeded, Unix milliseconds; 0 until then. */
+  checkedAt: number;
+  /** Why the last check failed, in words for the person; empty if it did not. */
+  error: string;
 }

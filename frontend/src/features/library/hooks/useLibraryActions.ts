@@ -5,6 +5,7 @@ import {
   renameLibrary,
   rescanAllLibraries,
   rescanLibrary,
+  setLibraryHiddenFromTVs,
 } from "@/shared/bridge";
 import { useLibraryStore } from "../store";
 
@@ -19,6 +20,8 @@ interface LibraryActions {
   remove: (id: string) => Promise<void>;
   /** Renames a library; resolves true if Go accepted the name. */
   rename: (id: string, name: string) => Promise<boolean>;
+  /** Keeps a library off smart TVs, or shows it to them again. */
+  setHiddenFromTVs: (id: string, hidden: boolean) => Promise<boolean>;
   /** True while a command is in flight or Go reports a scan running. */
   busy: boolean;
   /** Why the last command was refused, in Go's words (for example, the folder is already added). */
@@ -54,5 +57,7 @@ export function useLibraryActions(): LibraryActions {
   const remove = useCallback(async (id: string) => void (await run(() => removeLibrary(id))), [run]);
   const rename = useCallback((id: string, name: string) => run(() => renameLibrary(id, name)), [run]);
 
-  return { add, rescan, rescanAll, remove, rename, busy: pending || scanning, error };
+  const setHiddenFromTVs = useCallback((id: string, hidden: boolean) => run(() => setLibraryHiddenFromTVs(id, hidden)), [run]);
+
+  return { add, rescan, rescanAll, remove, rename, setHiddenFromTVs, busy: pending || scanning, error };
 }

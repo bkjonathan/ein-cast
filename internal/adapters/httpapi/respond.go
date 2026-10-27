@@ -24,6 +24,7 @@ const (
 	codeForbidden    = "forbidden"
 	codeBusy         = "busy"
 	codeNotConvert   = "not_convertible"
+	codeDiskFull     = "disk_full"
 )
 
 // writeJSON marshals first, so a marshalling failure becomes a clean 500

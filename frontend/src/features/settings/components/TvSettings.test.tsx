@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // screen's component tests).
 const mem = vi.hoisted(() => ({
   settings: { settings: null } as {
-    settings: { port: number; name: string; requireToken: boolean; dlna: boolean } | null;
+    settings: Record<string, unknown> | null;
   },
   server: { status: null } as { status: { state: string; discovery: string[] } | null },
 }));
@@ -20,7 +20,10 @@ vi.mock("@/features/server", () => ({
 import { TvSettings } from "./TvSettings";
 
 const set = (over: Partial<NonNullable<typeof mem.settings.settings>> = {}) => {
-  mem.settings.settings = { port: 8765, name: "Den", requireToken: false, dlna: false, ...over };
+  mem.settings.settings = {
+    port: 8765, name: "Den", requireToken: false, dlna: false,
+    autoStart: false, keepAwake: true, openAtLogin: false, hideOnClose: false, ...over,
+  };
 };
 
 beforeEach(() => {
@@ -46,11 +49,13 @@ describe("TvSettings", () => {
     expect(renderToStaticMarkup(<TvSettings />)).toMatch(/aria-checked="true"/);
   });
 
-  it("cannot be switched on while the access token is, and says why", () => {
+  it("with the access token on, still offers the switch and says what turning it on costs", () => {
     set({ requireToken: true });
     const html = renderToStaticMarkup(<TvSettings />);
-    expect(html).toMatch(/disabled=""/);
+    expect(html).not.toMatch(/disabled=""/); // the person decides; Go enforces the exclusion
     expect(html).toMatch(/access token is on, and TVs can(&#x27;|')t send it/);
+    expect(html).toMatch(/Turning this on turns the token off/);
+    expect(html).not.toMatch(/alertdialog/); // the warning appears on click, not before
   });
 
   it("asks for a restart only when the running server differs from the setting", () => {

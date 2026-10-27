@@ -25,14 +25,29 @@ func (a *api) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 	// requested with. Through a tunnel it is a signed link per item that expires,
 	// never the PIN session or the LAN token.
 	tunnel := a.viaTunnel(r)
-	suffix := ""
+	items, v, ok := a.visibleItems(w, r)
+	if !ok {
+		return
+	}
+	// Each entry also carries the profile credential when there is a choice of
+	// profiles, so the player's own requests are checked as this profile too.
+	var params []string
 	if token := tokenFrom(r.Context()); token != "" && !tunnel {
-		suffix = "?" + queryParam + "=" + url.QueryEscape(token)
+		params = append(params, queryParam+"="+url.QueryEscape(token))
+	}
+	if !tunnel && !v.open && a.profiles.Active() {
+		if cred, ok := a.profiles.Credential(v.id); ok {
+			params = append(params, profileParam+"="+url.QueryEscape(cred))
+		}
+	}
+	suffix := ""
+	if len(params) > 0 {
+		suffix = "?" + strings.Join(params, "&")
 	}
 
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
-	for _, it := range a.lib.List() {
+	for _, it := range items {
 		if it.Kind != media.KindVideo && it.Kind != media.KindAudio {
 			continue
 		}

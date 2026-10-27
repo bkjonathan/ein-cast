@@ -234,3 +234,68 @@ func TestGrab_StopsWhenItsContextIsCancelled(t *testing.T) {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
+
+func missingFFmpeg(t *testing.T) *Grabber {
+	t.Helper()
+	g := New(slog.New(slog.DiscardHandler))
+	g.find = func() (string, error) { return "", errors.New("ffmpeg was not found") }
+	return g
+}
+
+func writeJPEG(t *testing.T, dir, name string, w, h int) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, image.NewRGBA(image.Rect(0, 0, w, h)), nil); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestGrab_WithoutFFmpegASmallPosterIsItsOwnThumbnail(t *testing.T) {
+	root := t.TempDir()
+	poster := writeJPEG(t, root, "poster.jpg", 40, 60)
+	got, err := missingFFmpeg(t).Grab(context.Background(), app.GrabRequest{Root: root, Path: poster, Kind: media.KindImage, Width: 320})
+	if err != nil || !isJPEG(got) {
+		t.Fatalf("Grab() = %d bytes, %v; want the poster as it is", len(got), err)
+	}
+}
+
+func TestGrab_WithoutFFmpegOnlySmallJPEGImagesAreServedAsTheyAre(t *testing.T) {
+	root := t.TempDir()
+	g := missingFFmpeg(t)
+	grab := func(path string, kind media.Kind) error {
+		_, err := g.Grab(context.Background(), app.GrabRequest{Root: root, Path: path, Kind: kind, Width: 320})
+		return err
+	}
+
+	big := filepath.Join(root, "big.jpg")
+	if err := os.WriteFile(big, append([]byte{0xFF, 0xD8, 0xFF}, make([]byte, maxUnshrunk)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	png := filepath.Join(root, "p.png")
+	_ = os.WriteFile(png, []byte("\x89PNG\r\n\x1a\n"), 0o644)
+	video := filepath.Join(root, "a.mkv")
+	_ = os.WriteFile(video, []byte("\xff\xd8\xff not really a video"), 0o644)
+
+	for name, tc := range map[string]struct {
+		path string
+		kind media.Kind
+	}{"too big to send unshrunk": {big, media.KindImage}, "a PNG": {png, media.KindImage}, "a video": {video, media.KindVideo}} {
+		if err := grab(tc.path, tc.kind); !errors.Is(err, app.ErrThumbnailsUnavailable) {
+			t.Errorf("%s: error = %v, want ErrThumbnailsUnavailable", name, err)
+		}
+	}
+}
+
+func TestGrab_WithoutFFmpegStillKeepsToTheLibrary(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	poster := writeJPEG(t, outside, "poster.jpg", 10, 10)
+	_, err := missingFFmpeg(t).Grab(context.Background(), app.GrabRequest{Root: root, Path: poster, Kind: media.KindImage, Width: 320})
+	if err == nil || errors.Is(err, app.ErrThumbnailsUnavailable) {
+		t.Fatalf("error = %v, want the path to be refused for being outside the library", err)
+	}
+}
