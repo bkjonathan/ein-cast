@@ -1,0 +1,15 @@
+# Files whose exact bytes matter must come out of a Windows checkout the same as
+# on a Mac: git's line-ending conversion would change them. Git applies the LAST
+# matching line, so the specific rule goes after the general one.
+
+# Everything the app embeds and serves, so a Windows build ships the same files.
+# "auto" keeps git's binary detection, so an image in there is left alone.
+internal/adapters/httpapi/web/** text=auto eol=lf
+
+# Vendored hls.js: its SHA-256 is checked by a test
+# (internal/adapters/httpapi/static_hls_test.go). Never convert it.
+internal/adapters/httpapi/web/hls.min.js -text
+
+# The CI and release workflows run these under Git Bash on Windows, where a
+# carriage return at the end of a line is a syntax error.
+*.sh text eol=lf
