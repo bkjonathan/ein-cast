@@ -6,8 +6,10 @@ import {
   ChooseFile as goChooseFile,
   ChooseFolder as goChooseFolder,
   ClearFFmpegPath as goClearFFmpegPath,
+  ClearProfilePIN as goClearProfilePIN,
   ClearRemotePIN as goClearRemotePIN,
   ClearRemoteProviderField as goClearRemoteProviderField,
+  DeleteProfile as goDeleteProfile,
   DisableRemote as goDisableRemote,
   EnableRemote as goEnableRemote,
   FreePort as goFreePort,
@@ -19,6 +21,10 @@ import {
   GetServerState as goGetServerState,
   GetThumbnail as goGetThumbnail,
   ListLibraries as goListLibraries,
+  ListProfiles as goListProfiles,
+  SaveProfile as goSaveProfile,
+  SetLibraryHiddenFromTVs as goSetLibraryHiddenFromTVs,
+  SetProfilePIN as goSetProfilePIN,
   ListLibrary as goListLibrary,
   RefreshAddresses as goRefreshAddresses,
   RemoveLibrary as goRemoveLibrary,
@@ -35,7 +41,7 @@ import {
   ThumbnailsAvailable as goThumbnailsAvailable,
   UpdateSettings as goUpdateSettings,
 } from "../../../wailsjs/go/bridge/App";
-import { toLibraryItem, toLibraryState, toLogLine, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
+import { toLibraryItem, toLibraryState, toLogLine, toProfile, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
 import type {
   AppInfo,
   FFmpegStatus,
@@ -43,6 +49,7 @@ import type {
   LibraryState,
   LogLine,
   PortHolder,
+  Profile,
   RemoteFieldState,
   RemoteProvider,
   RemoteStatus,
@@ -280,4 +287,37 @@ export async function checkPort(port: number): Promise<PortHolder[]> {
  */
 export async function freePort(port: number, pid: number): Promise<void> {
   await goFreePort(port, pid);
+}
+
+/** Keeps a library off smart TVs, or shows it to them again. The new state arrives as a "library:status" event. */
+export async function setLibraryHiddenFromTVs(id: string, hidden: boolean): Promise<void> {
+  await goSetLibraryHiddenFromTVs(id, hidden);
+}
+
+/** Every profile, with what each may see. Changes arrive as "profiles:changed". */
+export async function listProfiles(): Promise<Profile[]> {
+  return (await goListProfiles()).map(toProfile);
+}
+
+/**
+ * Adds a profile (an empty id) or changes one, and resolves with it as stored. The PIN
+ * is not part of it: see setProfilePin. Rejects with Go's reason in words for the person.
+ */
+export async function saveProfile(profile: Profile): Promise<Profile> {
+  return toProfile(await goSaveProfile(profile));
+}
+
+/** Removes a profile and ends every sign-in made as it. Rejects if it is the last one. */
+export async function deleteProfile(id: string): Promise<void> {
+  await goDeleteProfile(id);
+}
+
+/** Sets or changes a profile's PIN (4 to 6 digits). Devices that chose the profile must choose again. */
+export async function setProfilePin(id: string, pin: string): Promise<void> {
+  await goSetProfilePIN(id, pin);
+}
+
+/** Removes a profile's PIN. */
+export async function clearProfilePin(id: string): Promise<void> {
+  await goClearProfilePIN(id);
 }

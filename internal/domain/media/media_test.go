@@ -82,3 +82,17 @@ func TestNewID(t *testing.T) {
 		}
 	})
 }
+
+func TestLegacyID(t *testing.T) {
+	// Pinned: browsers hold resume positions under exactly this value, so it must
+	// never change. SHA-256("movies/film.mkv")[:8].
+	if got := LegacyID("movies/film.mkv"); got != "3ae4b49870a8f355" {
+		t.Errorf("LegacyID() = %q", got)
+	}
+	if LegacyID("a.mkv") == NewID("lib", "a.mkv") {
+		t.Error("the legacy ID equals a current one; the two schemes must stay apart")
+	}
+	if LegacyID("a.mkv") != LegacyID("a.mkv") || LegacyID("a.mkv") == LegacyID("b.mkv") {
+		t.Error("LegacyID() is not a function of the path")
+	}
+}

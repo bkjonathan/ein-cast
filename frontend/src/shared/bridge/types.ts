@@ -65,6 +65,26 @@ export interface LibraryState {
   error: string;
   /** True while Go watches the folder, so changes on disk reach the library by themselves. */
   watching: boolean;
+  /** Kept off smart TVs: a TV cannot say who is watching, so this is the one choice it gets. */
+  hiddenFromTVs: boolean;
+}
+
+/**
+ * One person's view of the library. `libraries` matter only when `allLibraries`
+ * is false; empty `kinds` means every kind; `hiddenFolders` are names (with * and ?)
+ * matched against each folder in a file's path. A PIN never leaves Go: only
+ * whether one is set.
+ */
+export interface Profile {
+  /** Empty for a profile that has not been saved yet. */
+  id: string;
+  name: string;
+  color: string;
+  allLibraries: boolean;
+  libraries: string[];
+  kinds: MediaKind[];
+  hiddenFolders: string[];
+  hasPin: boolean;
 }
 
 /** The user's preferences, plus the access token when it is switched on. */

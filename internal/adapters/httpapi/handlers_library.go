@@ -30,6 +30,9 @@ type itemJSON struct {
 	Season  int    `json:"season"`
 	Episode int    `json:"episode"`
 	Plot    string `json:"plot"`
+	// LegacyID is the ID the item had before libraries existed. The player page
+	// moves a resume position saved under it to the current ID.
+	LegacyID media.ID `json:"legacyId"`
 	// Poster says /thumb/{id} is a poster found next to the file (a portrait
 	// picture), not a frame taken from it.
 	Poster bool `json:"poster"`
@@ -53,13 +56,16 @@ func toItemJSON(it media.Item) itemJSON {
 	return itemJSON{
 		ID: it.ID, Name: it.Name, Kind: it.Kind, Size: it.Size, ModTime: it.ModTime, Subtitles: subs,
 		Title: it.DisplayName(), Year: m.Year, Show: show, Season: season, Episode: episode, Plot: m.Plot,
-		Poster: it.Artwork.Present(),
+		Poster: it.Artwork.Present(), LegacyID: media.LegacyID(it.RelPath),
 	}
 }
 
-// handleLibrary lists every item.
-func (a *api) handleLibrary(w http.ResponseWriter, _ *http.Request) {
-	items := a.lib.List()
+// handleLibrary lists the items the request may see.
+func (a *api) handleLibrary(w http.ResponseWriter, r *http.Request) {
+	items, _, ok := a.visibleItems(w, r)
+	if !ok {
+		return
+	}
 	out := make([]itemJSON, 0, len(items)) // non-nil: an empty library is [], not null
 	for _, it := range items {
 		out = append(out, toItemJSON(it))
@@ -77,11 +83,17 @@ func (a *api) handleLibraryItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // lookup resolves the {id} path value. On failure it has already written the
-// response and ok is false.
+// response and ok is false. An item the request may not see is the same 404 as one
+// that does not exist: the answer must not confirm that an ID is real (ADR 0027).
+// Every route that takes an ID goes through here.
 func (a *api) lookup(w http.ResponseWriter, r *http.Request) (media.Item, bool) {
 	it, err := a.lib.Get(media.ID(r.PathValue("id")))
 	switch {
 	case err == nil:
+		if !a.allowed(r, it) {
+			writeError(w, http.StatusNotFound, codeNotFound, "media not found")
+			return media.Item{}, false
+		}
 		return it, true
 	case errors.Is(err, media.ErrNotFound):
 		writeError(w, http.StatusNotFound, codeNotFound, "media not found")

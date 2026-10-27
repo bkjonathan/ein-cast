@@ -235,7 +235,7 @@ func TestLibrary_ListHidesInternalFields(t *testing.T) {
 		// An exact list: a new field must be added here on purpose, so a path or
 		// anything else internal cannot leak by accident.
 		allowed := []string{"id", "name", "kind", "size", "modTime", "subtitles",
-			"title", "year", "show", "season", "episode", "plot", "poster"}
+			"title", "year", "show", "season", "episode", "plot", "poster", "legacyId"}
 		for _, want := range allowed {
 			if _, ok := it[want]; !ok {
 				t.Errorf("item missing %q: %v", want, it)

@@ -100,3 +100,11 @@ type RemoteStatusChanged struct {
 }
 
 func (RemoteStatusChanged) event() {}
+
+// ProfilesChanged is published after a profile is added, changed or removed, or
+// its PIN is set or cleared. It carries no PINs or hashes.
+type ProfilesChanged struct {
+	Profiles []ProfileEntry
+}
+
+func (ProfilesChanged) event() {}

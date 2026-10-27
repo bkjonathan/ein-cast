@@ -105,13 +105,30 @@ describe("onEvent", () => {
     onEvent(name, handler);
     const wire = {
       id: "f1", name: "Films", root: "/m", total: 1, totalSize: 7,
-      counts: { video: 1, audio: 0, image: 0 }, scanning: true, error: "", watching: false,
+      counts: { video: 1, audio: 0, image: 0 }, scanning: true, error: "", watching: false, hiddenFromTVs: false,
     };
     deliver([wire]);
     expect(runtime.EventsOn).toHaveBeenLastCalledWith(name, expect.any(Function));
     expect(handler).toHaveBeenCalledWith([wire]);
     deliver([]);
     expect(handler).toHaveBeenLastCalledWith([]);
+  });
+
+  it("decodes profiles:changed into a list of profiles and rejects an unknown kind", () => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_n: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+    const handler = vi.fn();
+    onEvent("profiles:changed", handler);
+    const wire = {
+      id: "k", name: "Kids", color: "green", allLibraries: true, libraries: [], kinds: ["video"], hiddenFolders: [], hasPin: false,
+    };
+    deliver([wire]);
+    expect(runtime.EventsOn).toHaveBeenLastCalledWith("profiles:changed", expect.any(Function));
+    expect(handler).toHaveBeenCalledWith([wire]);
+    expect(() => deliver([{ ...wire, kinds: ["book"] }])).toThrow(/unknown media kind/);
   });
 
   it("decodes remote:status payloads and rejects unknown states", () => {

@@ -88,4 +88,20 @@ button.card:hover .cover { box-shadow: 0 0 0 2px var(--accent); }
 .file { overflow-wrap: anywhere; }
 .back { display: inline-block; margin: .25rem 0; }
 .item .num { flex: none; width: 2rem; color: var(--muted); text-align: right; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+#profile-button { display: inline-flex; align-items: center; gap: .5rem; }
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 1.6rem; height: 1.6rem; border-radius: 50%; color: #fff; font-weight: 700; font-size: .85rem;
+}
+/* Who is watching. */
+.picker-page { max-width: 40rem; margin: 2rem auto; text-align: center; }
+.people { align-items: start; justify-content: center; grid-template-columns: repeat(auto-fit, minmax(120px, 160px)); }
+.people button.card { text-align: center; padding: 1rem .5rem; }
+.people .avatar { width: 5rem; height: 5rem; font-size: 2rem; margin: 0 auto .6rem; }
+.people .card-title { margin-top: 0; }
+.pin-form { margin: 1.5rem auto 0; max-width: 18rem; display: grid; gap: .6rem; }
+.pin-form input { font: inherit; font-size: 1.4rem; text-align: center; letter-spacing: .4rem; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: .6rem; }
+.pin-form input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.hint.error { color: #e5534b; min-height: 1.4em; }
 [hidden] { display: none !important; }

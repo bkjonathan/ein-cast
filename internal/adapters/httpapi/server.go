@@ -39,6 +39,9 @@ type Server struct {
 	dlnaID  string      // the server's UPnP identity; empty: no DLNA pages
 	version string
 	log     *slog.Logger
+
+	profiles Profiles // nil: no profile rules
+	resume   Resume   // nil: no server-side resume
 }
 
 var _ app.WebServer = (*Server)(nil)
@@ -62,6 +65,18 @@ func WithDLNA(uuid string) Option {
 // route answers "not found" and the player page only plays files as they are.
 func WithTranscoding(t Transcoding) Option {
 	return func(s *Server) { s.hls = t }
+}
+
+// WithProfiles puts the profile rules in front of the library: who may see what,
+// who must choose, and what smart TVs may list (ADR 0027). Without it every
+// request sees the whole library.
+func WithProfiles(p Profiles) Option {
+	return func(s *Server) { s.profiles = p }
+}
+
+// WithResume serves and records where each profile stopped, at /api/resume.
+func WithResume(r Resume) Option {
+	return func(s *Server) { s.resume = r }
 }
 
 // New builds a Server. version appears in the Server header and /api/health.
@@ -191,9 +206,16 @@ func addrStrings(addrs []netip.AddrPort) []string {
 
 // newAPI builds the handler state for one run.
 func (s *Server) newAPI(cfg app.ServeConfig) *api {
-	a := &api{lib: s.lib, access: s.access, remote: s.remote, thumbs: s.thumbs, hls: s.hls, version: s.version, name: cfg.Name, log: s.log}
+	a := &api{lib: s.lib, access: s.access, remote: s.remote, thumbs: s.thumbs, hls: s.hls,
+		profiles: s.profiles, resume: s.resume, version: s.version, name: cfg.Name, log: s.log}
 	if cfg.DLNA && s.dlnaID != "" {
-		a.dlna = dlna.NewHandler(dlna.Config{Library: s.lib, Name: cfg.Name, UUID: s.dlnaID, Version: s.version})
+		// A TV cannot say who is watching, so it lists only libraries marked
+		// visible to TVs.
+		var tvLib dlna.Library = s.lib
+		if s.profiles != nil {
+			tvLib = tvLibrary{lib: s.lib, tv: s.profiles}
+		}
+		a.dlna = dlna.NewHandler(dlna.Config{Library: tvLib, Name: cfg.Name, UUID: s.dlnaID, Version: s.version})
 	}
 	return a
 }

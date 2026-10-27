@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toLibraryItem, toLibraryState, toLogLine, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
+import { toLibraryItem, toProfile, toLibraryState, toLogLine, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
 
 const raw = (state: string) => ({
   state,
@@ -146,10 +146,30 @@ describe("toLibraryItem", () => {
   });
 });
 
+describe("toProfile", () => {
+  const raw = {
+    id: "k1", name: "Kids", color: "green", allLibraries: false, libraries: ["a", "b"], kinds: ["video"],
+    hiddenFolders: ["18*"], hasPin: true,
+  };
+
+  it("copies every field, and the lists rather than sharing them", () => {
+    const got = toProfile(raw);
+    expect(got).toStrictEqual(raw);
+    got.libraries.push("c");
+    got.hiddenFolders.push("x");
+    expect(raw.libraries).toEqual(["a", "b"]);
+    expect(raw.hiddenFolders).toEqual(["18*"]);
+  });
+
+  it("fails loudly on a kind it does not know", () => {
+    expect(() => toProfile({ ...raw, kinds: ["video", "book"] })).toThrow(/unknown media kind/);
+  });
+});
+
 describe("toLibraryState", () => {
   const raw = {
     id: "f1", name: "Films", root: "/m/films", total: 3, totalSize: 99,
-    counts: { video: 2, audio: 0, image: 1 }, scanning: false, error: "gone", watching: true,
+    counts: { video: 2, audio: 0, image: 1 }, scanning: false, error: "gone", watching: true, hiddenFromTVs: true,
   };
 
   it("copies every field", () => {

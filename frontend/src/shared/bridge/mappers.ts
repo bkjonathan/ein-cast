@@ -4,6 +4,7 @@ import type {
   LogLevel,
   LogLine,
   MediaKind,
+  Profile,
   RemoteField,
   RemoteFieldKind,
   RemoteProvider,
@@ -199,6 +200,7 @@ export interface RawLibraryState {
   scanning: boolean;
   error: string;
   watching: boolean;
+  hiddenFromTVs: boolean;
 }
 
 export function toLibraryState(raw: RawLibraryState): LibraryState {
@@ -212,5 +214,36 @@ export function toLibraryState(raw: RawLibraryState): LibraryState {
     scanning: raw.scanning,
     error: raw.error,
     watching: raw.watching,
+    hiddenFromTVs: raw.hiddenFromTVs,
+  };
+}
+
+/** The wire shape of a profile, before `kinds` is narrowed. */
+export interface RawProfile {
+  id: string;
+  name: string;
+  color: string;
+  allLibraries: boolean;
+  libraries: string[];
+  kinds: string[];
+  hiddenFolders: string[];
+  hasPin: boolean;
+}
+
+/** Lists are copied so a caller cannot change Go's object; an unknown kind is a protocol mismatch and fails loudly, like items. */
+export function toProfile(raw: RawProfile): Profile {
+  return {
+    id: raw.id,
+    name: raw.name,
+    color: raw.color,
+    allLibraries: raw.allLibraries,
+    libraries: [...raw.libraries],
+    kinds: raw.kinds.map((k) => {
+      const kind = mediaKinds.find((m) => m === k);
+      if (!kind) throw new Error(`unknown media kind from Go: "${k}"`);
+      return kind;
+    }),
+    hiddenFolders: [...raw.hiddenFolders],
+    hasPin: raw.hasPin,
   };
 }

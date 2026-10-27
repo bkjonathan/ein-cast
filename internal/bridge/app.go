@@ -16,10 +16,12 @@ import (
 
 	"eincast/internal/app"
 	"eincast/internal/app/portfree"
+	"eincast/internal/app/profiles"
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/app/thumbnails"
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/profile"
 	"eincast/internal/domain/server"
 )
 
@@ -35,6 +37,7 @@ type Library interface {
 	Add(ctx context.Context, root string) (app.LibraryState, error)
 	Remove(id media.LibraryID) error
 	Rename(id media.LibraryID, name string) error
+	SetHiddenFromTVs(id media.LibraryID, hidden bool) error
 	Rescan(ctx context.Context, id media.LibraryID) error
 	RescanAll(ctx context.Context) error
 	Restore(ctx context.Context) error
@@ -50,6 +53,15 @@ type Settings interface {
 	Update(in settings.Input) (app.SettingsView, error)
 	RotateToken() (app.SettingsView, error)
 	SetFFmpegPath(path string) error
+}
+
+// Profiles is the part of the profile use cases the bridge drives.
+type Profiles interface {
+	Entries() []app.ProfileEntry
+	Save(p profile.Profile) (profile.Profile, error)
+	Delete(id profile.ID) error
+	SetPIN(id profile.ID, pin string) error
+	ClearPIN(id profile.ID) error
 }
 
 // FFmpeg is the part of the ffmpeg adapter the bridge needs: where it is, and
@@ -117,6 +129,8 @@ type App struct {
 	thumbs    Thumbnails  // nil: no thumbnails
 	convert   Conversions // nil: no conversion
 	ffmpeg    FFmpeg      // nil: ffmpeg is not managed from Settings
+	profiles  Profiles    // nil: profiles are not managed from Settings
+	closers   []func()    // run at shutdown, after the server has stopped
 	logs      app.LogStream
 	emitter   *Emitter
 	log       *slog.Logger
@@ -146,10 +160,15 @@ type Deps struct {
 	// Conversions may be nil.
 	Conversions Conversions
 	// FFmpeg may be nil.
-	FFmpeg  FFmpeg
-	Logs    app.LogStream
-	Emitter *Emitter
-	Log     *slog.Logger
+	FFmpeg FFmpeg
+	// Profiles may be nil.
+	Profiles Profiles
+	// OnShutdown runs once the server has stopped, for whatever must be written
+	// before the app ends (resume positions).
+	OnShutdown []func()
+	Logs       app.LogStream
+	Emitter    *Emitter
+	Log        *slog.Logger
 }
 
 // New builds the facade from its dependencies.
@@ -164,6 +183,8 @@ func New(d Deps) *App {
 		thumbs:     d.Thumbnails,
 		convert:    d.Conversions,
 		ffmpeg:     d.FFmpeg,
+		profiles:   d.Profiles,
+		closers:    d.OnShutdown,
 		logs:       d.Logs,
 		emitter:    d.Emitter,
 		log:        d.Log,
@@ -219,6 +240,9 @@ func (a *App) shutdown(ctx context.Context) {
 	// No ffmpeg or temporary file may outlive the app.
 	if a.convert != nil {
 		a.convert.StopAll()
+	}
+	for _, f := range a.closers {
+		f()
 	}
 }
 
@@ -449,6 +473,78 @@ func (a *App) UpdateSettings(in SettingsInputDTO) error {
 		AutoStart: in.AutoStart, KeepAwake: in.KeepAwake, OpenAtLogin: in.OpenAtLogin, HideOnClose: in.HideOnClose,
 	})
 	return err
+}
+
+// SetLibraryHiddenFromTVs keeps a library off smart TVs, or shows it to them again.
+// A TV cannot say who is watching, so this is the one choice it gets.
+func (a *App) SetLibraryHiddenFromTVs(id string, hidden bool) error {
+	return a.library.SetHiddenFromTVs(media.LibraryID(id), hidden)
+}
+
+// ListProfiles returns the profiles with what each may see. The UI calls it on
+// load; changes arrive as "profiles:changed". PINs and hashes never cross.
+func (a *App) ListProfiles() []ProfileDTO {
+	if a.profiles == nil {
+		return []ProfileDTO{}
+	}
+	return toProfileDTOs(a.profiles.Entries())
+}
+
+// SaveProfile adds a profile (an empty id) or changes one, and returns it as
+// stored. A refusal comes back in words for the person.
+func (a *App) SaveProfile(in ProfileDTO) (ProfileDTO, error) {
+	if a.profiles == nil {
+		return ProfileDTO{}, errors.New("profiles are not available in this build")
+	}
+	saved, err := a.profiles.Save(in.toProfile())
+	if err != nil {
+		return ProfileDTO{}, profileError(err)
+	}
+	return toProfileDTO(app.ProfileEntry{Profile: saved, HasPIN: in.HasPIN}), nil
+}
+
+// DeleteProfile removes a profile and ends every sign-in made as it.
+func (a *App) DeleteProfile(id string) error {
+	if a.profiles == nil {
+		return errors.New("profiles are not available in this build")
+	}
+	return profileError(a.profiles.Delete(profile.ID(id)))
+}
+
+// SetProfilePIN sets or changes a profile's PIN (4 to 6 digits). Devices that chose
+// the profile with the old one have to choose again.
+func (a *App) SetProfilePIN(id, pin string) error {
+	if a.profiles == nil {
+		return errors.New("profiles are not available in this build")
+	}
+	return profileError(a.profiles.SetPIN(profile.ID(id), pin))
+}
+
+// ClearProfilePIN removes a profile's PIN.
+func (a *App) ClearProfilePIN(id string) error {
+	if a.profiles == nil {
+		return errors.New("profiles are not available in this build")
+	}
+	return profileError(a.profiles.ClearPIN(profile.ID(id)))
+}
+
+// profileError rewrites the refusals a person can act on as plain advice. These
+// messages are shown in the UI; the invalid-profile ones are already written for it.
+func profileError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, profiles.ErrLastProfile):
+		return errors.New("There has to be at least one profile.")
+	case errors.Is(err, profiles.ErrTooMany):
+		return fmt.Errorf("There can be at most %d profiles.", profiles.MaxProfiles)
+	case errors.Is(err, profiles.ErrUnknownProfile):
+		return errors.New("That profile no longer exists.")
+	case errors.Is(err, profile.ErrInvalid):
+		return errors.New(strings.TrimPrefix(err.Error(), profile.ErrInvalid.Error()+": "))
+	default:
+		return err
+	}
 }
 
 // GetFFmpegStatus says whether ffmpeg was found, where, and what to run to

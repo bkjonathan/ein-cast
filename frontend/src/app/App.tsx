@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useWindowTheme } from "@/features/appearance";
 import { isFirstScan, LibraryView, useLibraryStore, useLibrarySync } from "@/features/library";
 import { LogsView, useLogSync } from "@/features/logs";
+import { useProfilesSync } from "@/features/profiles";
 import { OnboardingScreen, ScanningScreen, SetupWizard } from "@/features/onboarding";
 import { RemoteView, useRemoteSync } from "@/features/remote";
 import { useServerSync } from "@/features/server";
@@ -28,6 +29,7 @@ export function App() {
   useLogSync();
   useSettingsSync();
   useRemoteSync();
+  useProfilesSync();
   useWindowTheme();
 
   const hydrated = useLibraryStore((s) => s.hydrated);

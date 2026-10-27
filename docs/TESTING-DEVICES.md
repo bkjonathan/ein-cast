@@ -71,6 +71,8 @@ These are not device rows but belong to the same reality check.
 | Check | Where | Status |
 |---|---|---|
 | 13.4 Windows 11: install, start, firewall prompt, Free a port, Mica look, uninstall | real Windows machine | not run |
+| 16 Profiles: pick Kids on an iPad (no PIN), Adults with a PIN on a phone; confirm the kids' iPad cannot see, search, stream, get a playlist entry or HLS for adult titles, and that "Continue watching" follows a profile between phone and TV browser | iPad, phone, TV browser | not run |
+| 16 Smart TV with profiles: a library marked "not shown to TVs" does not appear in the TV's browse list or play by a remembered ID | a real TV or VLC's UPnP list | not run |
 | 14.6 Keep awake: `pmset -g assertions` shows `caffeinate` while sharing (macOS); `powercfg /requests` shows EinCast (Windows); gone after Stop | real machines | macOS: not run on a Mac laptop; Windows: not run |
 | 14.7 Windows tray icon: Open / Quit, close-to-tray, relaunch shows the window | real Windows machine | not run |
 | 14.7 Open at login: LaunchAgent after a real macOS sign-in; `Run` key after a real Windows sign-in; starts hidden only with hide-on-close | real machines | not run |

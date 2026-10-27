@@ -17,9 +17,25 @@
         <p class="tagline">Your home media, on every screen.</p>
       </div>
     </div>
-    <a class="button" id="playlist-link" href="/playlist.m3u" download="eincast.m3u">Playlist for VLC / Infuse</a>
+    <div class="actions">
+      <button type="button" id="profile-button" class="button" hidden></button>
+      <a class="button" id="playlist-link" href="/playlist.m3u" download="eincast.m3u">Playlist for VLC / Infuse</a>
+    </div>
   </header>
 
+  <section id="picker" class="picker-page" hidden>
+    <h2>Who's watching?</h2>
+    <div id="picker-list" class="cards people"></div>
+    <form id="pin-form" class="pin-form" hidden>
+      <p id="pin-for" class="hint"></p>
+      <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" maxlength="6" aria-label="PIN">
+      <button type="submit" class="button primary">Continue</button>
+      <button type="button" id="pin-cancel" class="linkbutton">Back</button>
+      <p id="pin-error" class="hint error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="library-view">
   <section id="stage" class="stage" hidden>
     <p id="now-playing" class="now-playing"></p>
     <video id="video" controls playsinline hidden></video>
@@ -35,6 +51,7 @@
     <p id="status" class="status" role="status">Loading…</p>
     <div id="groups"></div>
   </main>
+  </div>
 
   <script src="/static/app.js" defer></script>
 </body>

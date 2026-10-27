@@ -8,16 +8,19 @@ import (
 	"net/netip"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"eincast/internal/app"
 	"eincast/internal/app/portfree"
+	"eincast/internal/app/profiles"
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/app/thumbnails"
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/profile"
 	"eincast/internal/domain/server"
 )
 
@@ -29,6 +32,8 @@ type fakeLibrary struct {
 	added      []string
 	removeErr  error
 	removed    []media.LibraryID
+	hidden     []string
+	hideErr    error
 	renameErr  error
 	renamed    [][2]string
 	rescanErr  error
@@ -47,6 +52,11 @@ func (f *fakeLibrary) Add(_ context.Context, root string) (app.LibraryState, err
 func (f *fakeLibrary) Remove(id media.LibraryID) error {
 	f.removed = append(f.removed, id)
 	return f.removeErr
+}
+
+func (f *fakeLibrary) SetHiddenFromTVs(id media.LibraryID, hidden bool) error {
+	f.hidden = append(f.hidden, fmt.Sprintf("%s=%v", id, hidden))
+	return f.hideErr
 }
 
 func (f *fakeLibrary) Rename(id media.LibraryID, name string) error {
@@ -1373,5 +1383,156 @@ func TestClearFFmpegPath(t *testing.T) {
 	a.settings = fs
 	if err := a.ClearFFmpegPath(); err != nil || !reflect.DeepEqual(fs.ffmpegSet, []string{""}) {
 		t.Errorf("err=%v remembered=%v", err, fs.ffmpegSet)
+	}
+}
+
+// ---- profiles ---------------------------------------------------------------------
+
+type fakeProfiles struct {
+	entries []app.ProfileEntry
+	saveErr error
+	saved   []profile.Profile
+	deleted []profile.ID
+	pins    map[profile.ID]string
+	err     error
+}
+
+func (f *fakeProfiles) Entries() []app.ProfileEntry { return f.entries }
+func (f *fakeProfiles) Save(p profile.Profile) (profile.Profile, error) {
+	f.saved = append(f.saved, p)
+	if f.saveErr != nil {
+		return profile.Profile{}, f.saveErr
+	}
+	if p.ID == "" {
+		p.ID = "new1"
+	}
+	return p, nil
+}
+func (f *fakeProfiles) Delete(id profile.ID) error { f.deleted = append(f.deleted, id); return f.err }
+func (f *fakeProfiles) SetPIN(id profile.ID, pin string) error {
+	if f.pins == nil {
+		f.pins = map[profile.ID]string{}
+	}
+	f.pins[id] = pin
+	return f.err
+}
+func (f *fakeProfiles) ClearPIN(id profile.ID) error { delete(f.pins, id); return f.err }
+
+func appWithProfiles(fp *fakeProfiles) *App {
+	a := newTestApp(&fakeLibrary{})
+	a.profiles = fp
+	return a
+}
+
+func TestListProfiles_NeverCarriesAPINAndIsNeverNull(t *testing.T) {
+	fp := &fakeProfiles{entries: []app.ProfileEntry{
+		{Profile: profile.Profile{ID: "k", Name: "Kids", Color: "green", Libraries: []media.LibraryID{"a"}, Kinds: []media.Kind{media.KindVideo}, HiddenFolders: []string{"18*"}}, HasPIN: true},
+		{Profile: profile.Everyone()},
+	}}
+	got := appWithProfiles(fp).ListProfiles()
+	if len(got) != 2 || got[0].ID != "k" || !got[0].HasPIN || got[0].Libraries[0] != "a" || got[0].Kinds[0] != "video" || got[0].HiddenFolders[0] != "18*" {
+		t.Fatalf("ListProfiles() = %+v", got)
+	}
+	if got[1].Libraries == nil || got[1].Kinds == nil || got[1].HiddenFolders == nil {
+		t.Errorf("an empty list must be [] not null: %+v", got[1])
+	}
+	if out := newTestApp(&fakeLibrary{}).ListProfiles(); out == nil || len(out) != 0 {
+		t.Errorf("without profiles: %#v", out)
+	}
+}
+
+func TestSaveProfile_PassesTheFormAndReturnsWhatWasStored(t *testing.T) {
+	fp := &fakeProfiles{}
+	a := appWithProfiles(fp)
+	got, err := a.SaveProfile(ProfileDTO{Name: "Kids", Color: "green", Libraries: []string{"a"}, Kinds: []string{"video"}, HiddenFolders: []string{"x"}})
+	if err != nil || got.ID != "new1" {
+		t.Fatalf("SaveProfile() = %+v, %v", got, err)
+	}
+	want := profile.Profile{Name: "Kids", Color: "green", Libraries: []media.LibraryID{"a"}, Kinds: []media.Kind{media.KindVideo}, HiddenFolders: []string{"x"}}
+	if len(fp.saved) != 1 || !reflect.DeepEqual(fp.saved[0], want) {
+		t.Errorf("saved %+v, want %+v", fp.saved, want)
+	}
+}
+
+func TestProfileErrors_AreAdviceInPlainWords(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want string
+	}{
+		"last":     {profiles.ErrLastProfile, "at least one profile"},
+		"too many": {profiles.ErrTooMany, "at most"},
+		"unknown":  {profiles.ErrUnknownProfile, "no longer exists"},
+		"invalid":  {fmt.Errorf("%w: the name must be 1 to 32 characters", profile.ErrInvalid), "the name must be 1 to 32 characters"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			fp := &fakeProfiles{saveErr: c.err, err: c.err}
+			a := appWithProfiles(fp)
+			for label, err := range map[string]error{
+				"save":   func() error { _, e := a.SaveProfile(ProfileDTO{}); return e }(),
+				"delete": a.DeleteProfile("x"),
+				"pin":    a.SetProfilePIN("x", "1234"),
+				"clear":  a.ClearProfilePIN("x"),
+			} {
+				if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), "invalid profile") {
+					t.Errorf("%s: error = %v, want advice containing %q", label, err, c.want)
+				}
+			}
+		})
+	}
+}
+
+func TestProfileCommands_GoToTheService(t *testing.T) {
+	fp := &fakeProfiles{}
+	a := appWithProfiles(fp)
+	if err := a.DeleteProfile("k"); err != nil || len(fp.deleted) != 1 || fp.deleted[0] != "k" {
+		t.Errorf("delete: %v %v", err, fp.deleted)
+	}
+	if err := a.SetProfilePIN("k", "1234"); err != nil || fp.pins["k"] != "1234" {
+		t.Errorf("set pin: %v %v", err, fp.pins)
+	}
+	if err := a.ClearProfilePIN("k"); err != nil || fp.pins["k"] != "" {
+		t.Errorf("clear pin: %v %v", err, fp.pins)
+	}
+}
+
+func TestProfileCommands_RefuseWithoutTheFeature(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	if _, err := a.SaveProfile(ProfileDTO{}); err == nil {
+		t.Error("SaveProfile worked with no service")
+	}
+	if a.DeleteProfile("x") == nil || a.SetProfilePIN("x", "1234") == nil || a.ClearProfilePIN("x") == nil {
+		t.Error("a command worked with no service")
+	}
+}
+
+func TestSetLibraryHiddenFromTVs(t *testing.T) {
+	lib := &fakeLibrary{}
+	a := newTestApp(lib)
+	if err := a.SetLibraryHiddenFromTVs("L1", true); err != nil || len(lib.hidden) != 1 || lib.hidden[0] != "L1=true" {
+		t.Errorf("hidden = %v, %v", lib.hidden, err)
+	}
+	lib.hideErr = errors.New("nope")
+	if err := a.SetLibraryHiddenFromTVs("L1", false); err == nil {
+		t.Error("the library's refusal was swallowed")
+	}
+}
+
+func TestLibraryState_CarriesTheTVFlag(t *testing.T) {
+	lib := media.NewLibrary("/m")
+	lib.HiddenFromTVs = true
+	got := toLibraryStateDTO(app.LibraryState{Library: lib})
+	if !got.HiddenFromTVs {
+		t.Error("the Settings screen cannot show that the library is kept off TVs")
+	}
+}
+
+func TestShutdown_RunsTheClosersAfterTheServerStops(t *testing.T) {
+	a, st := newTestAppWithStreaming(&fakeLibrary{})
+	var order []string
+	a.closers = []func(){func() { order = append(order, fmt.Sprintf("closed after %d stops", st.stops)) }}
+	a.shutdown(context.Background())
+	if len(order) != 1 || order[0] != "closed after 1 stops" {
+		t.Errorf("order = %v, want the closer to run once the server has stopped", order)
 	}
 }

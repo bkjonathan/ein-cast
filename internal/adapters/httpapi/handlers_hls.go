@@ -36,7 +36,11 @@ func (a *api) handleHLS(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotFound, "conversion is not available")
 		return
 	}
-	id, name := media.ID(r.PathValue("id")), r.PathValue("file")
+	it, ok := a.lookup(w, r) // the profile check, before a conversion is started
+	if !ok {
+		return
+	}
+	id, name := it.ID, r.PathValue("file")
 
 	var (
 		f   io.ReadSeekCloser

@@ -26,12 +26,20 @@ export function ClearFFmpegPath() {
   return window['go']['bridge']['App']['ClearFFmpegPath']();
 }
 
+export function ClearProfilePIN(arg1) {
+  return window['go']['bridge']['App']['ClearProfilePIN'](arg1);
+}
+
 export function ClearRemotePIN() {
   return window['go']['bridge']['App']['ClearRemotePIN']();
 }
 
 export function ClearRemoteProviderField(arg1, arg2) {
   return window['go']['bridge']['App']['ClearRemoteProviderField'](arg1, arg2);
+}
+
+export function DeleteProfile(arg1) {
+  return window['go']['bridge']['App']['DeleteProfile'](arg1);
 }
 
 export function DisableRemote() {
@@ -82,6 +90,10 @@ export function ListLibrary() {
   return window['go']['bridge']['App']['ListLibrary']();
 }
 
+export function ListProfiles() {
+  return window['go']['bridge']['App']['ListProfiles']();
+}
+
 export function ListRemoteProviders() {
   return window['go']['bridge']['App']['ListRemoteProviders']();
 }
@@ -108,6 +120,18 @@ export function RescanLibrary(arg1) {
 
 export function RotateAccessToken() {
   return window['go']['bridge']['App']['RotateAccessToken']();
+}
+
+export function SaveProfile(arg1) {
+  return window['go']['bridge']['App']['SaveProfile'](arg1);
+}
+
+export function SetLibraryHiddenFromTVs(arg1, arg2) {
+  return window['go']['bridge']['App']['SetLibraryHiddenFromTVs'](arg1, arg2);
+}
+
+export function SetProfilePIN(arg1, arg2) {
+  return window['go']['bridge']['App']['SetProfilePIN'](arg1, arg2);
 }
 
 export function SetRemotePIN(arg1) {

@@ -38,6 +38,8 @@ changes.
 | `app/library` | `Service`: the list of libraries — `Add`, `Remove`, `Rename`, `Rescan`/`RescanAll`, `Restore`, `State`, `List`, `Get` (one scan at a time *per library*); `Watch` supervises one watcher per library and rescans quietly after changes settle (ADRs 0014, 0021) |
 | `app/transcode` | `Service`: one shared HLS conversion per video (`Playlist` waits until playable, `File`), at most two at once, idle ones swept, all stopped on exit (ADR 0018) |
 | `app/thumbnails` | `Service`: `Get` (cache → one shared ffmpeg attempt, two at a time, remembered failures), `Available` (ADR 0015) |
+| `app/profiles` | `Service`: profiles and their PINs (PBKDF2, rate-limited `Select`), signed profile credentials, `Visible`/`TVVisible`; enforced by the HTTP layer on every route that takes an ID (ADR 0027) |
+| `app/resume` | `Service`: where each profile stopped in each title, written in batches and on quit |
 | `app/settings` | `Service`: load/validate/save preferences, access token (`Required`, `Verify`, `RotateToken`); implements `LibraryMemory` |
 | `app/streaming` | `Config` + functional options (port, name, DLNA), `Service`: `Start`, `Stop`, `Status`, crash watcher, `Local()` (the running server, for tunnels); announces on the network once running (`WithDiscovery`) and withdraws that, then public access, before the server stops |
 | `app/providerconfig` | `Store`: a provider's saved settings in the credential store; cleans and checks values; secrets are write-only |
@@ -54,6 +56,9 @@ changes.
 | `adapters/safepath` | `Inside(root, file)`: the symlink-safe "stays in the library" check used by streaming and thumbnails |
 | `adapters/memrepo` | `sync.RWMutex`-guarded snapshot repository |
 | `adapters/httpapi` | Server lifecycle (errgroup, one listener per address), route table, middleware chain, handlers, embedded player page; tunnel gate (PIN sign-in, signed links, trusted forwarding headers); `Bind` for extra listeners |
+| `adapters/atomicfile` | `Write`: a file replaced atomically, owner-only; used by the three stores below |
+| `adapters/profilefile` | `profiles.json` (profiles and PIN hashes) beside settings.json |
+| `adapters/resumefile` | `resume.json` (positions per profile) beside settings.json |
 | `adapters/settingsfile` | `settings.json` in the user config dir: atomic writes, `0600`, corrupt files set aside |
 | `adapters/tunnel` | Registry of tunnel providers by ID |
 | `adapters/tunnel/procsup` | `Supervisor`: runs one child process, line-splits its output, restarts with backoff, kills on cancel |
@@ -72,8 +77,11 @@ changes.
 | `GET /` | The device player page (embedded; list, search, `<video>`/`<audio>`/`<img>`), with a strict CSP |
 | `GET /static/{file}` | The page's script, stylesheet and icon (single path segment, never a directory listing) |
 | `GET /api/health` | `{"status":"ok","version":"…","name":"…","thumbnails":true,"transcoding":true}` |
-| `GET /api/library` | `[{id, name, kind, size, modTime, subtitles:[{label, lang}]}]` (never a path) |
-| `GET /api/library/{id}` | One item, or 404 |
+| `GET /api/library` | The items the request's profile may see: `[{id, name, kind, size, modTime, subtitles, title, year, show, season, episode, plot, poster, legacyId}]` (never a path). 401 `profile_required` for a guest when there is more than one profile |
+| `GET /api/library/{id}` | One item, or 404 (also for an item the profile may not see: the same answer as an unknown ID) |
+| `GET /api/profiles` | `{active, current, profiles:[{id, name, color, hasPin}]}` for the picker; no restrictions, no hashes |
+| `POST /api/profile` / `DELETE /api/profile` | Choose a profile (`{id, pin}`; sets the signed `eincast_profile` cookie, rate limited) / leave it |
+| `GET /api/resume`, `PUT` / `DELETE /api/resume/{id}` | Where this profile stopped in each title it may see |
 | `/dlna/…` | Only while Smart TVs is on and the token is off: `device.xml`, `cd.xml`, `cm.xml`, `cd/control`, `cm/control`, and the event URLs |
 | `GET /subtitle/{id}/{n}` | Track `n` of a video as WebVTT, or 404 |
 | `GET /hls/{id}/index.m3u8` | Starts (or joins) the HLS conversion and answers once it is playable; `/hls/{id}/seg00000.ts` serves its segments; `503` when busy, `422` when ffmpeg cannot convert it |

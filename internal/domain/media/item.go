@@ -26,6 +26,14 @@ func NewID(lib LibraryID, relPath string) ID {
 	return ID(hex.EncodeToString(sum[:idBytes]))
 }
 
+// LegacyID is the ID an item had before libraries existed (ADR 0021): the hash of
+// the relative path alone. Browsers kept resume positions under it, so the player
+// page uses it to carry those positions over to the current ID.
+func LegacyID(relPath string) ID {
+	sum := sha256.Sum256([]byte(relPath))
+	return ID(hex.EncodeToString(sum[:idBytes]))
+}
+
 // Item is one servable file in the library.
 type Item struct {
 	ID ID

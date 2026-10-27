@@ -96,6 +96,7 @@ export namespace bridge {
 	    scanning: boolean;
 	    error: string;
 	    watching: boolean;
+	    hiddenFromTVs: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new LibraryStateDTO(source);
@@ -112,6 +113,7 @@ export namespace bridge {
 	        this.scanning = source["scanning"];
 	        this.error = source["error"];
 	        this.watching = source["watching"];
+	        this.hiddenFromTVs = source["hiddenFromTVs"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -200,6 +202,32 @@ export namespace bridge {
 	        this.pid = source["pid"];
 	        this.name = source["name"];
 	        this.self = source["self"];
+	    }
+	}
+	export class ProfileDTO {
+	    id: string;
+	    name: string;
+	    color: string;
+	    allLibraries: boolean;
+	    libraries: string[];
+	    kinds: string[];
+	    hiddenFolders: string[];
+	    hasPin: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProfileDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.color = source["color"];
+	        this.allLibraries = source["allLibraries"];
+	        this.libraries = source["libraries"];
+	        this.kinds = source["kinds"];
+	        this.hiddenFolders = source["hiddenFolders"];
+	        this.hasPin = source["hasPin"];
 	    }
 	}
 	export class RemoteFieldDTO {

@@ -1,5 +1,6 @@
 import { AppearanceSettings } from "@/features/appearance";
 import { LibraryManager } from "@/features/library";
+import { ProfilesPanel } from "@/features/profiles";
 import { AccessSettings } from "./AccessSettings";
 import { FFmpegSettings } from "./FFmpegSettings";
 import { NetworkSettings } from "./NetworkSettings";
@@ -13,6 +14,7 @@ export function SettingsView({ checkPort }: { checkPort?: number }) {
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto">
       <LibraryManager />
+      <ProfilesPanel />
       <ServerSettings />
       <StartupSettings />
       <PortSettings checkPort={checkPort} />

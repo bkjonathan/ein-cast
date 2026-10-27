@@ -6,6 +6,7 @@ import (
 	"eincast/internal/app"
 	"eincast/internal/app/portfree"
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/profile"
 )
 
 // AppInfoDTO is what the frontend sees about the running app.
@@ -42,6 +43,8 @@ type LibraryStateDTO struct {
 	Error string `json:"error"`
 	// Watching is true while the folder is watched for changes.
 	Watching bool `json:"watching"`
+	// HiddenFromTVs keeps the library off smart TVs.
+	HiddenFromTVs bool `json:"hiddenFromTVs"`
 }
 
 func toLibraryStateDTO(s app.LibraryState) LibraryStateDTO {
@@ -56,9 +59,10 @@ func toLibraryStateDTO(s app.LibraryState) LibraryStateDTO {
 			Audio: s.Stats.Counts[media.KindAudio],
 			Image: s.Stats.Counts[media.KindImage],
 		},
-		Scanning: s.Scanning,
-		Error:    s.Error,
-		Watching: s.Watching,
+		Scanning:      s.Scanning,
+		Error:         s.Error,
+		Watching:      s.Watching,
+		HiddenFromTVs: s.Library.HiddenFromTVs,
 	}
 }
 
@@ -378,4 +382,58 @@ func nonNil(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// ProfileDTO is one profile as the Settings screen edits it. It never carries a PIN
+// or a hash, only whether a PIN is set. Libraries and Kinds are what the profile
+// may see (empty Kinds means all); AllLibraries says "every library, even ones
+// added later".
+type ProfileDTO struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Color         string   `json:"color"`
+	AllLibraries  bool     `json:"allLibraries"`
+	Libraries     []string `json:"libraries"`
+	Kinds         []string `json:"kinds"`
+	HiddenFolders []string `json:"hiddenFolders"`
+	HasPIN        bool     `json:"hasPin"`
+}
+
+func toProfileDTO(e app.ProfileEntry) ProfileDTO {
+	p := e.Profile
+	out := ProfileDTO{
+		ID: string(p.ID), Name: p.Name, Color: p.Color, AllLibraries: p.AllLibraries, HasPIN: e.HasPIN,
+		// Non-nil: JSON [] rather than null.
+		Libraries: []string{}, Kinds: []string{}, HiddenFolders: append([]string{}, p.HiddenFolders...),
+	}
+	for _, l := range p.Libraries {
+		out.Libraries = append(out.Libraries, string(l))
+	}
+	for _, k := range p.Kinds {
+		out.Kinds = append(out.Kinds, string(k))
+	}
+	return out
+}
+
+func toProfileDTOs(in []app.ProfileEntry) []ProfileDTO {
+	out := make([]ProfileDTO, len(in))
+	for i, e := range in {
+		out[i] = toProfileDTO(e)
+	}
+	return out
+}
+
+// toProfile reads what the form sent. An empty ID means a new profile.
+func (d ProfileDTO) toProfile() profile.Profile {
+	p := profile.Profile{
+		ID: profile.ID(d.ID), Name: d.Name, Color: d.Color, AllLibraries: d.AllLibraries,
+		HiddenFolders: d.HiddenFolders,
+	}
+	for _, l := range d.Libraries {
+		p.Libraries = append(p.Libraries, media.LibraryID(l))
+	}
+	for _, k := range d.Kinds {
+		p.Kinds = append(p.Kinds, media.Kind(k))
+	}
+	return p
 }

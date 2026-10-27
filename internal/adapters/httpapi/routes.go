@@ -17,15 +17,19 @@ type Library interface {
 // api holds what handlers share. Handlers parse the request, call the library,
 // and write the response; there is no business logic here.
 type api struct {
-	lib     Library
-	access  Access
-	remote  Remote
-	thumbs  Thumbnails
-	hls     Transcoding
-	dlna    http.Handler // nil unless Smart TV discovery is on for this run
-	version string
-	name    string
-	log     *slog.Logger
+	lib    Library
+	access Access
+	remote Remote
+	thumbs Thumbnails
+	hls    Transcoding
+	// profiles and resume are nil when profiles are not wired in; then every
+	// request sees the whole library, as before profiles existed.
+	profiles Profiles
+	resume   Resume
+	dlna     http.Handler // nil unless Smart TV discovery is on for this run
+	version  string
+	name     string
+	log      *slog.Logger
 }
 
 // routes is the single route table. Go 1.22 patterns give us method matching
@@ -42,6 +46,14 @@ func (a *api) routes() http.Handler {
 	mux.HandleFunc("GET /hls/{id}/{file}", a.handleHLS)
 	mux.HandleFunc("GET /subtitle/{id}/{track}", a.handleSubtitle)
 	mux.HandleFunc("GET /playlist.m3u", a.handlePlaylist)
+	mux.HandleFunc("GET /api/profiles", a.handleProfiles)
+	mux.HandleFunc("POST /api/profile", a.handleChooseProfile)
+	mux.HandleFunc("DELETE /api/profile", a.handleLeaveProfile)
+	if a.resume != nil {
+		mux.HandleFunc("GET /api/resume", a.handleResumeList)
+		mux.HandleFunc("PUT /api/resume/{id}", a.handleResumePut)
+		mux.HandleFunc("DELETE /api/resume/{id}", a.handleResumeDelete)
+	}
 	mux.HandleFunc("POST /login", a.handleLogin)
 	if a.dlna != nil {
 		// No method in the pattern: UPnP eventing uses SUBSCRIBE and UNSUBSCRIBE.

@@ -27,6 +27,24 @@ let transcoding = false;
 // True while the current video is played through the converted (HLS) stream.
 let converted = false;
 
+// An HTTP error with the status and the server's error code, so the page can tell
+// "choose a profile first" from "the server is down".
+function httpError(url, status, code) {
+  const err = new Error(url + ' returned ' + status);
+  err.status = status;
+  err.code = code || '';
+  return err;
+}
+
+async function errorCode(res) {
+  try {
+    const body = await res.json();
+    return body && body.error ? body.error.code : '';
+  } catch (err) {
+    return '';
+  }
+}
+
 async function getJSON(url) {
   // ngrok's free plan puts a warning page in front of browser requests unless
   // this header is present. It is harmless anywhere else, and sending it always
@@ -34,8 +52,19 @@ async function getJSON(url) {
   const res = await fetch(url, {
     headers: { Accept: 'application/json', 'ngrok-skip-browser-warning': '1' },
   });
-  if (!res.ok) throw new Error(url + ' returned ' + res.status);
+  if (!res.ok) throw httpError(url, res.status, await errorCode(res));
   return res.json();
+}
+
+// Sends a small JSON body (or none) and returns the parsed answer, or null for 204.
+async function sendJSON(method, url, body) {
+  const res = await fetch(url, {
+    method: method,
+    headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw httpError(url, res.status, await errorCode(res));
+  return res.status === 204 ? null : res.json();
 }
 
 function formatSize(bytes) {
@@ -116,7 +145,20 @@ const SAVE_EVERY_MS = 5000;
 const RESUME_MIN = 10; // seconds: not worth resuming a few seconds in
 const RESUME_END_MARGIN = 30; // seconds: near the end counts as finished
 
-function loadResume(item) {
+// Where each title stopped, as the server remembers it for the profile in use:
+// id -> { t, d, m (the file's modification time in ms), s (when it was saved) }.
+// Positions follow the person between devices because they live there; this
+// browser's own storage stays as the fallback when the server cannot be reached.
+let serverResume = new Map();
+// True once /api/resume answered, so positions are also sent to the server.
+let serverResumeOn = false;
+
+// The file's modification time as the server stores it (milliseconds).
+function modMs(item) {
+  return Date.parse(item.modTime);
+}
+
+function loadLocalResume(item) {
   try {
     const saved = JSON.parse(localStorage.getItem(RESUME_PREFIX + item.id));
     // A file that changed since is a different film as far as a position goes.
@@ -127,6 +169,83 @@ function loadResume(item) {
   return null;
 }
 
+function loadServerResume(item) {
+  const saved = serverResume.get(item.id);
+  if (saved && saved.m === modMs(item) && saved.t >= RESUME_MIN) {
+    return { t: saved.t, d: saved.d, m: item.modTime, s: saved.s };
+  }
+  return null;
+}
+
+// The newer of what the server and this browser remember.
+function loadResume(item) {
+  const local = loadLocalResume(item);
+  const remote = loadServerResume(item);
+  if (remote && (!local || (remote.s || 0) >= (local.s || 0))) return remote;
+  return local;
+}
+
+// Tells the server where a title stopped, or forgets it (finished). Failing is
+// fine: this browser has it, and the next save tries again.
+function pushResume(item, time, duration) {
+  if (!serverResumeOn) return;
+  const url = '/api/resume/' + encodeURIComponent(item.id);
+  if (time === null) {
+    serverResume.delete(item.id);
+    sendJSON('DELETE', url).catch(() => {});
+    return;
+  }
+  const t = Math.floor(time);
+  const d = Math.floor(duration);
+  serverResume.set(item.id, { t: t, d: d, m: modMs(item), s: Date.now() });
+  sendJSON('PUT', url, { t: t, d: d, m: modMs(item) }).catch(() => {});
+}
+
+// Before libraries existed an item's ID was the hash of its path alone, and
+// browsers kept positions under it. The server sends that old ID as legacyId; a
+// position found under one moves to the item's current ID, once.
+function migrateLegacyResume(list) {
+  const current = new Set(list.map((i) => i.id));
+  const legacy = new Map();
+  for (const item of list) {
+    if (item.legacyId && item.legacyId !== item.id) legacy.set(item.legacyId, item);
+  }
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(RESUME_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) {
+      const id = key.slice(RESUME_PREFIX.length);
+      const item = current.has(id) ? null : legacy.get(id);
+      if (!item) continue;
+      const raw = localStorage.getItem(key);
+      if (raw !== null && localStorage.getItem(RESUME_PREFIX + item.id) === null) {
+        localStorage.setItem(RESUME_PREFIX + item.id, raw);
+      }
+      localStorage.removeItem(key);
+    }
+  } catch (err) {
+    // No storage: nothing to carry over.
+  }
+}
+
+// Positions this browser has and the server lacks (or has older) go up once, so
+// what was watched before the server remembered anything is not lost.
+function uploadLocalResume(list) {
+  let sent = 0;
+  for (const item of list) {
+    if (sent >= 100) break;
+    const local = loadLocalResume(item);
+    if (!local) continue;
+    const remote = serverResume.get(item.id);
+    if (remote && remote.m === modMs(item) && (remote.s || 0) >= (local.s || 0)) continue;
+    sent++;
+    pushResume(item, local.t, local.d);
+  }
+}
+
 function saveResume(item, time, duration) {
   // Without a known duration the player is empty or still loading (this also
   // happens to the "pause" that resetting a player fires), or it is a stream
@@ -135,6 +254,7 @@ function saveResume(item, time, duration) {
   try {
     if (time < RESUME_MIN || time > duration - RESUME_END_MARGIN) {
       localStorage.removeItem(RESUME_PREFIX + item.id);
+      pushResume(item, null);
       return;
     }
     localStorage.setItem(
@@ -144,6 +264,7 @@ function saveResume(item, time, duration) {
   } catch (err) {
     // Resume is a convenience; losing it is fine.
   }
+  pushResume(item, time, duration);
 }
 
 function formatTime(seconds) {
@@ -197,6 +318,7 @@ function startOver() {
   } catch (err) {
     // Nothing was stored, or nothing can be.
   }
+  pushResume(current, null);
   $('resume').hidden = true;
 }
 
@@ -605,6 +727,7 @@ function renderItem(root, item) {
       } catch (err) {
         // Nothing was stored, or nothing can be.
       }
+      pushResume(item, null);
       play(item);
     });
     info.append(again);
@@ -755,6 +878,168 @@ window.addEventListener('popstate', (event) => {
   render();
 });
 
+// ---- Who is watching ---------------------------------------------------------
+
+// The avatar colours, by the names the server uses. The server accepts only these.
+const PROFILE_COLORS = {
+  blue: '#3b82f6', green: '#22c55e', red: '#ef4444', orange: '#f97316',
+  purple: '#a855f7', pink: '#ec4899', teal: '#14b8a6', gray: '#6b7280',
+};
+
+// What /api/profiles last said: whether there is a choice to make (more than one
+// profile), who this browser chose, and the people to pick from.
+let profiles = { active: false, current: '', profiles: [] };
+// The profile whose PIN is being asked for.
+let pinFor = null;
+
+function avatar(profile) {
+  const el = document.createElement('span');
+  el.className = 'avatar';
+  el.style.background = PROFILE_COLORS[profile.color] || PROFILE_COLORS.gray;
+  el.textContent = (Array.from(profile.name)[0] || '?').toUpperCase();
+  return el;
+}
+
+function currentProfile() {
+  return profiles.profiles.find((p) => p.id === profiles.current) || null;
+}
+
+// Shows the library view and the button that goes back to the picker.
+function showLibrary() {
+  $('picker').hidden = true;
+  $('library-view').hidden = false;
+  $('playlist-link').hidden = false;
+  const button = $('profile-button');
+  const who = profiles.active ? currentProfile() : null;
+  button.hidden = who === null;
+  if (who) {
+    button.replaceChildren(avatar(who), document.createTextNode(who.name));
+    button.setAttribute('aria-label', 'Switch profile. Now: ' + who.name);
+  }
+}
+
+// Shows "Who's watching?" in place of the library.
+function showPicker() {
+  $('library-view').hidden = true;
+  $('profile-button').hidden = true;
+  $('playlist-link').hidden = true; // a playlist is per profile: there is none to offer yet
+  $('picker').hidden = false;
+  $('pin-form').hidden = true;
+  pinFor = null;
+
+  const list = $('picker-list');
+  list.replaceChildren();
+  for (const p of profiles.profiles) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'card';
+    const name = document.createElement('span');
+    name.className = 'card-title';
+    name.textContent = p.name;
+    btn.append(avatar(p), name);
+    if (p.hasPin) {
+      const lock = document.createElement('span');
+      lock.className = 'card-sub';
+      lock.textContent = 'PIN';
+      btn.append(lock);
+    }
+    btn.addEventListener('click', () => (p.hasPin ? askPin(p) : choose(p, '')));
+    list.append(btn);
+  }
+}
+
+function askPin(profile) {
+  pinFor = profile;
+  $('pin-for').textContent = 'PIN for ' + profile.name;
+  $('pin-error').textContent = '';
+  $('pin-input').value = '';
+  $('pin-form').hidden = false;
+  $('pin-input').focus();
+}
+
+// Picks a profile. The server checks the PIN and answers with the cookie that
+// makes this browser that profile; the page only shows what the server then lets
+// through, so nothing here is a lock.
+async function choose(profile, pin) {
+  try {
+    await sendJSON('POST', '/api/profile', { id: profile.id, pin: pin });
+  } catch (err) {
+    if (!profile.hasPin) {
+      $('status').textContent = "Couldn't choose that profile.";
+      return;
+    }
+    $('pin-error').textContent =
+      err.status === 429 ? 'Too many wrong PINs. Try again in a few minutes.'
+        : err.status === 401 ? "That PIN didn't work."
+          : "Couldn't sign in. Try again.";
+    $('pin-input').value = '';
+    return;
+  }
+  profiles.current = profile.id;
+  await openLibrary();
+}
+
+function submitPin() {
+  if (pinFor) choose(pinFor, $('pin-input').value.trim());
+}
+
+// Forgets the choice and shows the picker, e.g. for someone else to take over.
+async function leaveProfile() {
+  flushResume();
+  resetPlayers();
+  current = null;
+  $('stage').hidden = true;
+  try {
+    await sendJSON('DELETE', '/api/profile');
+    profiles = await getJSON('/api/profiles');
+  } catch (err) {
+    $('status').textContent = "Couldn't switch profile. Check that EinCast is still running.";
+    return;
+  }
+  profiles.current = '';
+  items = [];
+  catalog = { movies: [], shows: [], music: [], photos: [] };
+  serverResume = new Map();
+  serverResumeOn = false;
+  view = { type: 'grid' };
+  showPicker();
+}
+
+// Loads what this browser's profile may see, and where it stopped in each title.
+async function openLibrary() {
+  try {
+    const library = await getJSON('/api/library');
+    try {
+      const saved = await getJSON('/api/resume');
+      serverResume = new Map(saved.map((e) => [e.id, e]));
+      serverResumeOn = true;
+    } catch (err) {
+      // No server-side resume (or it is unreachable): this browser's own storage serves.
+      serverResume = new Map();
+      serverResumeOn = false;
+    }
+    items = library.slice();
+    catalog = buildCatalog(items);
+    migrateLegacyResume(items);
+    uploadLocalResume(items);
+    view = { type: 'grid' };
+    showLibrary();
+    render();
+  } catch (err) {
+    if (err.status === 401 && err.code === 'profile_required') {
+      // The choice was never made, or the profile's PIN changed since.
+      try {
+        profiles = await getJSON('/api/profiles');
+      } catch (err2) {
+        // Keep what we had.
+      }
+      showPicker();
+      return;
+    }
+    $('status').textContent = "Couldn't load the library. Check that EinCast is still running.";
+  }
+}
+
 async function init() {
   $('video').addEventListener('error', onPlaybackError);
   $('audio').addEventListener('error', onPlaybackError);
@@ -767,18 +1052,30 @@ async function init() {
     media.addEventListener('ended', onPauseOrEnd);
   }
   $('restart').addEventListener('click', startOver);
+  $('profile-button').addEventListener('click', leaveProfile);
+  $('pin-cancel').addEventListener('click', () => {
+    $('pin-form').hidden = true;
+    pinFor = null;
+  });
+  $('pin-form').addEventListener('submit', (event) => {
+    event.preventDefault(); // the page never submits a form: its policy forbids it
+    submitPin();
+  });
 
   try {
-    const [health, library] = await Promise.all([getJSON('/api/health'), getJSON('/api/library')]);
+    const [health, who] = await Promise.all([getJSON('/api/health'), getJSON('/api/profiles')]);
     if (health.name) {
       $('server-name').textContent = health.name;
       document.title = health.name + ' · EinCast';
     }
     thumbnails = health.thumbnails === true;
     transcoding = health.transcoding === true;
-    items = library.slice();
-    catalog = buildCatalog(items);
-    render();
+    profiles = who;
+    if (who.active && !who.current) {
+      showPicker();
+      return;
+    }
+    await openLibrary();
   } catch (err) {
     $('status').textContent = "Couldn't load the library. Check that EinCast is still running.";
   }

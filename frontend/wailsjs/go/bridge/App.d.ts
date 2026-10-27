@@ -14,9 +14,13 @@ export function ChooseFolder():Promise<void>;
 
 export function ClearFFmpegPath():Promise<void>;
 
+export function ClearProfilePIN(arg1:string):Promise<void>;
+
 export function ClearRemotePIN():Promise<void>;
 
 export function ClearRemoteProviderField(arg1:string,arg2:string):Promise<void>;
+
+export function DeleteProfile(arg1:string):Promise<void>;
 
 export function DisableRemote():Promise<void>;
 
@@ -42,6 +46,8 @@ export function ListLibraries():Promise<Array<bridge.LibraryStateDTO>>;
 
 export function ListLibrary():Promise<Array<bridge.LibraryItemDTO>>;
 
+export function ListProfiles():Promise<Array<bridge.ProfileDTO>>;
+
 export function ListRemoteProviders():Promise<Array<bridge.RemoteProviderDTO>>;
 
 export function RefreshAddresses():Promise<void>;
@@ -55,6 +61,12 @@ export function RescanAllLibraries():Promise<void>;
 export function RescanLibrary(arg1:string):Promise<void>;
 
 export function RotateAccessToken():Promise<void>;
+
+export function SaveProfile(arg1:bridge.ProfileDTO):Promise<bridge.ProfileDTO>;
+
+export function SetLibraryHiddenFromTVs(arg1:string,arg2:boolean):Promise<void>;
+
+export function SetProfilePIN(arg1:string,arg2:string):Promise<void>;
 
 export function SetRemotePIN(arg1:string):Promise<void>;
 

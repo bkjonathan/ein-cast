@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"eincast/internal/domain/media"
+	"eincast/internal/domain/profile"
 )
 
 // Scanner walks a library's folder and reports the media files in it.
@@ -368,4 +369,53 @@ type PortInspector interface {
 	Terminate(pid int) error
 	// Kill ends a process at once, without cleanup. Same errors as Terminate.
 	Kill(pid int) error
+}
+
+// ProfileRecord is a profile as stored: the profile, and what is needed to check
+// its PIN without keeping the PIN.
+type ProfileRecord struct {
+	Profile profile.Profile
+	// PINHash and PINSalt are empty when the profile has no PIN.
+	PINHash []byte
+	PINSalt []byte
+	// Version rises whenever the PIN changes, which ends every sign-in made with the
+	// old one.
+	Version int
+}
+
+// ProfileEntry is a profile as the desktop app edits it: no hash, only whether a
+// PIN is set.
+type ProfileEntry struct {
+	Profile profile.Profile
+	HasPIN  bool
+}
+
+// ErrNoProfiles means nothing has been saved yet (first run, or an install from
+// before profiles). It is not a failure.
+var ErrNoProfiles = errors.New("no saved profiles")
+
+// ProfileStore persists profiles between runs.
+type ProfileStore interface {
+	// Load returns ErrNoProfiles (possibly wrapped) when nothing is saved.
+	Load() ([]ProfileRecord, error)
+	Save([]ProfileRecord) error
+}
+
+// ResumePosition is where a person stopped in one video or song.
+type ResumePosition struct {
+	// T is the position and D the length, in seconds.
+	T, D int
+	// M is the file's modification time in milliseconds when it was saved: a file
+	// that changed since is a different film as far as a position goes.
+	M int64
+	// S is when it was saved, in milliseconds, so "Continue watching" can put the
+	// latest first.
+	S int64
+}
+
+// ResumeStore persists resume positions: profile → item → position.
+type ResumeStore interface {
+	// Load returns an empty map when nothing is saved.
+	Load() (map[profile.ID]map[media.ID]ResumePosition, error)
+	Save(map[profile.ID]map[media.ID]ResumePosition) error
 }

@@ -30,7 +30,11 @@ func (a *api) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotFound, "thumbnails are not available")
 		return
 	}
-	th, err := a.thumbs.Get(r.Context(), media.ID(r.PathValue("id")))
+	it, ok := a.lookup(w, r) // the profile check, before anything is made
+	if !ok {
+		return
+	}
+	th, err := a.thumbs.Get(r.Context(), it.ID)
 	switch {
 	case err == nil:
 	case errors.Is(err, media.ErrNotFound),

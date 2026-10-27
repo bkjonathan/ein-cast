@@ -106,16 +106,16 @@ Goal: movies and shows look recognisable, with no accounts and no internet neede
 
 Goal: the household use case. Needs a design decision first (ROADMAP already says so); decide before coding.
 
-- [ ] **16.1 Design + ADR 0027 (S).** Recommended design to review:
+- [x] **16.1 Design + ADR 0027 (S).** Recommended design to review:
   - A **profile** = name + avatar colour + optional 4–6 digit PIN + allowed libraries + allowed kinds (+ optional "hide folders matching…").
   - The **access token** still gets a device onto the network; a **profile picker** appears on the player page after that.
   - Profile choice lives in a signed, HttpOnly cookie (reuse the session machinery from remote auth). The server checks the profile on `/api/library`, `/stream`, `/thumb`, `/subtitle`, HLS and the playlist — **enforced in the service layer, not only the UI** (same rule as ADR 0008).
   - DLNA and the Smart-TV mode cannot know the profile, so: DLNA serves only libraries marked "visible to TVs". The exclusive-with-token rule stays.
-- [ ] **16.2 Domain + settings (M).** `Profile` type, persisted in `settings.json`; PINs hashed, never stored plain. Default profile "Everyone" so existing installs behave the same.
-- [ ] **16.3 Server enforcement (M).** Middleware resolves the profile; library queries are filtered by it. Tests: a kids profile gets 404 (not 403) for an adults-only `/stream/{id}`, including with a guessed ID; playlist and HLS respect it too.
-- [ ] **16.4 Profile picker on the player page + Settings screen to manage profiles (M).**
-- [ ] **16.5 Server-side resume and "Continue watching" (M).** Store position per profile on the server (small JSON file), not only in browser storage. This also fixes the "resume differs between LAN and tunnel addresses" seam. Keep the browser value as an offline fallback.
-- [ ] **16.6 Item ID stability (S).** Check ADR 0021's renumbering note; if a migration is cheap, keep old resume positions alive.
+- [x] **16.2 Domain + settings (M).** `Profile` type, persisted in `settings.json`; PINs hashed, never stored plain. Default profile "Everyone" so existing installs behave the same.
+- [x] **16.3 Server enforcement (M).** Middleware resolves the profile; library queries are filtered by it. Tests: a kids profile gets 404 (not 403) for an adults-only `/stream/{id}`, including with a guessed ID; playlist and HLS respect it too.
+- [x] **16.4 Profile picker on the player page + Settings screen to manage profiles (M).**
+- [x] **16.5 Server-side resume and "Continue watching" (M).** Store position per profile on the server (small JSON file), not only in browser storage. This also fixes the "resume differs between LAN and tunnel addresses" seam. Keep the browser value as an offline fallback.
+- [x] **16.6 Item ID stability (S).** Check ADR 0021's renumbering note; if a migration is cheap, keep old resume positions alive.
 
 **Done when:** a child's profile on an iPad cannot see, search, stream or get a playlist entry for adult content, proven by tests, and "Continue watching" follows the person between phone and TV browser.
 

@@ -32,6 +32,8 @@ import (
 	"eincast/internal/adapters/netinfo"
 	"eincast/internal/adapters/portproc"
 	"eincast/internal/adapters/powerguard"
+	"eincast/internal/adapters/profilefile"
+	"eincast/internal/adapters/resumefile"
 	"eincast/internal/adapters/secrets"
 	"eincast/internal/adapters/settingsfile"
 	"eincast/internal/adapters/thumbcache"
@@ -43,8 +45,10 @@ import (
 	"eincast/internal/app"
 	"eincast/internal/app/library"
 	"eincast/internal/app/portfree"
+	"eincast/internal/app/profiles"
 	"eincast/internal/app/providerconfig"
 	"eincast/internal/app/remote"
+	"eincast/internal/app/resume"
 	"eincast/internal/app/settings"
 	"eincast/internal/app/streaming"
 	"eincast/internal/app/thumbnails"
@@ -122,6 +126,15 @@ func main() {
 
 	libraryService := library.NewService(fsscan.New(log), memrepo.New(), settingsService, emitter, log,
 		library.WithWatcher(fswatch.New(log), library.DefaultWatchTiming))
+	// Who is watching: profiles (with their PIN hashes) and where each of them
+	// stopped live in files beside settings.json, and a profile's positions go with it.
+	configDir := settingsDir(log)
+	resumeService := resume.NewService(resumefile.New(configDir), log)
+	resumeService.Load()
+	profileService := profiles.NewService(profilefile.New(configDir), credentialStore, libraryService, emitter, log,
+		profiles.WithOnDelete(resumeService.Forget))
+	profileService.Load()
+
 	// Thumbnails are made on demand with the ffmpeg already on the computer and
 	// kept in the per-user cache folder, so they are made once.
 	thumbCache := thumbcache.New(cacheDir(log, "thumbs"), log)
@@ -148,7 +161,8 @@ func main() {
 
 	webServer := httpapi.New(libraryService, settingsService, remoteService, version, log,
 		httpapi.WithThumbnails(thumbnailService), httpapi.WithTranscoding(conversions),
-		httpapi.WithDLNA(deviceID))
+		httpapi.WithDLNA(deviceID),
+		httpapi.WithProfiles(profileService), httpapi.WithResume(resumeService))
 	// The server withdraws public access before it stops, so a tunnel never
 	// outlives the server it points at.
 	streamingService := streaming.NewService(webServer, netinfo.New(), emitter, log,
@@ -172,9 +186,16 @@ func main() {
 		Thumbnails:  thumbnailService,
 		Conversions: conversions,
 		FFmpeg:      thumbnailer,
-		Logs:        logs,
-		Emitter:     emitter,
-		Log:         log,
+		Profiles:    profileService,
+		// The last seconds of watching are written once the server has stopped.
+		OnShutdown: []func(){func() {
+			if err := resumeService.Close(); err != nil {
+				log.Warn("could not save resume positions", slog.String("error", err.Error()))
+			}
+		}},
+		Logs:    logs,
+		Emitter: emitter,
+		Log:     log,
 	})
 
 	// Signing in launches EinCast with this flag; it then comes up without a

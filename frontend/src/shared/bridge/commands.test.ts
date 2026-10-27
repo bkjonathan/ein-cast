@@ -35,6 +35,12 @@ const go = vi.hoisted(() => ({
   ChooseFFmpeg: vi.fn(),
   ClearFFmpegPath: vi.fn(),
   RefreshAddresses: vi.fn(),
+  ListProfiles: vi.fn(),
+  SaveProfile: vi.fn(),
+  DeleteProfile: vi.fn(),
+  SetProfilePIN: vi.fn(),
+  ClearProfilePIN: vi.fn(),
+  SetLibraryHiddenFromTVs: vi.fn(),
 }));
 vi.mock("../../../wailsjs/go/bridge/App", () => go);
 
@@ -42,6 +48,12 @@ import {
   checkPort,
   freePort,
   chooseFFmpeg,
+  clearProfilePin,
+  deleteProfile,
+  listProfiles,
+  saveProfile,
+  setLibraryHiddenFromTVs,
+  setProfilePin,
   chooseFile,
   chooseFolder,
   clearFFmpegPath,
@@ -97,14 +109,14 @@ describe("listLibraries", () => {
   it("maps every library and copies the counts", async () => {
     const dto = {
       id: "f1", name: "Films", root: "/m/films", total: 3, totalSize: 99,
-      counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true, extra: 1,
+      counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true, hiddenFromTVs: true, extra: 1,
     };
     go.ListLibraries.mockResolvedValue([dto]);
     const got = await listLibraries();
     expect(got).toStrictEqual([
       {
         id: "f1", name: "Films", root: "/m/films", total: 3, totalSize: 99,
-        counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true,
+        counts: { video: 2, audio: 0, image: 1 }, scanning: true, error: "", watching: true, hiddenFromTVs: true,
       },
     ]);
     expect(got[0]?.counts).not.toBe(dto.counts);
@@ -433,5 +445,48 @@ describe("ffmpeg and addresses", () => {
     await refreshAddresses();
     expect(go.ClearFFmpegPath).toHaveBeenCalledOnce();
     expect(go.RefreshAddresses).toHaveBeenCalledOnce();
+  });
+});
+
+describe("profiles", () => {
+  const dto = {
+    id: "k1", name: "Kids", color: "green", allLibraries: false, libraries: ["a"], kinds: ["video"],
+    hiddenFolders: ["18*"], hasPin: true, extra: 1,
+  };
+  const profile = {
+    id: "k1", name: "Kids", color: "green", allLibraries: false, libraries: ["a"], kinds: ["video"] as const,
+    hiddenFolders: ["18*"], hasPin: true,
+  };
+
+  it("listProfiles maps every profile and narrows the kinds", async () => {
+    go.ListProfiles.mockResolvedValue([dto]);
+    await expect(listProfiles()).resolves.toStrictEqual([{ ...profile, kinds: ["video"] }]);
+  });
+
+  it("saveProfile sends the profile and resolves with what Go stored", async () => {
+    go.SaveProfile.mockResolvedValue({ ...dto, id: "new1" });
+    const saved = await saveProfile({ ...profile, id: "", kinds: ["video"] });
+    expect(go.SaveProfile).toHaveBeenCalledWith({ ...profile, id: "", kinds: ["video"] });
+    expect(saved.id).toBe("new1");
+  });
+
+  it("saveProfile surfaces Go's reason in words", async () => {
+    go.SaveProfile.mockRejectedValueOnce("the name must be 1 to 32 characters");
+    await expect(saveProfile({ ...profile, name: "", kinds: ["video"] })).rejects.toMatch(/the name must be/);
+  });
+
+  it("the PIN commands pass the id and the PIN, and nothing else", async () => {
+    go.SetProfilePIN.mockResolvedValue(undefined);
+    go.ClearProfilePIN.mockResolvedValue(undefined);
+    go.DeleteProfile.mockResolvedValue(undefined);
+    go.SetLibraryHiddenFromTVs.mockResolvedValue(undefined);
+    await setProfilePin("k1", "1234");
+    await clearProfilePin("k1");
+    await deleteProfile("k1");
+    await setLibraryHiddenFromTVs("L1", true);
+    expect(go.SetProfilePIN).toHaveBeenCalledWith("k1", "1234");
+    expect(go.ClearProfilePIN).toHaveBeenCalledWith("k1");
+    expect(go.DeleteProfile).toHaveBeenCalledWith("k1");
+    expect(go.SetLibraryHiddenFromTVs).toHaveBeenCalledWith("L1", true);
   });
 });

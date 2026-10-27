@@ -4,6 +4,7 @@ import type { LibraryState } from "@/shared/bridge";
 import { formatBytes } from "@/shared/lib/format";
 import { GlassButton } from "@/shared/ui/glass";
 import { Input } from "@/shared/ui/input";
+import { Switch } from "@/shared/ui/Switch";
 import { useLibraryActions } from "../hooks/useLibraryActions";
 
 /**
@@ -12,7 +13,7 @@ import { useLibraryActions } from "../hooks/useLibraryActions";
  * contents, and says so.
  */
 export function LibraryCard({ library }: { library: LibraryState }) {
-  const { rescan, remove, rename, busy, error } = useLibraryActions();
+  const { rescan, remove, rename, setHiddenFromTVs, busy, error } = useLibraryActions();
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -75,6 +76,20 @@ export function LibraryCard({ library }: { library: LibraryState }) {
           ? "Watching this folder: added and removed files appear by themselves."
           : "Changes on disk are not picked up automatically. Use Rescan after adding or removing files."}
       </p>
+
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-xs text-muted-foreground">
+          {library.hiddenFromTVs
+            ? "Kept off smart TVs. A TV can't say who is watching, so it only sees libraries that are shown to TVs."
+            : "Shown to smart TVs, when Smart TVs is on. A TV can't say who is watching, so turn this off for what a child shouldn't see."}
+        </p>
+        <Switch
+          checked={!library.hiddenFromTVs}
+          label={`Show ${library.name} to smart TVs`}
+          disabled={busy}
+          onChange={(show) => void setHiddenFromTVs(library.id, !show)}
+        />
+      </div>
 
       {library.error && (
         <p role="alert" className="flex items-start gap-2 text-sm text-destructive">

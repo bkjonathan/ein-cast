@@ -3,16 +3,19 @@ import { EventsOn } from "../../../wailsjs/runtime/runtime";
 import {
   toLibraryState,
   toLogLine,
+  toProfile,
   toRemoteStatus,
   toServerStatus,
   type RawLibraryState,
   type RawLogLine,
+  type RawProfile,
   type RawRemoteStatus,
   type RawServerStatus,
 } from "./mappers";
 import type {
   LibraryState,
   LogLine,
+  Profile,
   RemoteStatus,
   ServerStatus,
   Settings,
@@ -26,6 +29,7 @@ export interface EventMap {
   "library:status": LibraryState[];
   "settings:changed": Settings;
   "remote:status": RemoteStatus;
+  "profiles:changed": Profile[];
 }
 
 export type EventName = keyof EventMap;
@@ -40,6 +44,7 @@ const decoders: { [K in EventName]: (raw: unknown) => EventMap[K] } = {
   "library:status": (raw) => (raw as RawLibraryState[]).map(toLibraryState),
   "settings:changed": (raw) => raw as Settings,
   "remote:status": (raw) => toRemoteStatus(raw as RawRemoteStatus),
+  "profiles:changed": (raw) => (raw as RawProfile[]).map(toProfile),
 };
 
 /** Subscribes to a Go event. Returns the unsubscribe function. */

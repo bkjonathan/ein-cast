@@ -56,7 +56,18 @@ interface FakeElement {
   [key: string]: unknown;
 }
 
+interface Call {
+  method: string;
+  url: string;
+  body: unknown;
+}
+
 interface Page {
+  pushResume: (item: Item, time: number | null, duration?: number) => void;
+  migrateLegacyResume: (items: Item[]) => void;
+  uploadLocalResume: (items: Item[]) => void;
+  setServerResume: (entries: { id: string; t: number; d: number; m: number; s: number }[], on: boolean) => void;
+  calls: Call[];
   loadResume: (item: Item) => { t: number; d: number; m: string; s?: number } | null;
   titleOf: (item: Item) => string;
   isEpisode: (item: Item) => boolean;
@@ -122,7 +133,12 @@ function loadPage(storageThrows = false): Page {
     return e;
   };
 
+  const calls: Call[] = [];
   const localStorage = {
+    get length() {
+      return store.size;
+    },
+    key: (i: number) => [...store.keys()][i] ?? null,
     getItem: (k: string) => {
       if (storageThrows) throw new Error("blocked");
       return store.get(k) ?? null;
@@ -153,7 +169,17 @@ function loadPage(storageThrows = false): Page {
     window: { addEventListener: () => undefined, scrollTo: () => undefined },
     history: { pushState: () => undefined, back: () => undefined },
     localStorage,
-    fetch: () => Promise.reject(new Error("no network in tests")),
+    // Records what the page sends. It answers every write with "no content" and
+    // every read with a failure: the page treats an unreachable server as normal.
+    fetch: (url: string, init?: { method?: string; body?: string }) => {
+      if (init?.method && init.method !== "GET") {
+        calls.push({ method: init.method, url, body: init.body ? JSON.parse(init.body) : undefined });
+        return Promise.resolve({ ok: true, status: 204, json: () => Promise.resolve(null) });
+      }
+      return Promise.reject(new Error("no network in tests"));
+    },
+    Set,
+    Map,
     Date,
     JSON,
     Math,
@@ -167,7 +193,8 @@ function loadPage(storageThrows = false): Page {
   vm.runInContext(
     `this.__page = { loadResume, saveResume, formatTime, resumeLabel, flushResume,
        titleOf, isEpisode, episodeCode, titleWithYear, nowPlayingLabel, matches, buildCatalog,
-       hasPicture, detailOf,
+       hasPicture, detailOf, pushResume, migrateLegacyResume, uploadLocalResume,
+       setServerResume: (entries, on) => { serverResume = new Map(entries.map((e) => [e.id, e])); serverResumeOn = on; },
        setThumbnails: (on) => { thumbnails = on; },
        setSubtitleChoice: (item, index) => { subtitleItem = item; subtitleChoice = index; },
        onPauseOrEnd, onLoadedMetadata, startOver, addSubtitleTracks,
@@ -178,8 +205,8 @@ function loadPage(storageThrows = false): Page {
        isConverted: () => converted };`,
     context,
   );
-  const page = (context as unknown as { __page: Omit<Page, "el" | "store"> }).__page;
-  return { ...page, el, store };
+  const page = (context as unknown as { __page: Omit<Page, "el" | "store" | "calls"> }).__page;
+  return { ...page, el, store, calls };
 }
 
 const video = (id: string, modTime = "2024-01-01T00:00:00Z"): Item => ({
@@ -554,5 +581,135 @@ describe("subtitle choice", () => {
     const player = page.el("video");
     page.addSubtitleTracks(player, withSubs);
     expect(player.children.map((t) => t.default)).toEqual([undefined, undefined]);
+  });
+});
+
+// ---- resume on the server, and the old IDs ------------------------------------------------------
+
+const MOD = "2024-01-01T00:00:00Z";
+const MOD_MS = Date.parse(MOD);
+const remote = (id: string, t: number, s: number, over: Partial<{ d: number; m: number }> = {}) => ({ id, t, d: 3600, m: MOD_MS, s, ...over });
+
+describe("resume: this browser and the server", () => {
+  it("takes the server's position when it is the newer", () => {
+    page.saveResume(video("a"), 100, 3600); // saved by this browser at "now"
+    page.setServerResume([remote("a", 900, Date.now() + 60_000)], true);
+    expect(page.loadResume(video("a"))?.t).toBe(900);
+  });
+
+  it("keeps this browser's when it is the newer", () => {
+    page.setServerResume([remote("a", 900, 1)], true);
+    page.saveResume(video("a"), 100, 3600);
+    expect(page.loadResume(video("a"))?.t).toBe(100);
+  });
+
+  it("uses the server's alone when this browser has none, so a position follows the person to a new device", () => {
+    page.setServerResume([remote("a", 900, 5)], true);
+    expect(page.loadResume(video("a"))).toEqual({ t: 900, d: 3600, m: MOD, s: 5 });
+  });
+
+  it("ignores a server position for another version of the file, or one too short to resume", () => {
+    page.setServerResume([remote("a", 900, 5, { m: MOD_MS + 1 }), remote("b", 3, 5)], true);
+    expect(page.loadResume(video("a"))).toBeNull();
+    expect(page.loadResume(video("b"))).toBeNull();
+  });
+
+  it("falls back to this browser's own when the server has nothing", () => {
+    page.saveResume(video("a"), 754, 3600);
+    page.setServerResume([], true);
+    expect(page.loadResume(video("a"))?.t).toBe(754);
+  });
+});
+
+describe("resume: telling the server", () => {
+  it("sends a position with its length and the file's time in milliseconds", () => {
+    page.setServerResume([], true);
+    page.saveResume(video("a"), 754.9, 3600);
+    expect(page.calls).toEqual([{ method: "PUT", url: "/api/resume/a", body: { t: 754, d: 3600, m: MOD_MS } }]);
+  });
+
+  it("asks the server to forget a title that was finished", () => {
+    page.setServerResume([], true);
+    page.saveResume(video("a"), 3599, 3600);
+    expect(page.calls).toEqual([{ method: "DELETE", url: "/api/resume/a", body: undefined }]);
+  });
+
+  it("sends nothing while the server's resume is not in use", () => {
+    page.setServerResume([], false);
+    page.saveResume(video("a"), 754, 3600);
+    expect(page.calls).toEqual([]);
+  });
+
+  it("start over forgets it on the server too", () => {
+    const a = video("a");
+    page.setServerResume([remote("a", 900, 5)], true);
+    page.setCurrent(a);
+    page.startOver();
+    expect(page.calls).toEqual([{ method: "DELETE", url: "/api/resume/a", body: undefined }]);
+    expect(page.loadResume(a)).toBeNull();
+  });
+
+  it("encodes the id in the path", () => {
+    page.setServerResume([], true);
+    page.saveResume(video("a/b"), 754, 3600);
+    expect(page.calls[0]?.url).toBe("/api/resume/a%2Fb");
+  });
+});
+
+describe("resume: what this browser holds goes up once", () => {
+  it("sends positions the server lacks or has older, and not the ones it has newer", () => {
+    page.saveResume(video("missing"), 600, 3600);
+    page.saveResume(video("older"), 600, 3600);
+    page.saveResume(video("newer"), 600, 3600);
+    page.setServerResume([remote("older", 100, 1), remote("newer", 100, Date.now() + 60_000)], true);
+    page.calls.length = 0;
+    page.uploadLocalResume([video("missing"), video("older"), video("newer"), video("none")]);
+    expect(page.calls.map((c) => c.url).sort()).toEqual(["/api/resume/missing", "/api/resume/older"]);
+  });
+
+  it("is capped, so a browser with years of positions does not flood the server", () => {
+    const many = Array.from({ length: 150 }, (_, i) => video(`t${i}`));
+    for (const v of many) page.saveResume(v, 600, 3600);
+    page.setServerResume([], true);
+    page.calls.length = 0;
+    page.uploadLocalResume(many);
+    expect(page.calls).toHaveLength(100);
+  });
+});
+
+describe("resume: positions saved under the ID from before libraries", () => {
+  const item = (id: string, legacyId: string): Item & { legacyId: string } => ({ ...video(id), legacyId });
+
+  it("moves a position to the item's current ID and removes the old key", () => {
+    page.store.set("eincast.resume.OLD1", JSON.stringify({ t: 500, d: 3600, m: MOD }));
+    page.migrateLegacyResume([item("new1", "OLD1")]);
+    expect(page.loadResume(video("new1"))?.t).toBe(500);
+    expect(page.store.has("eincast.resume.OLD1")).toBe(false);
+  });
+
+  it("never overwrites a position the current ID already has", () => {
+    page.saveResume(video("new1"), 700, 3600);
+    page.store.set("eincast.resume.OLD1", JSON.stringify({ t: 500, d: 3600, m: MOD }));
+    page.migrateLegacyResume([item("new1", "OLD1")]);
+    expect(page.loadResume(video("new1"))?.t).toBe(700);
+  });
+
+  it("leaves alone keys it does not recognise, other storage, and current IDs", () => {
+    page.store.set("eincast.resume.UNKNOWN", "{}");
+    page.store.set("something.else", "x");
+    page.saveResume(video("new1"), 700, 3600);
+    page.migrateLegacyResume([item("new1", "OLD1")]);
+    expect([...page.store.keys()].sort()).toEqual(["eincast.resume.UNKNOWN", "eincast.resume.new1", "something.else"]);
+  });
+
+  it("does nothing for an item whose legacy ID is its own, or has none", () => {
+    page.store.set("eincast.resume.same", JSON.stringify({ t: 500, d: 3600, m: MOD }));
+    page.migrateLegacyResume([item("same", "same"), video("nolegacy")]);
+    expect(page.store.has("eincast.resume.same")).toBe(true);
+  });
+
+  it("copes with storage that throws", () => {
+    const blocked = loadPage(true);
+    expect(() => blocked.migrateLegacyResume([item("new1", "OLD1")])).not.toThrow();
   });
 });
