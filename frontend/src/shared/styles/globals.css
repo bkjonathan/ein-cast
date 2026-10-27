@@ -103,7 +103,8 @@
 /* Maps tokens onto Tailwind utilities (bg-primary, text-muted-foreground, ...). */
 @theme inline {
   --font-sans:
-    -apple-system, "SF Pro Text", "Segoe UI Variable", system-ui, sans-serif;
+    -apple-system, "SF Pro Text", "Segoe UI Variable", system-ui,
+    "Myanmar Sangam MN", "Myanmar Text", "Noto Sans Myanmar", sans-serif;
   --font-mono:
     ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 
@@ -152,6 +153,12 @@
     -webkit-user-select: none;
     cursor: default;
   }
+}
+
+/* Myanmar script stacks vowel and tone marks above and below the line; the tight
+   line-heights used for Latin text clip them. Only the language that needs it. */
+:lang(my) {
+  line-height: 1.7;
 }
 
 /* The frosted surface every glass component is built from. */

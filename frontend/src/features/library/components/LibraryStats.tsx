@@ -1,4 +1,5 @@
 import { Film, FolderX, Image, LoaderCircle, Music, type LucideIcon } from "lucide-react";
+import { useT, type MessageKey } from "@/shared/i18n";
 import { formatBytes } from "@/shared/lib/format";
 import { GlassPanel } from "@/shared/ui/glass";
 import { totalsOf } from "../derive";
@@ -6,42 +7,43 @@ import { useLibraryStore } from "../store";
 
 const kinds: readonly {
   key: "video" | "audio" | "image";
-  label: string;
+  labelKey: MessageKey;
   icon: LucideIcon;
 }[] = [
-  { key: "video", label: "Videos", icon: Film },
-  { key: "audio", label: "Audio", icon: Music },
-  { key: "image", label: "Images", icon: Image },
+  { key: "video", labelKey: "stats.videos", icon: Film },
+  { key: "audio", labelKey: "stats.audio", icon: Music },
+  { key: "image", labelKey: "stats.images", icon: Image },
 ];
 
 /** Counts by kind and total size across every library, and how each library is doing. */
 export function LibraryStats() {
   const libraries = useLibraryStore((s) => s.libraries);
+  const { t, tn } = useT();
   if (libraries.length === 0) return null;
   const totals = totalsOf(libraries);
 
   return (
     <GlassPanel className="flex flex-col gap-6 p-6">
       <header className="space-y-1">
-        <h2 className="text-lg font-semibold">Library</h2>
+        <h2 className="text-lg font-semibold">{t("stats.title")}</h2>
         <p className="text-sm text-muted-foreground">
-          {libraries.length === 1 ? "1 folder" : `${libraries.length} folders`} · manage them in Settings
+          {t("stats.manage", { folders: tn("stats.folders", libraries.length) })}
         </p>
       </header>
 
       {totals.total === 0 ? (
-        <p className="text-sm text-muted-foreground">No supported media found yet.</p>
+        <p className="text-sm text-muted-foreground">{t("stats.none")}</p>
       ) : (
         <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {kinds.map(({ key, label, icon: Icon }) => (
-            <Stat key={key} label={label} icon={Icon} value={totals.counts[key]} />
+          {kinds.map(({ key, labelKey, icon: Icon }) => (
+            <Stat key={key} label={t(labelKey)} icon={Icon} value={totals.counts[key]} />
           ))}
-          <Stat label="Total size" value={formatBytes(totals.totalSize)} />
+          <Stat label={t("stats.totalSize")} value={formatBytes(totals.totalSize)} />
         </dl>
       )}
 
       {libraries.length > 1 || libraries.some((l) => l.error) ? (
-        <ul className="flex flex-col gap-2" aria-label="Libraries">
+        <ul className="flex flex-col gap-2" aria-label={t("stats.libraries")}>
           {libraries.map((l) => (
             <li key={l.id} className="flex min-w-0 items-center gap-3 text-sm">
               {l.scanning ? (
@@ -55,7 +57,7 @@ export function LibraryStats() {
                 {l.name}
               </span>
               <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                {l.error ? l.error : `${l.total} files`}
+                {l.error ? l.error : tn("stats.files", l.total)}
               </span>
             </li>
           ))}

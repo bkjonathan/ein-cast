@@ -151,6 +151,8 @@ Goal: first-class Burmese, and a structure other communities can add languages t
 - [ ] **18.6 Burmese README + docs (S).** `README.my.md` with install, first run and troubleshooting, linked from the top of the English README.
 - [ ] **18.7 Locale-aware formatting (S).** Dates, sizes and numbers through `Intl`. Optional Burmese numerals off by default.
 
+**Progress note (Phase 18, in progress):** 18.1 foundation is built (ADR 0028): typed dictionary, language setting (System / English / မြန်မာ), `<html lang>`, a Burmese-capable font stack and taller line-height for `lang="my"` (18.4, bundled font not added). Migrated so far: the window shell, Appearance, Language, and the whole Dashboard (server, connect card, library stats). Not yet migrated: Settings (all panels), Library, Logs, Onboarding/wizard, Remote, Profiles and their text helpers (`startup.ts`, `network.ts`, `conversion.ts`, `onboarding/wizard.ts`, `profiles/model.ts`, `remote/*.ts`). 18.2 (player page), 18.3 (a native reviewer for `my.json`), 18.5, 18.6 and 18.7 are not started. The Burmese in `my.json` is an unreviewed draft.
+
 **Done when:** the whole desktop app and player page can be switched to Burmese with no English leftovers on the main paths, and a Burmese-speaking tester signs off.
 
 ---

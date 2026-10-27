@@ -1,5 +1,6 @@
 import { LoaderCircle, OctagonX, Play, Square } from "lucide-react";
 import { useSettingsStore } from "@/features/settings";
+import { useT } from "@/shared/i18n";
 import { GlassButton, GlassPanel } from "@/shared/ui/glass";
 import { allowedActions, isPortInUse } from "../describe";
 import { useServerControls } from "../hooks/useServerControls";
@@ -16,6 +17,7 @@ export function ServerPanel({ onFreePort }: ServerPanelProps) {
   const status = useServerStore((s) => s.status);
   const port = useSettingsStore((s) => s.settings?.port ?? 0);
   const { start, stop, pending, commandError } = useServerControls();
+  const { t } = useT();
 
   if (!status) return null;
 
@@ -30,7 +32,7 @@ export function ServerPanel({ onFreePort }: ServerPanelProps) {
     <GlassPanel className="flex flex-col gap-4 p-6">
       <header className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold">Server</h2>
+          <h2 className="text-lg font-semibold">{t("server.title")}</h2>
           <p className="text-sm text-muted-foreground">{status.name || "EinCast"}</p>
         </div>
         <StatusPill state={status.state} />
@@ -38,8 +40,7 @@ export function ServerPanel({ onFreePort }: ServerPanelProps) {
 
       {status.state === "running" && (
         <p className="text-sm text-muted-foreground">
-          Serving your library on port{" "}
-          <span className="font-mono text-foreground select-text">{status.port}</span>.
+          {t("server.serving", { port: status.port })}
         </p>
       )}
 
@@ -53,17 +54,17 @@ export function ServerPanel({ onFreePort }: ServerPanelProps) {
         {canStop || status.state === "stopping" ? (
           <GlassButton onClick={stop} disabled={!canStop || pending}>
             {status.state === "stopping" ? <LoaderCircle className="animate-spin" /> : <Square />}
-            Stop server
+            {t("server.stop")}
           </GlassButton>
         ) : (
           <GlassButton onClick={start} disabled={!canStart || pending}>
             {transitioning ? <LoaderCircle className="animate-spin" /> : <Play />}
-            {status.state === "failed" ? "Try again" : "Start server"}
+            {status.state === "failed" ? t("server.retry") : t("server.start")}
           </GlassButton>
         )}
         {portTaken && (
           <GlassButton onClick={() => onFreePort(port)}>
-            <OctagonX /> Find what is using port {port}
+            <OctagonX /> {t("server.findPort", { port })}
           </GlassButton>
         )}
       </div>

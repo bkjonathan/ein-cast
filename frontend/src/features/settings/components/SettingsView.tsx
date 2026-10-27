@@ -1,4 +1,4 @@
-import { AppearanceSettings } from "@/features/appearance";
+import { AppearanceSettings, LanguageSettings } from "@/features/appearance";
 import { LibraryManager } from "@/features/library";
 import { ProfilesPanel } from "@/features/profiles";
 import { AccessSettings } from "./AccessSettings";
@@ -23,6 +23,7 @@ export function SettingsView({ checkPort }: { checkPort?: number }) {
       <TvSettings />
       <FFmpegSettings />
       <AppearanceSettings />
+      <LanguageSettings />
     </div>
   );
 }

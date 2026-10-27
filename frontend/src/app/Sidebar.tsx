@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { useT } from "@/shared/i18n";
 import { spring } from "@/shared/motion/presets";
 import { cn } from "@/shared/lib/cn";
 import { views, type View } from "./routes";
@@ -11,13 +12,14 @@ interface SidebarProps {
 
 /** Primary navigation. The highlight glides between items via a shared layoutId. */
 export function Sidebar({ active, onSelect, version }: SidebarProps) {
+  const { t } = useT();
   return (
     <nav
-      aria-label="Primary"
+      aria-label={t("nav.primary")}
       className="glass flex w-52 shrink-0 flex-col rounded-glass-lg p-2"
     >
       <ul className="flex flex-1 flex-col gap-1">
-        {views.map(({ id, label, icon: Icon }) => {
+        {views.map(({ id, labelKey, icon: Icon }) => {
           const isActive = id === active;
           return (
             <li key={id}>
@@ -40,7 +42,7 @@ export function Sidebar({ active, onSelect, version }: SidebarProps) {
                   />
                 )}
                 <Icon className="relative size-4" aria-hidden />
-                <span className="relative">{label}</span>
+                <span className="relative">{t(labelKey)}</span>
               </button>
             </li>
           );

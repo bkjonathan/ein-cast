@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ServerState } from "@/shared/bridge";
+import { translate } from "@/shared/i18n";
 import { allowedActions, describeState, isPortInUse } from "./describe";
 
 describe("describeState", () => {
@@ -10,7 +11,8 @@ describe("describeState", () => {
     ["stopping", "Stopping…", "warning"],
     ["failed", "Failed", "danger"],
   ])("%s → %s (%s)", (state, label, tone) => {
-    expect(describeState(state)).toEqual({ label, tone });
+    const { labelKey, ...rest } = describeState(state);
+    expect({ label: translate("en", labelKey), ...rest }).toEqual({ label, tone });
   });
 });
 

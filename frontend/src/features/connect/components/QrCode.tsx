@@ -1,5 +1,6 @@
 import { motion } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
+import { useT } from "@/shared/i18n";
 import { spring } from "@/shared/motion/presets";
 
 /**
@@ -7,6 +8,7 @@ import { spring } from "@/shared/motion/presets";
  * need the contrast and the quiet zone, and a "glass" QR would not scan.
  */
 export function QrCode({ value }: { value: string }) {
+  const { t } = useT();
   return (
     <motion.div
       // A new URL (another network card picked) replays the reveal.
@@ -15,7 +17,7 @@ export function QrCode({ value }: { value: string }) {
       animate={{ opacity: 1, scale: 1 }}
       transition={spring.gentle}
       role="img"
-      aria-label={`QR code for ${value}`}
+      aria-label={t("connect.qrAria", { url: value })}
       className="shrink-0 self-center rounded-glass-md bg-white p-3 shadow-lg"
     >
       <QRCodeSVG value={value} size={168} level="M" marginSize={0} bgColor="#ffffff" fgColor="#000000" />
