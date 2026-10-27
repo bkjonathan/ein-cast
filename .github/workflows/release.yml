@@ -1,6 +1,6 @@
 # Builds the desktop apps and publishes them as a GitHub release.
-# Push a tag like v1.0.2 and this creates the release (if it does not exist yet)
-# and uploads:
+# Push a tag like v1.0.2 and this runs the tests (ci.yml), then creates the release
+# (if it does not exist yet) and uploads:
 #   eincast-<version>-macos-universal.zip      (eincast.app, Intel + Apple Silicon)
 #   eincast-<version>-windows-amd64-installer.exe
 #   eincast-<version>-windows-amd64.exe        (portable)
@@ -17,9 +17,15 @@ permissions:
   contents: write # create the release and upload assets to it
 
 jobs:
+  # The full test run (ci.yml) gates the release: if it fails, no release is
+  # created and nothing is built. Fix the problem, then move or re-push the tag.
+  test:
+    uses: ./.github/workflows/ci.yml
+
   # Created once, before the builds, so the two platform jobs never race to
   # create it. A release someone already published by hand is left as it is.
   create-release:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       # The whole history, because the notes are the commits since the previous tag.

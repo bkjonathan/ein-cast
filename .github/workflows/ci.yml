@@ -1,11 +1,12 @@
 # Runs the full check on the two platforms EinCast ships for. scripts/check-cross.sh
 # proves the code compiles for the other OS; this proves it behaves on each one.
+# Not triggered by pushes or pull requests: release.yml calls it when a v* tag is
+# pushed, and it can be run by hand from the Actions tab.
 name: ci
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
