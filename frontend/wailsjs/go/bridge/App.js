@@ -6,6 +6,10 @@ export function AppInfo() {
   return window['go']['bridge']['App']['AppInfo']();
 }
 
+export function CheckForUpdatesNow() {
+  return window['go']['bridge']['App']['CheckForUpdatesNow']();
+}
+
 export function CheckPort(arg1) {
   return window['go']['bridge']['App']['CheckPort'](arg1);
 }
@@ -82,6 +86,10 @@ export function GetThumbnail(arg1) {
   return window['go']['bridge']['App']['GetThumbnail'](arg1);
 }
 
+export function GetUpdateStatus() {
+  return window['go']['bridge']['App']['GetUpdateStatus']();
+}
+
 export function ListLibraries() {
   return window['go']['bridge']['App']['ListLibraries']();
 }
@@ -96,6 +104,10 @@ export function ListProfiles() {
 
 export function ListRemoteProviders() {
   return window['go']['bridge']['App']['ListRemoteProviders']();
+}
+
+export function OpenUpdatePage() {
+  return window['go']['bridge']['App']['OpenUpdatePage']();
 }
 
 export function RefreshAddresses() {

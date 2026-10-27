@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1308,11 +1309,11 @@ func TestUpdateSettings_PassesTheStartupAndPowerChoices(t *testing.T) {
 	a := newTestApp(&fakeLibrary{})
 	fs := &fakeSettings{}
 	a.settings = fs
-	err := a.UpdateSettings(SettingsInputDTO{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, HardwareEncoding: true})
+	err := a.UpdateSettings(SettingsInputDTO{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, HardwareEncoding: true, CheckForUpdates: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := settings.Input{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, HardwareEncoding: true}
+	want := settings.Input{Port: 9000, Name: "Den", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, HardwareEncoding: true, CheckForUpdates: true}
 	if fs.gotInput != want {
 		t.Errorf("input = %+v, want %+v", fs.gotInput, want)
 	}
@@ -1534,5 +1535,133 @@ func TestShutdown_RunsTheClosersAfterTheServerStops(t *testing.T) {
 	a.shutdown(context.Background())
 	if len(order) != 1 || order[0] != "closed after 1 stops" {
 		t.Errorf("order = %v, want the closer to run once the server has stopped", order)
+	}
+}
+
+// fakeUpdates answers for the update service and records what the bridge asked.
+type fakeUpdates struct {
+	status  app.UpdateStatus
+	pageURL string
+	checks  int
+	ran     chan struct{}
+}
+
+func (f *fakeUpdates) Status() app.UpdateStatus { return f.status }
+func (f *fakeUpdates) PageURL() string          { return f.pageURL }
+func (f *fakeUpdates) Check(context.Context) app.UpdateStatus {
+	f.checks++
+	return f.status
+}
+func (f *fakeUpdates) Run(ctx context.Context) {
+	close(f.ran)
+	<-ctx.Done()
+}
+
+func TestUpdates_WithoutAServiceTheCommandsAreHarmless(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+
+	if got := a.GetUpdateStatus(); got.Current != "1.2.3" || got.Available {
+		t.Errorf("GetUpdateStatus() = %+v", got)
+	}
+	if got := a.CheckForUpdatesNow(); got.Current != "1.2.3" || got.Available {
+		t.Errorf("CheckForUpdatesNow() = %+v", got)
+	}
+	if err := a.OpenUpdatePage(); err == nil {
+		t.Error("OpenUpdatePage() with no update service must say so")
+	}
+}
+
+func TestUpdates_StatusMapsToTheDTO(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	a.updates = &fakeUpdates{status: app.UpdateStatus{
+		Current: "1.1.1", Available: true,
+		CheckedAt: time.UnixMilli(1_700_000_000_000),
+		Latest: &app.UpdateRelease{
+			Version: "1.1.2", Name: "EinCast 1.1.2", Notes: "- fixes", URL: "https://github.com/x/y/releases/tag/v1.1.2",
+			PublishedAt: time.UnixMilli(1_700_000_100_000),
+			Assets:      []app.ReleaseAsset{{Name: "a.zip", Size: 5, SHA256: "ab"}},
+		},
+	}}
+
+	got := a.GetUpdateStatus()
+
+	want := UpdateStatusDTO{
+		Current: "1.1.1", Available: true, CheckedAt: 1_700_000_000_000,
+		Latest: &UpdateReleaseDTO{
+			Version: "1.1.2", Name: "EinCast 1.1.2", Notes: "- fixes", PublishedAt: 1_700_000_100_000,
+			Assets: []UpdateAssetDTO{{Name: "a.zip", Size: 5, SHA256: "ab"}},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetUpdateStatus() = %+v\nwant %+v", got, want)
+	}
+}
+
+func TestUpdates_TheReleaseAddressNeverCrossesTheBridge(t *testing.T) {
+	// The UI opens the page by asking Go, so it can never be told to open a
+	// different address.
+	const url = "https://github.com/x/y/releases/tag/v1.1.2"
+	a := newTestApp(&fakeLibrary{})
+	a.updates = &fakeUpdates{status: app.UpdateStatus{Available: true, Latest: &app.UpdateRelease{URL: url}}}
+
+	data, err := json.Marshal(a.GetUpdateStatus())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "github.com") {
+		t.Fatalf("the DTO carries the address: %s", data)
+	}
+}
+
+func TestUpdates_NoReleaseIsNullAndNoZeroTimes(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	a.updates = &fakeUpdates{status: app.UpdateStatus{Current: "1.1.1"}}
+
+	got := a.GetUpdateStatus()
+	if got.Latest != nil || got.CheckedAt != 0 {
+		t.Fatalf("status = %+v, want no release and CheckedAt 0 (a zero time is not a Unix time)", got)
+	}
+}
+
+func TestUpdates_CheckNowAsksTheService(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fu := &fakeUpdates{status: app.UpdateStatus{Current: "1.1.1", Error: "offline"}}
+	a.updates = fu
+
+	if got := a.CheckForUpdatesNow(); fu.checks != 1 || got.Error != "offline" {
+		t.Fatalf("checks = %d, status = %+v", fu.checks, got)
+	}
+}
+
+func TestUpdates_OpenUpdatePage(t *testing.T) {
+	const url = "https://github.com/x/y/releases/tag/v1.1.2"
+	a := newTestApp(&fakeLibrary{})
+	var opened []string
+	a.openURL = func(_ context.Context, u string) { opened = append(opened, u) }
+
+	a.updates = &fakeUpdates{}
+	if err := a.OpenUpdatePage(); err == nil || len(opened) != 0 {
+		t.Errorf("with nothing newer: err=%v opened=%v; want an error and no browser", err, opened)
+	}
+
+	a.updates = &fakeUpdates{pageURL: url}
+	if err := a.OpenUpdatePage(); err != nil || !reflect.DeepEqual(opened, []string{url}) {
+		t.Errorf("err=%v opened=%v, want exactly the release page", err, opened)
+	}
+}
+
+func TestStartup_RunsTheUpdateCheckUntilTheAppEnds(t *testing.T) {
+	a := newTestApp(&fakeLibrary{})
+	fu := &fakeUpdates{ran: make(chan struct{})}
+	a.updates = fu
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.startup(ctx)
+
+	select {
+	case <-fu.ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startup did not start the update check")
 	}
 }

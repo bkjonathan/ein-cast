@@ -4,7 +4,9 @@
 #   eincast-<version>-macos-universal.zip      (eincast.app, Intel + Apple Silicon)
 #   eincast-<version>-windows-amd64-installer.exe
 #   eincast-<version>-windows-amd64.exe        (portable)
-# The builds are unsigned for now; see docs/ROADMAP.md (v1.0) for signing.
+#   SHA256SUMS.txt                             (checksums of the three files above)
+# The app's update check reads SHA256SUMS.txt to show each file's checksum, so keep
+# that name. The builds are unsigned for now; see docs/ROADMAP.md (v1.0) for signing.
 name: release
 
 on:
@@ -20,6 +22,11 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
+      # The whole history, because the notes are the commits since the previous tag.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Create the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -29,12 +36,12 @@ jobs:
             echo "release $TAG already exists"
             exit 0
           fi
+          scripts/release-notes.sh "$TAG" > "$RUNNER_TEMP/notes.md"
           flags=()
           case "$TAG" in *-*) flags+=(--prerelease) ;; esac # v1.2.0-rc1 is a pre-release
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
             --title "EinCast ${TAG#v}" \
-            --generate-notes \
-            --notes $'These builds are not code-signed yet.\n\n- **macOS:** unzip, then run `xattr -dr com.apple.quarantine eincast.app` (or right-click, Open, the first time).\n- **Windows:** SmartScreen will warn; choose **More info, Run anyway**.\n' \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             "${flags[@]}"
 
   build:
@@ -131,3 +138,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Published last, once every file it covers is on the release. A failed build
+  # leaves this job skipped, so the checksums never describe a partial release.
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish SHA-256 checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir dl
+          cd dl
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'eincast-*'
+          # "<hash>  <name>" per line, which `shasum -a 256 -c` and the app both read.
+          sha256sum eincast-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          # macOS zip, Windows installer, Windows portable: a missing one means a build did not upload.
+          test "$(wc -l < SHA256SUMS.txt)" -eq 3
+          gh release upload "$TAG" SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"

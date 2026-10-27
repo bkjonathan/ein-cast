@@ -392,6 +392,10 @@ type Settings struct {
 	// ffmpeg can use it. It is on by default and falls back to the processor by
 	// itself when the chip does not work.
 	HardwareEncoding bool
+	// CheckForUpdates lets EinCast ask GitHub, now and then, whether a newer
+	// release exists. It is on by default and is the one network call EinCast
+	// makes by itself (ADR 0029); turning it off stops those calls.
+	CheckForUpdates bool
 }
 
 // PowerGuard keeps the computer from sleeping on its own while something needs
@@ -517,4 +521,41 @@ type ResumeStore interface {
 	// Load returns an empty map when nothing is saved.
 	Load() (map[profile.ID]map[media.ID]ResumePosition, error)
 	Save(map[profile.ID]map[media.ID]ResumePosition) error
+}
+
+// ErrNoRelease means the project has published no release to compare with. It is
+// not a failure of the check.
+var ErrNoRelease = errors.New("no release has been published")
+
+// ReleaseAsset is one downloadable file of a release.
+type ReleaseAsset struct {
+	Name string
+	// Size is in bytes.
+	Size int64
+	// SHA256 is the file's checksum as lowercase hex, or "" when the release
+	// published none for it.
+	SHA256 string
+}
+
+// Release is a published version of EinCast.
+type Release struct {
+	// Tag is the release's git tag, such as "v1.1.2".
+	Tag  string
+	Name string
+	// Notes is the release description as plain text. It is untrusted: show it as
+	// text, never as markup.
+	Notes string
+	// URL is the release's page, where the downloads are.
+	URL         string
+	PublishedAt time.Time
+	Assets      []ReleaseAsset
+}
+
+// ReleaseSource tells which release is the newest. It only reads; installing a
+// new version stays with the person (ADR 0029).
+type ReleaseSource interface {
+	// Latest returns the newest final release (not a pre-release or a draft), or
+	// ErrNoRelease (possibly wrapped). It sends nothing that identifies the
+	// person or the installed version.
+	Latest(ctx context.Context) (Release, error)
 }

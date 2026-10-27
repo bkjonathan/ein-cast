@@ -149,9 +149,9 @@ func TestLoad_ToleratesUnknownAndMissingFields(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "settings.json"), []byte(data), 0o600)
 
 	got, err := New(dir).Load()
-	// KeepAwake and HardwareEncoding are true: a file from before they existed has
-	// no such field, and absent means on.
-	want := app.Settings{Port: 9200, Name: "Den", RequireToken: true, KeepAwake: true, HardwareEncoding: true}
+	// KeepAwake, HardwareEncoding and CheckForUpdates are true: a file from before
+	// they existed has no such field, and absent means on.
+	want := app.Settings{Port: 9200, Name: "Den", RequireToken: true, KeepAwake: true, HardwareEncoding: true, CheckForUpdates: true}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("Load() = %+v, %v; want %+v", got, err, want)
 	}
@@ -231,7 +231,7 @@ func TestLoad_SkipsALibraryWithoutAFolder(t *testing.T) {
 func TestSaveThenLoad_StartupAndPowerSettings(t *testing.T) {
 	s := New(t.TempDir())
 	for _, want := range []app.Settings{
-		{Port: 9100, Name: "x", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, FFmpegPath: "/opt/ffmpeg", HardwareEncoding: true},
+		{Port: 9100, Name: "x", AutoStart: true, KeepAwake: true, OpenAtLogin: true, HideOnClose: true, FFmpegPath: "/opt/ffmpeg", HardwareEncoding: true, CheckForUpdates: true},
 		{Port: 9100, Name: "x"}, // an explicit "off" must not read back as the old default "on"
 	} {
 		if err := s.Save(want); err != nil {

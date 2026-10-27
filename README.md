@@ -57,7 +57,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full route table.
 
 | What | Where |
 |---|---|
-| Port, display name, library folders (and their names, and whether each is shown to smart TVs), token on/off, Smart TVs on/off, start/awake/login/close-window choices, the ffmpeg location | `settings.json` in `~/Library/Application Support/EinCast` (macOS) or `%AppData%\EinCast` (Windows) |
+| Port, display name, library folders (and their names, and whether each is shown to smart TVs), token on/off, Smart TVs on/off, start/awake/login/close-window choices, the ffmpeg location, the update check on/off | `settings.json` in `~/Library/Application Support/EinCast` (macOS) or `%AppData%\EinCast` (Windows) |
 | Profiles and their PIN hashes (`profiles.json`) and where each profile stopped (`resume.json`) | The same folder as `settings.json`, readable by you only |
 | The access token | The system Keychain / Credential Manager, service `com.bkthomas.eincast`. Never in `settings.json` or the logs |
 
@@ -72,6 +72,8 @@ Smart TVs (Settings → Smart TVs) is off by default. A TV can't send the access
 If the server won't start because another program already holds its port, Settings → Free a port shows which program that is (using `lsof` on macOS, `netstat` on Windows) and ends it when you confirm. It never ends EinCast itself, and only offers ports 1024–65535.
 
 Burmese file names: names in Myanmar Unicode are listed, searched and read for titles like any other, and search treats the two spellings of a letter (for example U+1026 and U+1025 U+102E) as the same text. Names in the old **Zawgyi** encoding are shown as they are stored, which can look garbled (overlapping or misordered letters); EinCast does not convert them. Rename such files in Unicode with any Zawgyi-to-Unicode converter, and rescan.
+
+Updates: about once a day EinCast asks GitHub whether a newer release exists (Settings → Updates). If one does, a line appears in the sidebar and the Updates card shows what's new and each download's SHA-256; **Open download page** takes you to the release, and you install it yourself. EinCast never downloads or installs anything on its own. The request is one anonymous read of this project's public release list: no account, no cookie, nothing about you, this computer or the version you run (GitHub sees your IP address, as any website does). Turn **Check for updates automatically** off and EinCast makes no request until you press **Check now**. This is the only request EinCast makes to the internet unprompted (finding your devices on your own Wi-Fi is separate); tunnels and the like happen only when you turn them on.
 
 Deleting `settings.json` resets EinCast to its defaults. A damaged one is moved to `settings.json.bad` and EinCast starts with defaults.
 

@@ -688,3 +688,22 @@ func TestHardwareEncoding_IsOnByDefaultAndTheChoiceIsKept(t *testing.T) {
 		t.Errorf("turning it on: view = %+v, err = %v", view, err)
 	}
 }
+
+func TestCheckForUpdates_IsOnByDefaultAndTheChoiceIsKept(t *testing.T) {
+	if !Default().CheckForUpdates {
+		t.Fatal("Default().CheckForUpdates = false: an install that is never told about a fix keeps its bugs")
+	}
+	s := newServiceWithLoginItem(existingInstall(), &fakeLoginItem{})
+	in := Input{Port: 8765, Name: "EinCast", KeepAwake: true, CheckForUpdates: false}
+	view, err := s.Update(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.CheckForUpdates || s.Get().CheckForUpdates {
+		t.Error("turning it off did not stick")
+	}
+	in.CheckForUpdates = true
+	if view, err = s.Update(in); err != nil || !view.CheckForUpdates {
+		t.Errorf("turning it on: view = %+v, err = %v", view, err)
+	}
+}

@@ -22,3 +22,19 @@ export function formatBytes(bytes: number, locale = "en"): string {
   }).format(value);
   return `${number} ${units[unit]}`;
 }
+
+/**
+ * Formats a moment (Unix milliseconds) as a short date, e.g. "Nov 1, 2026". Latin
+ * digits in every language, like formatBytes. A moment of 0 means "unknown" and
+ * gives a dash.
+ */
+export function formatDate(ms: number, locale = "en"): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  return new Intl.DateTimeFormat(`${locale}-u-nu-latn`, { dateStyle: "medium" }).format(ms);
+}
+
+/** Like formatDate, with the time of day: "Nov 1, 2026, 9:05 AM". */
+export function formatDateTime(ms: number, locale = "en"): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  return new Intl.DateTimeFormat(`${locale}-u-nu-latn`, { dateStyle: "medium", timeStyle: "short" }).format(ms);
+}

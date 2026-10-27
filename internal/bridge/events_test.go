@@ -167,3 +167,19 @@ func TestEmitter_ProfilesChangedCarriesNoPIN(t *testing.T) {
 		t.Fatalf("payload = %#v", got[0].data[0])
 	}
 }
+
+func TestEmitter_UpdateChanged(t *testing.T) {
+	var got []emitted
+	e := newTestEmitter(&got)
+	e.bind(context.Background())
+
+	e.Publish(app.UpdateChanged{Status: app.UpdateStatus{Current: "1.1.1", Checking: true}})
+
+	if len(got) != 1 || got[0].name != "update:status" {
+		t.Fatalf("emitted = %+v", got)
+	}
+	want := UpdateStatusDTO{Current: "1.1.1", Checking: true}
+	if dto, ok := got[0].data[0].(UpdateStatusDTO); !ok || !reflect.DeepEqual(dto, want) {
+		t.Fatalf("payload = %#v, want %#v", got[0].data[0], want)
+	}
+}

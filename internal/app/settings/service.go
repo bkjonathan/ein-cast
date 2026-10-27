@@ -36,9 +36,10 @@ var ErrTokenOff = errors.New("access token is turned off")
 // the choices that existed before they became settings: nothing starts by itself
 // and the token is off. The video chip is used for conversions: it is safe to
 // leave on, because a conversion that the chip cannot do falls back to the
-// processor by itself.
+// processor by itself. The check for a newer version is on too (ADR 0029): an
+// install that never hears about a fix keeps its bugs.
 func Default() app.Settings {
-	return app.Settings{Port: streaming.DefaultPort, Name: streaming.DefaultName, KeepAwake: true, HardwareEncoding: true}
+	return app.Settings{Port: streaming.DefaultPort, Name: streaming.DefaultName, KeepAwake: true, HardwareEncoding: true, CheckForUpdates: true}
 }
 
 // firstRun returns the settings of a new install: the same, with the protections
@@ -65,6 +66,8 @@ type Input struct {
 	HideOnClose  bool
 	// HardwareEncoding lets conversions use the computer's video chip.
 	HardwareEncoding bool
+	// CheckForUpdates lets EinCast look for a newer release by itself.
+	CheckForUpdates bool
 }
 
 // Service owns the settings and the access token. It implements
@@ -192,7 +195,7 @@ func (s *Service) Update(in Input) (app.SettingsView, error) {
 	next := s.cur
 	next.Port, next.Name, next.RequireToken, next.DLNA = in.Port, in.Name, in.RequireToken, in.DLNA
 	next.AutoStart, next.KeepAwake, next.OpenAtLogin, next.HideOnClose = in.AutoStart, in.KeepAwake, in.OpenAtLogin, in.HideOnClose
-	next.HardwareEncoding = in.HardwareEncoding
+	next.HardwareEncoding, next.CheckForUpdates = in.HardwareEncoding, in.CheckForUpdates
 	if err := s.applyLoginItemLocked(next.OpenAtLogin); err != nil {
 		s.mu.Unlock()
 		return app.SettingsView{}, err

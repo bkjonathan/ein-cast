@@ -24,6 +24,7 @@ import (
 	"eincast/internal/adapters/ffmpeg"
 	"eincast/internal/adapters/fsscan"
 	"eincast/internal/adapters/fswatch"
+	"eincast/internal/adapters/githubrelease"
 	"eincast/internal/adapters/httpapi"
 	"eincast/internal/adapters/logbus"
 	"eincast/internal/adapters/loginitem"
@@ -54,6 +55,7 @@ import (
 	"eincast/internal/app/thumbnails"
 	"eincast/internal/app/tracks"
 	"eincast/internal/app/transcode"
+	"eincast/internal/app/updates"
 	"eincast/internal/bridge"
 )
 
@@ -61,6 +63,9 @@ const appName = "EinCast"
 
 // version is stamped at build time: -ldflags "-X main.version=1.0.1".
 var version = "dev"
+
+// releaseRepo is where releases are published; the update check reads it.
+const releaseRepo = "bkjonathan/ein-cast"
 
 // thumbnailMaxAge is how long an unrefreshed thumbnail is kept. A changed file
 // gets a new one, so the old picture would otherwise stay forever.
@@ -163,6 +168,12 @@ func main() {
 	trackService := tracks.NewService(libraryService, ffmpeg.NewProber(log, chosenFFmpeg),
 		ffmpeg.NewExtractor(log, chosenFFmpeg), subtitleCache, log, tracks.DefaultOptions)
 
+	// Looking for a newer version is the one network call EinCast makes by itself.
+	// It only reads, can be turned off in Settings, and the person installs the
+	// update (ADR 0029).
+	updateService := updates.NewService(githubrelease.New(releaseRepo), settingsService, emitter, log,
+		version, updates.DefaultTiming, updates.WithPlatform(runtime.GOOS))
+
 	// Smart TVs identify a server by a UUID; deriving it from the computer's name
 	// keeps it the same on every run without storing anything.
 	hostname, err := os.Hostname()
@@ -199,6 +210,7 @@ func main() {
 		Conversions: conversions,
 		FFmpeg:      thumbnailer,
 		Profiles:    profileService,
+		Updates:     updateService,
 		// The last seconds of watching are written once the server has stopped.
 		OnShutdown: []func(){func() {
 			if err := resumeService.Close(); err != nil {

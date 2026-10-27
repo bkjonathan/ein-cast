@@ -6,11 +6,13 @@ import {
   toProfile,
   toRemoteStatus,
   toServerStatus,
+  toUpdateStatus,
   type RawLibraryState,
   type RawLogLine,
   type RawProfile,
   type RawRemoteStatus,
   type RawServerStatus,
+  type RawUpdateStatus,
 } from "./mappers";
 import type {
   LibraryState,
@@ -19,6 +21,7 @@ import type {
   RemoteStatus,
   ServerStatus,
   Settings,
+  UpdateStatus,
 } from "./types";
 
 /** Every event Go emits, with its payload. Mirrors internal/bridge/events.go. */
@@ -30,6 +33,7 @@ export interface EventMap {
   "settings:changed": Settings;
   "remote:status": RemoteStatus;
   "profiles:changed": Profile[];
+  "update:status": UpdateStatus;
 }
 
 export type EventName = keyof EventMap;
@@ -45,6 +49,7 @@ const decoders: { [K in EventName]: (raw: unknown) => EventMap[K] } = {
   "settings:changed": (raw) => raw as Settings,
   "remote:status": (raw) => toRemoteStatus(raw as RawRemoteStatus),
   "profiles:changed": (raw) => (raw as RawProfile[]).map(toProfile),
+  "update:status": (raw) => toUpdateStatus(raw as RawUpdateStatus),
 };
 
 /** Subscribes to a Go event. Returns the unsubscribe function. */

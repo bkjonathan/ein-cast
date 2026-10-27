@@ -77,7 +77,7 @@ describe("ConnectCard", () => {
 
   it("a public tunnel shows the PIN advice and no bare playlist link, and never the LAN token", () => {
     setServer(server({ lanUrls: [] }));
-    setSettings({ port: 8765, name: "Den", requireToken: true, dlna: false, autoStart: false, keepAwake: true, openAtLogin: false, hideOnClose: false, ffmpegPath: "", hardwareEncoding: true, accessToken: "SECRET-LAN-TOKEN", tokenPersisted: true });
+    setSettings({ port: 8765, name: "Den", requireToken: true, dlna: false, autoStart: false, keepAwake: true, openAtLogin: false, hideOnClose: false, ffmpegPath: "", hardwareEncoding: true, checkForUpdates: true, accessToken: "SECRET-LAN-TOKEN", tokenPersisted: true });
     setRemote(remote({ public: true, provider: "cloudflare-quick", url: "https://abc.trycloudflare.com" }));
     const html = render();
 
@@ -90,7 +90,7 @@ describe("ConnectCard", () => {
   });
 
   it("the LAN token is still added to LAN links", () => {
-    setSettings({ port: 8765, name: "Den", requireToken: true, dlna: false, autoStart: false, keepAwake: true, openAtLogin: false, hideOnClose: false, ffmpegPath: "", hardwareEncoding: true, accessToken: "SECRET-LAN-TOKEN", tokenPersisted: true });
+    setSettings({ port: 8765, name: "Den", requireToken: true, dlna: false, autoStart: false, keepAwake: true, openAtLogin: false, hideOnClose: false, ffmpegPath: "", hardwareEncoding: true, checkForUpdates: true, accessToken: "SECRET-LAN-TOKEN", tokenPersisted: true });
     expect(render()).toContain("t=SECRET-LAN-TOKEN");
   });
 

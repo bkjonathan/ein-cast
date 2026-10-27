@@ -152,4 +152,20 @@ describe("onEvent", () => {
     expect(() => deliver({ ...payload, live: "paused" })).toThrow();
     expect(handler).toHaveBeenCalledOnce();
   });
+
+  it("decodes update:status payloads, with a null release", () => {
+    let deliver: (payload: unknown) => void = () => undefined;
+    runtime.EventsOn.mockImplementation((_name: string, cb: (p: unknown) => void) => {
+      deliver = cb;
+      return () => undefined;
+    });
+
+    const handler = vi.fn();
+    onEvent("update:status", handler);
+    deliver({ current: "1.1.1", checking: true, available: false, latest: null, checkedAt: 0, error: "" });
+
+    expect(handler).toHaveBeenCalledWith({
+      current: "1.1.1", checking: true, available: false, latest: null, checkedAt: 0, error: "",
+    });
+  });
 });

@@ -65,6 +65,7 @@ export function inputFrom(saved: SettingsInput, change: Partial<SettingsInput> =
     openAtLogin: saved.openAtLogin,
     hideOnClose: saved.hideOnClose,
     hardwareEncoding: saved.hardwareEncoding,
+    checkForUpdates: saved.checkForUpdates,
     ...change,
   };
 }

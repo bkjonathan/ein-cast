@@ -20,6 +20,7 @@ const (
 	EventSettings       = "settings:changed"
 	EventRemote         = "remote:status"
 	EventProfiles       = "profiles:changed"
+	EventUpdate         = "update:status"
 )
 
 // Emitter implements app.EventPublisher by forwarding events to the frontend.
@@ -76,6 +77,8 @@ func (e *Emitter) Publish(ev app.Event) {
 		e.emit(ctx, EventSettings, toSettingsDTO(ev.View))
 	case app.ProfilesChanged:
 		e.emit(ctx, EventProfiles, toProfileDTOs(ev.Profiles))
+	case app.UpdateChanged:
+		e.emit(ctx, EventUpdate, toUpdateStatusDTO(ev.Status))
 	case app.RemoteStatusChanged:
 		e.emit(ctx, EventRemote, toRemoteStatusDTO(ev.Status))
 	case app.ServerStateChanged:

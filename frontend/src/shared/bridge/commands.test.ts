@@ -41,10 +41,16 @@ const go = vi.hoisted(() => ({
   SetProfilePIN: vi.fn(),
   ClearProfilePIN: vi.fn(),
   SetLibraryHiddenFromTVs: vi.fn(),
+  GetUpdateStatus: vi.fn(),
+  CheckForUpdatesNow: vi.fn(),
+  OpenUpdatePage: vi.fn(),
 }));
 vi.mock("../../../wailsjs/go/bridge/App", () => go);
 
 import {
+  checkForUpdatesNow,
+  getUpdateStatus,
+  openUpdatePage,
   checkPort,
   freePort,
   chooseFFmpeg,
@@ -247,18 +253,18 @@ describe("settings", () => {
   it("getSettings maps the DTO", async () => {
     go.GetSettings.mockResolvedValue({
       port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: true, keepAwake: true,
-      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", hardwareEncoding: true, accessToken: "tok", tokenPersisted: true, junk: 1,
+      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", hardwareEncoding: true, checkForUpdates: true, accessToken: "tok", tokenPersisted: true, junk: 1,
     });
     await expect(getSettings()).resolves.toStrictEqual({
       port: 9000, name: "Den", requireToken: true, dlna: false, autoStart: true, keepAwake: true,
-      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", hardwareEncoding: true, accessToken: "tok", tokenPersisted: true,
+      openAtLogin: false, hideOnClose: true, ffmpegPath: "/x/ffmpeg", hardwareEncoding: true, checkForUpdates: true, accessToken: "tok", tokenPersisted: true,
     });
   });
 
   it("updateSettings sends the editable fields and surfaces Go's validation message", async () => {
     const input = {
       port: 9100, name: "Den", requireToken: false, dlna: false,
-      autoStart: true, keepAwake: true, openAtLogin: false, hideOnClose: false, hardwareEncoding: true,
+      autoStart: true, keepAwake: true, openAtLogin: false, hideOnClose: false, hardwareEncoding: true, checkForUpdates: true,
     };
     go.UpdateSettings.mockResolvedValueOnce(undefined);
     await updateSettings(input);
@@ -488,5 +494,48 @@ describe("profiles", () => {
     expect(go.ClearProfilePIN).toHaveBeenCalledWith("k1");
     expect(go.DeleteProfile).toHaveBeenCalledWith("k1");
     expect(go.SetLibraryHiddenFromTVs).toHaveBeenCalledWith("L1", true);
+  });
+});
+
+describe("updates", () => {
+  const dto = {
+    current: "1.1.1", checking: false, available: true, checkedAt: 1_700_000_000_000, error: "", junk: 1,
+    latest: {
+      version: "1.1.2", name: "EinCast 1.1.2", notes: "- fixes", publishedAt: 1_700_000_100_000,
+      assets: [{ name: "a.zip", size: 5, sha256: "ab", extra: 1 }],
+    },
+  };
+  const status = {
+    current: "1.1.1", checking: false, available: true, checkedAt: 1_700_000_000_000, error: "",
+    latest: {
+      version: "1.1.2", name: "EinCast 1.1.2", notes: "- fixes", publishedAt: 1_700_000_100_000,
+      assets: [{ name: "a.zip", size: 5, sha256: "ab" }],
+    },
+  };
+
+  it("getUpdateStatus maps the DTO and drops unknown fields", async () => {
+    go.GetUpdateStatus.mockResolvedValue(dto);
+    await expect(getUpdateStatus()).resolves.toStrictEqual(status);
+  });
+
+  it("a status with no release has latest null, whether Go sent null or left it out", async () => {
+    go.GetUpdateStatus.mockResolvedValueOnce({ ...dto, latest: null, available: false });
+    await expect(getUpdateStatus()).resolves.toMatchObject({ latest: null });
+    go.GetUpdateStatus.mockResolvedValueOnce({ ...dto, latest: undefined, available: false });
+    await expect(getUpdateStatus()).resolves.toMatchObject({ latest: null });
+  });
+
+  it("checkForUpdatesNow resolves with the status, failures included", async () => {
+    go.CheckForUpdatesNow.mockResolvedValue({ ...dto, latest: null, available: false, error: "offline" });
+    await expect(checkForUpdatesNow()).resolves.toMatchObject({ error: "offline", latest: null });
+  });
+
+  it("openUpdatePage sends no address: Go knows which page to open", async () => {
+    go.OpenUpdatePage.mockResolvedValueOnce(undefined);
+    await openUpdatePage();
+    expect(go.OpenUpdatePage).toHaveBeenCalledWith();
+
+    go.OpenUpdatePage.mockRejectedValueOnce("there is no newer version to download");
+    await expect(openUpdatePage()).rejects.toMatch(/no newer version/);
   });
 });

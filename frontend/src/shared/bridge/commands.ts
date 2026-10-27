@@ -4,6 +4,7 @@ import {
   CheckPort as goCheckPort,
   ChooseFFmpeg as goChooseFFmpeg,
   ChooseFile as goChooseFile,
+  CheckForUpdatesNow as goCheckForUpdatesNow,
   ChooseFolder as goChooseFolder,
   ClearFFmpegPath as goClearFFmpegPath,
   ClearProfilePIN as goClearProfilePIN,
@@ -20,12 +21,14 @@ import {
   ListRemoteProviders as goListRemoteProviders,
   GetServerState as goGetServerState,
   GetThumbnail as goGetThumbnail,
+  GetUpdateStatus as goGetUpdateStatus,
   ListLibraries as goListLibraries,
   ListProfiles as goListProfiles,
   SaveProfile as goSaveProfile,
   SetLibraryHiddenFromTVs as goSetLibraryHiddenFromTVs,
   SetProfilePIN as goSetProfilePIN,
   ListLibrary as goListLibrary,
+  OpenUpdatePage as goOpenUpdatePage,
   RefreshAddresses as goRefreshAddresses,
   RemoveLibrary as goRemoveLibrary,
   RenameLibrary as goRenameLibrary,
@@ -41,7 +44,16 @@ import {
   ThumbnailsAvailable as goThumbnailsAvailable,
   UpdateSettings as goUpdateSettings,
 } from "../../../wailsjs/go/bridge/App";
-import { toLibraryItem, toLibraryState, toLogLine, toProfile, toRemoteProvider, toRemoteStatus, toServerStatus } from "./mappers";
+import {
+  toLibraryItem,
+  toLibraryState,
+  toLogLine,
+  toProfile,
+  toRemoteProvider,
+  toRemoteStatus,
+  toServerStatus,
+  toUpdateStatus,
+} from "./mappers";
 import type {
   AppInfo,
   FFmpegStatus,
@@ -56,6 +68,7 @@ import type {
   ServerStatus,
   Settings,
   SettingsInput,
+  UpdateStatus,
 } from "./types";
 
 /** Asks Go for the app name, version and host platform. */
@@ -142,6 +155,7 @@ export async function getSettings(): Promise<Settings> {
     hideOnClose: dto.hideOnClose,
     ffmpegPath: dto.ffmpegPath,
     hardwareEncoding: dto.hardwareEncoding,
+    checkForUpdates: dto.checkForUpdates,
     accessToken: dto.accessToken,
     tokenPersisted: dto.tokenPersisted,
   };
@@ -321,4 +335,25 @@ export async function setProfilePin(id: string, pin: string): Promise<void> {
 /** Removes a profile's PIN. */
 export async function clearProfilePin(id: string): Promise<void> {
   await goClearProfilePIN(id);
+}
+
+/** Whether a newer version is out, as far as the last check knows. Changes arrive as "update:status". */
+export async function getUpdateStatus(): Promise<UpdateStatus> {
+  return toUpdateStatus(await goGetUpdateStatus());
+}
+
+/**
+ * Asks for the newest version now, whatever the "check for updates" setting says.
+ * A failed check is part of the returned status (`error`), not a rejection.
+ */
+export async function checkForUpdatesNow(): Promise<UpdateStatus> {
+  return toUpdateStatus(await goCheckForUpdatesNow());
+}
+
+/**
+ * Opens the newest release's download page in the browser. Go knows the address;
+ * the UI cannot supply one. Rejects with Go's reason when there is nothing newer.
+ */
+export async function openUpdatePage(): Promise<void> {
+  await goOpenUpdatePage();
 }

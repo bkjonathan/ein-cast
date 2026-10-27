@@ -5,7 +5,7 @@ The goal of this release is not more features. It is that a stranger can downloa
 **Positioning (one sentence, used in every task below):**
 > The simplest way to play your laptop's videos on any TV. No server, no account.
 
-**Progress note (Phase 14):** built 14.3–14.11. 14.1 and 14.2 (signing) stay open: they need accounts and certificates. ADR 0023 stays reserved for the signing decision; 0024 (token default) and 0025 (keep awake) took their planned numbers, and 14.7 is ADR 0030 because 0026–0029 belong to Phases 15, 16, 18 and 19. Windows tray, Run key and hide-on-close are compiled and unit-tested but never run on Windows (see [TESTING-DEVICES.md](TESTING-DEVICES.md)).
+**Progress note (Phase 14):** built 14.3–14.11. 14.1 and 14.2 (signing) stay open: they need accounts and certificates. ADR 0023 stays reserved for the signing decision; 0024 (token default) and 0025 (keep awake) took their planned numbers, and 14.7 is ADR 0030 because 0026–0029 belong to Phases 15, 16, 18 and 19 (0029 is the update notice). Windows tray, Run key and hide-on-close are compiled and unit-tested but never run on Windows (see [TESTING-DEVICES.md](TESTING-DEVICES.md)).
 
 **How this plan follows the project rules** ([CLAUDE.md](../CLAUDE.md)): phases continue from 13, each phase ends with a build + tests + three understanding questions, every real decision gets an ADR (numbering continues at 0023), and anything not built goes into [ROADMAP.md](ROADMAP.md) "Seams", not into code.
 
@@ -161,13 +161,15 @@ Goal: first-class Burmese, and a structure other communities can add languages t
 
 Goal: people on 1.1.1 get 1.1.2 without hunting for it. Depends on Phase 14 signing.
 
-- [ ] **19.1 Decide the mechanism (S).** ADR 0029. Simplest honest option: check the GitHub Releases API on launch (and daily), compare versions, show "Version X is available" with a button that opens the download page. Full silent self-update is much harder with Wails and signing; leave it for later.
-- [ ] **19.2 `Updater` port + GitHub adapter (M).** Port in `app/ports.go`; adapter calls the Releases API with a timeout; no telemetry, no identifiers sent.
-- [ ] **19.3 UI + setting (S).** "Check for updates" (default on) with an off switch, the notice in Settings → About, and the release notes shown.
-- [ ] **19.4 Verify downloads (S).** Publish SHA-256 checksums with each release (CI step). Show them in the update dialog.
-- [ ] **19.5 Release notes template (S).** `release.yml` generates "What's new / Fixes / Known limits"; remove the "not signed" paragraph once 14.1/14.2 are done.
+- [x] **19.1 Decide the mechanism (S).** ADR 0029. Simplest honest option: check the GitHub Releases API on launch (and daily), compare versions, show "Version X is available" with a button that opens the download page. Full silent self-update is much harder with Wails and signing; leave it for later. *(Done: notice, not install. ADR 0029.)*
+- [x] **19.2 `Updater` port + GitHub adapter (M).** Port in `app/ports.go`; adapter calls the Releases API with a timeout; no telemetry, no identifiers sent. *(Done as `app.ReleaseSource` (named for what it does: it reads) with the `githubrelease` adapter and `updates.Service`; `domain/version` compares release numbers. A test asserts what is and is not sent.)*
+- [x] **19.3 UI + setting (S).** "Check for updates" (default on) with an off switch, the notice in Settings → About, and the release notes shown. *(Done: the setting `CheckForUpdates`, an Updates card at the bottom of Settings (there is no About screen) with Check now, the notes and the files, and a quiet line in the sidebar that jumps to the card.)*
+- [x] **19.4 Verify downloads (S).** Publish SHA-256 checksums with each release (CI step). Show them in the update dialog. *(Done: a `checksums` job in `release.yml` writes `SHA256SUMS.txt`; the card shows each file's SHA-256 with a copy button.)*
+- [x] **19.5 Release notes template (S).** `release.yml` generates "What's new / Fixes / Known limits"; remove the "not signed" paragraph once 14.1/14.2 are done. *(Done: `scripts/release-notes.sh` writes them from the commits since the previous tag; "Known limits" is `.github/release-known-limits.md`, where the unsigned paragraph stays until 14.1/14.2 are done.)*
 
-**Done when:** a 1.1.1 build, pointed at a test release 1.1.2, shows the update notice, and turning the setting off stops the network call (test with a fake).
+**Progress note (Phase 19):** built 19.1–19.5 (ADR 0029). **Run for real:** the adapter against GitHub's public API (it read v1.0.1 and its three files); `scripts/release-notes.sh` on this repo's history; the checksum file format with `shasum -c`; Go and frontend tests. **Not run:** the `release.yml` changes (the notes step and the `checksums` job) have never executed on GitHub, so the next tag is their first test: watch it, and expect to fix a typo. No release newer than the running one exists yet, so the "update available" path has only run against a fake server and in component tests, never in the real window. The Burmese strings are my draft, like the rest of `my.json`; the messages Go writes when a check fails are English. The checksums catch a damaged download, not a replaced one: that needs signing (ADR 0029).
+
+**Done when:** a 1.1.1 build, pointed at a test release 1.1.2, shows the update notice, and turning the setting off stops the network call (test with a fake). *(The off-switch half is tested with a fake: `TestCheckIfDue_SettingOffMakesNoRequest`, `TestRun_WithTheSettingOffNeverAsks`. The notice half is tested with fakes too; the real window with a real 1.1.2 is not checked yet.)*
 
 ---
 

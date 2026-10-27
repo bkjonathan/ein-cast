@@ -117,6 +117,17 @@ type Conversions interface {
 	StopAll()
 }
 
+// Updates is the part of the update check the bridge drives.
+type Updates interface {
+	Status() app.UpdateStatus
+	// Check asks now; the outcome is in the returned status.
+	Check(ctx context.Context) app.UpdateStatus
+	// PageURL is the newest release's page, or "" when there is nothing to open.
+	PageURL() string
+	// Run checks by itself until ctx ends.
+	Run(ctx context.Context)
+}
+
 // App is the Wails-bound facade. Every exported method is callable from JS, so
 // keep this surface small and stable (and keep lifecycle hooks unexported).
 type App struct {
@@ -130,6 +141,7 @@ type App struct {
 	convert   Conversions // nil: no conversion
 	ffmpeg    FFmpeg      // nil: ffmpeg is not managed from Settings
 	profiles  Profiles    // nil: profiles are not managed from Settings
+	updates   Updates     // nil: no update check
 	closers   []func()    // run at shutdown, after the server has stopped
 	logs      app.LogStream
 	emitter   *Emitter
@@ -142,6 +154,9 @@ type App struct {
 	// replace the one thing that needs a real window.
 	pickFolder func(ctx context.Context) (string, error)
 	pickFile   func(ctx context.Context, title string) (string, error)
+	// openURL opens an address in the default browser. A field so tests can
+	// observe the choice without a real browser.
+	openURL func(ctx context.Context, url string)
 	// windowThemes maps a theme name to the Wails call that applies it. A field
 	// so tests can observe the choice without a native window.
 	windowThemes map[string]func(ctx context.Context)
@@ -163,6 +178,8 @@ type Deps struct {
 	FFmpeg FFmpeg
 	// Profiles may be nil.
 	Profiles Profiles
+	// Updates may be nil.
+	Updates Updates
 	// OnShutdown runs once the server has stopped, for whatever must be written
 	// before the app ends (resume positions).
 	OnShutdown []func()
@@ -184,12 +201,14 @@ func New(d Deps) *App {
 		convert:    d.Conversions,
 		ffmpeg:     d.FFmpeg,
 		profiles:   d.Profiles,
+		updates:    d.Updates,
 		closers:    d.OnShutdown,
 		logs:       d.Logs,
 		emitter:    d.Emitter,
 		log:        d.Log,
 		pickFolder: openFolderDialog,
 		pickFile:   openFileDialog,
+		openURL:    wruntime.BrowserOpenURL,
 		windowThemes: map[string]func(context.Context){
 			"system": wruntime.WindowSetSystemDefaultTheme,
 			"light":  wruntime.WindowSetLightTheme,
@@ -256,6 +275,11 @@ func (a *App) startup(ctx context.Context) {
 	go a.library.Watch(ctx)
 	if a.convert != nil {
 		go a.convert.Run(ctx)
+	}
+	// Looks for a newer version now and then, if the person allows it; ends with
+	// the app context.
+	if a.updates != nil {
+		go a.updates.Run(ctx)
 	}
 	// Reopen the last folder in the background so the window appears at once.
 	go a.restoreLibrary(ctx)
@@ -471,7 +495,7 @@ func (a *App) UpdateSettings(in SettingsInputDTO) error {
 	_, err := a.settings.Update(settings.Input{
 		Port: in.Port, Name: in.Name, RequireToken: in.RequireToken, DLNA: in.DLNA,
 		AutoStart: in.AutoStart, KeepAwake: in.KeepAwake, OpenAtLogin: in.OpenAtLogin, HideOnClose: in.HideOnClose,
-		HardwareEncoding: in.HardwareEncoding,
+		HardwareEncoding: in.HardwareEncoding, CheckForUpdates: in.CheckForUpdates,
 	})
 	return err
 }
@@ -772,4 +796,38 @@ func openFileDialog(ctx context.Context, title string) (string, error) {
 		return "", errors.New("app not started")
 	}
 	return wruntime.OpenFileDialog(ctx, wruntime.OpenDialogOptions{Title: title})
+}
+
+// GetUpdateStatus says whether a newer version is out, as far as the last check
+// knows. The UI calls it on load; changes arrive as "update:status".
+func (a *App) GetUpdateStatus() UpdateStatusDTO {
+	if a.updates == nil {
+		return UpdateStatusDTO{Current: a.info.Version}
+	}
+	return toUpdateStatusDTO(a.updates.Status())
+}
+
+// CheckForUpdatesNow asks for the newest version right away, whatever the
+// "check for updates" setting says: the person pressed the button. A failure is
+// part of the returned status, not an error.
+func (a *App) CheckForUpdatesNow() UpdateStatusDTO {
+	if a.updates == nil {
+		return UpdateStatusDTO{Current: a.info.Version}
+	}
+	return toUpdateStatusDTO(a.updates.Check(a.ctx))
+}
+
+// OpenUpdatePage opens the newest release's download page in the person's
+// browser. It takes no address: only the page the update check found can be
+// opened, so the UI cannot be made to open anything else.
+func (a *App) OpenUpdatePage() error {
+	if a.updates == nil {
+		return errors.New("update checks are not available in this build")
+	}
+	url := a.updates.PageURL()
+	if url == "" {
+		return errors.New("there is no newer version to download")
+	}
+	a.openURL(a.ctx, url)
+	return nil
 }

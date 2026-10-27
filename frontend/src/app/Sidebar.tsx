@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { UpdateNotice } from "@/features/updates";
 import { useT } from "@/shared/i18n";
 import { spring } from "@/shared/motion/presets";
 import { cn } from "@/shared/lib/cn";
@@ -6,7 +7,7 @@ import { views, type View } from "./routes";
 
 interface SidebarProps {
   active: View;
-  onSelect: (view: View) => void;
+  onSelect: (view: View, options?: { updates?: boolean }) => void;
   version?: string;
 }
 
@@ -48,6 +49,7 @@ export function Sidebar({ active, onSelect, version }: SidebarProps) {
           );
         })}
       </ul>
+      <UpdateNotice onOpen={() => onSelect("settings", { updates: true })} />
       {version && (
         <p className="px-3 pt-2 text-xs text-muted-foreground">v{version}</p>
       )}

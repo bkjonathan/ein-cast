@@ -71,7 +71,7 @@ describe("parsePort", () => {
 describe("inputFrom", () => {
   const all = {
     port: 8765, name: "EinCast", requireToken: true, dlna: false,
-    autoStart: true, keepAwake: true, openAtLogin: false, hideOnClose: true, hardwareEncoding: true,
+    autoStart: true, keepAwake: true, openAtLogin: false, hideOnClose: true, hardwareEncoding: true, checkForUpdates: true,
   };
 
   it("sends every field back, because Go replaces them all on each save", () => {
@@ -90,7 +90,7 @@ describe("smartTvsInsteadOfToken", () => {
   it("makes the exclusive choice in one save and leaves everything else alone", () => {
     const saved = {
       port: 9000, name: "Den", requireToken: true, dlna: false,
-      autoStart: true, keepAwake: false, openAtLogin: true, hideOnClose: false, hardwareEncoding: false,
+      autoStart: true, keepAwake: false, openAtLogin: true, hideOnClose: false, hardwareEncoding: false, checkForUpdates: false,
     };
     expect(smartTvsInsteadOfToken(saved)).toStrictEqual({ ...saved, requireToken: false, dlna: true });
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes } from "./format";
+import { formatBytes, formatDate, formatDateTime } from "./format";
 
 describe("formatBytes", () => {
   it.each([
@@ -25,5 +25,25 @@ describe("formatBytes in other languages", () => {
     expect(formatBytes(1536, "de")).toBe("1,5 KB");
     expect(formatBytes(1536, "my")).toBe("1.5 KB");
     expect(formatBytes(5 * 1024 ** 3, "my")).toBe("5.0 GB");
+  });
+});
+
+describe("formatDate and formatDateTime", () => {
+  const moment = Date.UTC(2026, 10, 1, 12, 30); // noon UTC: the same calendar day in every time zone
+
+  it("names the day", () => {
+    expect(formatDate(moment)).toMatch(/2026/);
+    expect(formatDateTime(moment)).toMatch(/2026/);
+    expect(formatDateTime(moment).length).toBeGreaterThan(formatDate(moment).length);
+  });
+
+  it("keeps Latin digits in Burmese", () => {
+    expect(formatDate(moment, "my")).toMatch(/2026/);
+    expect(formatDate(moment, "my")).not.toMatch(/[၀-၉]/);
+  });
+
+  it.each([0, -1, Number.NaN])("returns a dash for %s (unknown)", (input) => {
+    expect(formatDate(input)).toBe("—");
+    expect(formatDateTime(input)).toBe("—");
   });
 });

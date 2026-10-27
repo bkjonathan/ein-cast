@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"log/slog"
+	"time"
 
 	"eincast/internal/app"
 	"eincast/internal/app/portfree"
@@ -273,6 +274,7 @@ type SettingsDTO struct {
 	HideOnClose      bool   `json:"hideOnClose"`
 	FFmpegPath       string `json:"ffmpegPath"`
 	HardwareEncoding bool   `json:"hardwareEncoding"`
+	CheckForUpdates  bool   `json:"checkForUpdates"`
 	AccessToken      string `json:"accessToken"`
 	TokenPersisted   bool   `json:"tokenPersisted"`
 }
@@ -289,6 +291,7 @@ func toSettingsDTO(v app.SettingsView) SettingsDTO {
 		HideOnClose:      v.HideOnClose,
 		FFmpegPath:       v.FFmpegPath,
 		HardwareEncoding: v.HardwareEncoding,
+		CheckForUpdates:  v.CheckForUpdates,
 		AccessToken:      v.Token,
 		TokenPersisted:   v.TokenPersisted,
 	}
@@ -306,6 +309,7 @@ type SettingsInputDTO struct {
 	OpenAtLogin      bool   `json:"openAtLogin"`
 	HideOnClose      bool   `json:"hideOnClose"`
 	HardwareEncoding bool   `json:"hardwareEncoding"`
+	CheckForUpdates  bool   `json:"checkForUpdates"`
 }
 
 // FFmpegStatusDTO says where ffmpeg is. Chosen is the location the person set,
@@ -439,4 +443,60 @@ func (d ProfileDTO) toProfile() profile.Profile {
 		p.Kinds = append(p.Kinds, media.Kind(k))
 	}
 	return p
+}
+
+// UpdateAssetDTO is one file of a release. SHA256 is empty when the release
+// published no checksum for it.
+type UpdateAssetDTO struct {
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+// UpdateReleaseDTO is the newest release. Notes are plain text from the network:
+// the UI shows them as text, never as markup.
+type UpdateReleaseDTO struct {
+	Version     string           `json:"version"`
+	Name        string           `json:"name"`
+	Notes       string           `json:"notes"`
+	PublishedAt int64            `json:"publishedAt"` // Unix milliseconds; 0 when unknown
+	Assets      []UpdateAssetDTO `json:"assets"`
+}
+
+// UpdateStatusDTO says whether a newer version is out. The release's address
+// is not here: the UI asks Go to open it (OpenUpdatePage) and cannot supply one.
+type UpdateStatusDTO struct {
+	Current   string            `json:"current"`
+	Checking  bool              `json:"checking"`
+	Available bool              `json:"available"`
+	Latest    *UpdateReleaseDTO `json:"latest"`
+	CheckedAt int64             `json:"checkedAt"` // Unix milliseconds; 0 until a check succeeds
+	Error     string            `json:"error"`
+}
+
+func toUpdateStatusDTO(st app.UpdateStatus) UpdateStatusDTO {
+	out := UpdateStatusDTO{
+		Current: st.Current, Checking: st.Checking, Available: st.Available,
+		CheckedAt: millis(st.CheckedAt), Error: st.Error,
+	}
+	if st.Latest != nil {
+		l := UpdateReleaseDTO{
+			Version: st.Latest.Version, Name: st.Latest.Name, Notes: st.Latest.Notes,
+			PublishedAt: millis(st.Latest.PublishedAt),
+			Assets:      make([]UpdateAssetDTO, len(st.Latest.Assets)), // non-nil: JSON [] rather than null
+		}
+		for i, a := range st.Latest.Assets {
+			l.Assets[i] = UpdateAssetDTO{Name: a.Name, Size: a.Size, SHA256: a.SHA256}
+		}
+		out.Latest = &l
+	}
+	return out
+}
+
+// millis is a time as Unix milliseconds, 0 for the zero time.
+func millis(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixMilli()
 }

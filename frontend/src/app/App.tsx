@@ -6,6 +6,7 @@ import { useProfilesSync } from "@/features/profiles";
 import { OnboardingScreen, ScanningScreen, SetupWizard } from "@/features/onboarding";
 import { RemoteView, useRemoteSync } from "@/features/remote";
 import { useServerSync } from "@/features/server";
+import { useUpdatesSync } from "@/features/updates";
 import { SettingsView, useSettingsSync } from "@/features/settings";
 import { DashboardView } from "./DashboardView";
 import { Sidebar } from "./Sidebar";
@@ -19,8 +20,12 @@ export function App() {
   // Set when the Dashboard sends the person to the port tool; cleared when they
   // leave Settings, so opening Settings later does not search again by itself.
   const [portToCheck, setPortToCheck] = useState<number | undefined>(undefined);
-  const select = (view: View) => {
+  // Counts the times the sidebar's update notice sent the person to the updates
+  // card (a counter, so a second click scrolls again); 0 once they leave Settings.
+  const [focusUpdates, setFocusUpdates] = useState(0);
+  const select = (view: View, options?: { updates?: boolean }) => {
     if (view !== "settings") setPortToCheck(undefined);
+    setFocusUpdates((n) => (view === "settings" && options?.updates ? n + 1 : 0));
     setActive(view);
   };
   const info = useAppInfo();
@@ -30,6 +35,7 @@ export function App() {
   useSettingsSync();
   useRemoteSync();
   useProfilesSync();
+  useUpdatesSync();
   useWindowTheme();
 
   const hydrated = useLibraryStore((s) => s.hydrated);
@@ -67,6 +73,7 @@ export function App() {
               <ActiveView
                 view={active}
                 portToCheck={portToCheck}
+                focusUpdates={focusUpdates}
                 onFreePort={(port) => {
                   setPortToCheck(port);
                   setActive("settings");
@@ -83,10 +90,11 @@ export function App() {
 interface ActiveViewProps {
   view: View;
   portToCheck: number | undefined;
+  focusUpdates: number;
   onFreePort: (port: number) => void;
 }
 
-function ActiveView({ view, portToCheck, onFreePort }: ActiveViewProps) {
+function ActiveView({ view, portToCheck, focusUpdates, onFreePort }: ActiveViewProps) {
   switch (view) {
     case "dashboard":
       return <DashboardView onFreePort={onFreePort} />;
@@ -97,6 +105,6 @@ function ActiveView({ view, portToCheck, onFreePort }: ActiveViewProps) {
     case "logs":
       return <LogsView />;
     case "settings":
-      return <SettingsView checkPort={portToCheck} />;
+      return <SettingsView checkPort={portToCheck} focusUpdates={focusUpdates} />;
   }
 }

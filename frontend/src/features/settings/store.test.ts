@@ -13,6 +13,7 @@ const settings = (over: Partial<Settings> = {}): Settings => ({
   hideOnClose: false,
   ffmpegPath: "",
   hardwareEncoding: true,
+  checkForUpdates: true,
   accessToken: "",
   tokenPersisted: false,
   ...over,

@@ -25,7 +25,7 @@ import { FFmpegSettings } from "./FFmpegSettings";
 const set = (over: Record<string, unknown> = {}) => {
   mem.settings.settings = {
     port: 8765, name: "Den", requireToken: false, dlna: false, autoStart: false, keepAwake: true,
-    openAtLogin: false, hideOnClose: false, ffmpegPath: "", hardwareEncoding: true, ...over,
+    openAtLogin: false, hideOnClose: false, ffmpegPath: "", hardwareEncoding: true, checkForUpdates: true, ...over,
   };
 };
 

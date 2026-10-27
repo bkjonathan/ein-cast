@@ -41,6 +41,8 @@ changes.
 | `app/thumbnails` | `Service`: `Get` (cache → one shared ffmpeg attempt, two at a time, remembered failures), `Available` (ADR 0015) |
 | `app/profiles` | `Service`: profiles and their PINs (PBKDF2, rate-limited `Select`), signed profile credentials, `Visible`/`TVVisible`; enforced by the HTTP layer on every route that takes an ID (ADR 0027) |
 | `app/resume` | `Service`: where each profile stopped in each title, written in batches and on quit |
+| `domain/version` | `Version`, `Parse`, `Compare`/`Newer`: release numbers by semantic-versioning precedence |
+| `app/updates` | `Service`: asks a `ReleaseSource` whether a newer version exists (on a timer and on request), keeps the status, publishes `UpdateChanged`; never installs (ADR 0029) |
 | `app/settings` | `Service`: load/validate/save preferences, access token (`Required`, `Verify`, `RotateToken`); implements `LibraryMemory` |
 | `app/streaming` | `Config` + functional options (port, name, DLNA), `Service`: `Start`, `Stop`, `Status`, crash watcher, `Local()` (the running server, for tunnels); announces on the network once running (`WithDiscovery`) and withdraws that, then public access, before the server stops |
 | `app/providerconfig` | `Store`: a provider's saved settings in the credential store; cleans and checks values; secrets are write-only |
@@ -186,6 +188,45 @@ sequenceDiagram
     end
     UI->>UI: scanning → "Scanning…" screen; failed → "Can't open your library"; done → dashboard
 ```
+
+### Flow: EinCast looks for a newer version
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Main as bridge.App
+    participant U as updates.Service
+    participant Set as settings.Service
+    participant GH as githubrelease
+    participant API as api.github.com
+    participant UI as React
+
+    Main->>U: Run(ctx) at start-up (ends with the app context)
+    loop first after 15 s, then hourly
+        U->>Set: Get().CheckForUpdates
+        alt setting off, or last good check < 24 h old
+            Note over U: no request is made
+        else due
+            U->>GH: Latest(ctx)
+            GH->>API: GET /repos/…/releases/latest (User-Agent: EinCast, nothing else)
+            opt the release has SHA256SUMS.txt
+                GH->>API: GET SHA256SUMS.txt (https only)
+            end
+            API-->>GH: release + assets
+            GH-->>U: Release (checksums attached)
+            U->>U: version.Parse(tag).Newer(running)?
+            U-->>UI: "update:status" (available, notes, this computer's files)
+        end
+    end
+    User->>UI: sidebar notice → Settings → "Open download page"
+    UI->>Main: OpenUpdatePage() — no address passed
+    Main->>U: PageURL() (https only, else "")
+    Main->>User: opens the release page in the browser
+    Note over User: downloads, compares SHA-256, installs by hand
+```
+
+"Check now" calls `Check` directly and skips the setting and the 24 h rule: it is the
+person asking.
 
 ### Flow: a phone joins from the QR code
 

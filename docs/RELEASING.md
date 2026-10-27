@@ -18,6 +18,7 @@ flowchart LR
     E --> G[windows job<br/>installer + portable .exe]
     F --> H[Assets attached to the release]
     G --> H
+    H --> I[checksums job<br/>SHA256SUMS.txt]
 ```
 
 Two workflows live in [.github/workflows/](../.github/workflows/):
@@ -34,6 +35,7 @@ Two workflows live in [.github/workflows/](../.github/workflows/):
 | `eincast-<version>-macos-universal.zip` | Mac, Intel and Apple Silicon (`eincast.app`) |
 | `eincast-<version>-windows-amd64-installer.exe` | Windows installer (NSIS) |
 | `eincast-<version>-windows-amd64.exe` | Windows portable, no install |
+| `SHA256SUMS.txt` | The SHA-256 of the three files above, written by the last job (`shasum -a 256 -c SHA256SUMS.txt`). **The app's update check reads this exact name** to show checksums, so do not rename it. If a release ever has more or fewer than three files, change the `-eq 3` guard in the `checksums` job. |
 
 GitHub also adds "Source code (zip)" and "Source code (tar.gz)" to every release. Those are the repo, not the app.
 
@@ -158,7 +160,9 @@ Or the **Actions** tab → **release**. Expect about 10 to 15 minutes. The macOS
 On `https://github.com/bkjonathan/ein-cast/releases/tag/v1.0.2`:
 
 - [ ] The release is marked **Latest** (or Pre-release for `-rc` tags).
-- [ ] All three files are listed under Assets.
+- [ ] All three files and `SHA256SUMS.txt` are listed under Assets (the checksums appear a minute after the builds).
+- [ ] The notes read well (What's new, Fixes, Known limits).
+- [ ] An older EinCast, pointed at this release, shows "Update available" (Settings → Updates → Check now) with the checksums.
 - [ ] Download the Mac zip, unzip, open the app, check the version in the window title.
 - [ ] On a Windows machine, run the installer (or the portable exe) and check the version.
 
@@ -168,7 +172,13 @@ gh release view v1.0.2        # lists the assets from the terminal
 
 ### Step 8: Edit the notes (optional)
 
-The release is created with GitHub's auto-generated changelog plus a note about unsigned builds. To add highlights, edit the release on GitHub (pencil icon) or `gh release edit v1.0.2 --notes-file notes.md`.
+The release notes are written by [scripts/release-notes.sh](../scripts/release-notes.sh) from the commit subjects since the previous tag: `feat:` (and any subject that is not in `type: text` form) under **What's new**, `fix:` under **Fixes**, and nothing for `chore`, `docs`, `test`, `ci`, `build`, `refactor`, `style`, `perf`. **Known limits** is the file [.github/release-known-limits.md](../.github/release-known-limits.md); edit it when a limit appears or goes away (delete the unsigned-builds paragraph when signing lands). Preview the notes before you tag:
+
+```sh
+scripts/release-notes.sh HEAD
+```
+
+To add highlights afterwards, edit the release on GitHub (pencil icon) or `gh release edit v1.0.2 --notes-file notes.md`. The commit subjects become public text, so write them for a reader.
 
 ---
 
@@ -254,3 +264,4 @@ Unauthenticated GitHub API calls are limited to 60 per hour. Run `gh auth login`
 | Pre-release detection | any tag containing `-` |
 | Permissions | the workflow requests `contents: write`; no personal tokens or secrets |
 | Signing | none yet; planned for v1.0 in [ROADMAP.md](ROADMAP.md) |
+| Update check | the app reads `/releases/latest` of this repository (final releases only; a tag with `-` is a pre-release and is never offered) and `SHA256SUMS.txt`; see [ADR 0029](adr/0029-update-notice-from-github-releases.md) |

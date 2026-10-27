@@ -4,6 +4,8 @@ import {bridge} from '../models';
 
 export function AppInfo():Promise<bridge.AppInfoDTO>;
 
+export function CheckForUpdatesNow():Promise<bridge.UpdateStatusDTO>;
+
 export function CheckPort(arg1:number):Promise<Array<bridge.PortHolderDTO>>;
 
 export function ChooseFFmpeg():Promise<void>;
@@ -42,6 +44,8 @@ export function GetSettings():Promise<bridge.SettingsDTO>;
 
 export function GetThumbnail(arg1:string):Promise<string>;
 
+export function GetUpdateStatus():Promise<bridge.UpdateStatusDTO>;
+
 export function ListLibraries():Promise<Array<bridge.LibraryStateDTO>>;
 
 export function ListLibrary():Promise<Array<bridge.LibraryItemDTO>>;
@@ -49,6 +53,8 @@ export function ListLibrary():Promise<Array<bridge.LibraryItemDTO>>;
 export function ListProfiles():Promise<Array<bridge.ProfileDTO>>;
 
 export function ListRemoteProviders():Promise<Array<bridge.RemoteProviderDTO>>;
+
+export function OpenUpdatePage():Promise<void>;
 
 export function RefreshAddresses():Promise<void>;
 

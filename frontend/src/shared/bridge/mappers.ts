@@ -11,6 +11,8 @@ import type {
   RemoteStatus,
   ServerState,
   ServerStatus,
+  UpdateAsset,
+  UpdateStatus,
 } from "./types";
 
 const serverStates: readonly ServerState[] = [
@@ -245,5 +247,36 @@ export function toProfile(raw: RawProfile): Profile {
     }),
     hiddenFolders: [...raw.hiddenFolders],
     hasPin: raw.hasPin,
+  };
+}
+
+/** The wire shape of the update status. */
+export interface RawUpdateStatus {
+  current: string;
+  checking: boolean;
+  available: boolean;
+  /** A Go pointer: null on the wire, typed as optional by the generated bindings. */
+  latest?: { version: string; name: string; notes: string; publishedAt: number; assets: UpdateAsset[] } | null;
+  checkedAt: number;
+  error: string;
+}
+
+/** Copies the lists so a caller cannot change Go's object. */
+export function toUpdateStatus(raw: RawUpdateStatus): UpdateStatus {
+  return {
+    current: raw.current,
+    checking: raw.checking,
+    available: raw.available,
+    latest: raw.latest
+      ? {
+          version: raw.latest.version,
+          name: raw.latest.name,
+          notes: raw.latest.notes,
+          publishedAt: raw.latest.publishedAt,
+          assets: raw.latest.assets.map((a) => ({ name: a.name, size: a.size, sha256: a.sha256 })),
+        }
+      : null,
+    checkedAt: raw.checkedAt,
+    error: raw.error,
   };
 }
